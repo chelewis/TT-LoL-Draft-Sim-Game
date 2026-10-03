@@ -1,0 +1,180 @@
+import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { Link } from 'react-router-dom'
+import { api } from '../../api/client'
+import type { GameState, Lane, MatchEvent, MatchResult, ResultPlayer, Side } from '../../api/types'
+import { LANES } from '../../api/types'
+import { ChampionTag, ErrorNotice, Loading } from '../../components/common'
+import { OverBudgetBadge } from '../../components/TeamCard'
+import { useChampionMap } from '../../hooks/useData'
+import { LANE_LABEL, TIER_LABEL, formatDuration, isSolo, matchupText, titleCase } from '../../lib/format'
+import { describeEvent, summarize } from '../../lib/summary'
+
+export default function ResultView({ game }: { game: GameState }) {
+  const champions = useChampionMap()
+  const result = useQuery({ queryKey: ['result', game.game_id], queryFn: () => api<MatchResult>(`/games/${game.game_id}/result`) })
+  const events = useQuery({
+    queryKey: ['result-events', game.game_id],
+    queryFn: () => api<{ events: MatchEvent[] }>(`/games/${game.game_id}/result/events?limit=500`),
+  })
+  const [showLog, setShowLog] = useState(false)
+
+  if (result.isLoading) return <Loading label="Loading results…" />
+  if (result.error || !result.data) return <ErrorNotice error={result.error ?? new Error('No result.')} />
+  const r = result.data
+  const solo = isSolo(game)
+  const me = solo ? null : game.you.team      // single player: you are neither side, so no "you" labels
+  const names: Record<Side, string> = { BLUE: r.teams.BLUE.name, RED: r.teams.RED.name }
+  const youWon = r.winner === me
+  const bySide = (side: Side) => r.players.filter((p) => p.team === side)
+  const playerName = (id: number) => r.players.find((p) => p.player_id === id)?.name ?? ''
+
+  return (
+    <div className="stack">
+      <div className={`card result-banner side-${r.winner.toLowerCase()}`}>
+        <p className="muted">{solo ? 'Match result' : youWon ? 'Victory' : 'Defeat'}</p>
+        <h1>{names[r.winner]} wins</h1>
+        <p className="muted">
+          {r.win_condition === 'NEXUS' ? 'Nexus destroyed' : 'Decided on time'} · {formatDuration(r.duration_seconds)}
+        </p>
+        <div className="row wrap center">
+          <span className="badge gold">MVP: {r.mvp.name} ({r.mvp.champion})</span>
+          <span className="badge gold">
+            ACE: {r.ace.name} ({r.ace.champion}){r.ace.player_id === r.mvp.player_id ? ' — also MVP' : ''}
+          </span>
+        </div>
+      </div>
+
+      <div className="card stack">
+        <h2>How it happened</h2>
+        {summarize(r).map((line) => (
+          <p key={line}>{line}</p>
+        ))}
+      </div>
+
+      <div className="grid two">
+        {(['BLUE', 'RED'] as Side[]).map((side) => (
+          <div key={side} className={`card side-${side.toLowerCase()} ${side === me ? 'is-you' : ''}`}>
+            <div className="row between wrap">
+              <h3>
+                {names[side]} {side === me && <span className="badge">you</span>}
+              </h3>
+              {game.teams[side] && <OverBudgetBadge team={game.teams[side]!} />}
+            </div>
+            <table className="compact">
+              <tbody>
+                <tr><td>Kills</td><td>{r.teams[side].kills}</td></tr>
+                <tr><td>Gold</td><td>{r.teams[side].gold.toLocaleString()}</td></tr>
+                <tr><td>Towers destroyed</td><td>{r.teams[side].towers}</td></tr>
+                <tr><td>Inhibitors</td><td>{r.teams[side].inhibitors}</td></tr>
+                <tr><td>Dragons</td><td>{r.teams[side].dragons}{r.teams[side].soul ? ' (soul)' : ''}</td></tr>
+                <tr><td>Barons</td><td>{r.teams[side].barons}</td></tr>
+                <tr><td>Damage mix</td><td>{r.teams[side].comp.damage_profile.physical} physical / {r.teams[side].comp.damage_profile.magic} magic</td></tr>
+              </tbody>
+            </table>
+          </div>
+        ))}
+      </div>
+
+      <div className="card stack">
+        <h2>Lane results</h2>
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr><th>Lane</th><th>{names.BLUE}</th><th>{names.RED}</th><th>Winner</th><th>Matchup</th></tr>
+            </thead>
+            <tbody>
+              {LANES.map((lane: Lane) => {
+                const l = r.lanes[lane]
+                return (
+                  <tr key={lane}>
+                    <td>{LANE_LABEL[lane]}</td>
+                    <td><ChampionTag champion={champions.get(l.blue_champion)} /> <span className="muted small">{playerName(l.blue_player)}</span></td>
+                    <td><ChampionTag champion={champions.get(l.red_champion)} /> <span className="muted small">{playerName(l.red_player)}</span></td>
+                    <td>{l.winner ? `${titleCase(l.winner)} advantage` : 'Even'}</td>
+                    <td className="muted">{matchupText(l.matchup)}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {(['BLUE', 'RED'] as Side[]).map((side) => (
+        <Scoreboard key={side} side={side} name={names[side]} players={bySide(side)} mvp={r.mvp.player_id} ace={r.ace.player_id} />
+      ))}
+
+      <div className="card stack">
+        <h2>Draft summary</h2>
+        <div className="grid two">
+          {(['BLUE', 'RED'] as Side[]).map((side) => (
+            <div key={side}>
+              <h3>{names[side]}</h3>
+              <p className="small muted">Picks</p>
+              <div className="row wrap">
+                {(side === 'BLUE' ? r.draft.blue_picks : r.draft.red_picks).map((id) => (
+                  <span key={id} className="chip"><ChampionTag champion={champions.get(id)} /></span>
+                ))}
+              </div>
+              <p className="small muted">Bans</p>
+              <div className="row wrap">
+                {r.draft.bans.filter((b) => b.team === side).map((b) => (
+                  <span key={b.champion_id} className="chip banned"><ChampionTag champion={champions.get(b.champion_id)} /></span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="card stack">
+        <div className="row between wrap">
+          <h2>Play by play</h2>
+          <button className="ghost" onClick={() => setShowLog(!showLog)}>{showLog ? 'Hide' : 'Show'}</button>
+        </div>
+        {showLog && (
+          <ol className="log">
+            {(events.data?.events ?? []).map((e) => {
+              const text = describeEvent(e, names)
+              return text ? <li key={e.sequence}>{text}</li> : null
+            })}
+          </ol>
+        )}
+        <p className="small muted">Simulation v{r.simulation_version} · seed {r.seed}</p>
+      </div>
+
+      <Link to="/">← Back home</Link>
+    </div>
+  )
+}
+
+function Scoreboard({ side, name, players, mvp, ace }: { side: Side; name: string; players: ResultPlayer[]; mvp: number; ace: number }) {
+  return (
+    <div className={`card side-${side.toLowerCase()}`}>
+      <h3>{name}</h3>
+      <div className="table-scroll">
+        <table className="compact">
+          <thead>
+            <tr><th>Player</th><th>Champion</th><th>Pool</th><th>K/D/A</th><th>CS</th><th>Gold</th><th>Rank</th></tr>
+          </thead>
+          <tbody>
+            {players.map((p) => (
+              <tr key={p.player_id}>
+                <td>
+                  {p.name} {p.player_id === mvp && <span className="badge gold">MVP</span>} {p.player_id === ace && <span className="badge gold">ACE</span>}
+                </td>
+                <td>{p.champion}</td>
+                <td><span className={`badge tier-${p.comfort_tier.toLowerCase()}`}>{TIER_LABEL[p.comfort_tier]}</span></td>
+                <td>{p.kills}/{p.deaths}/{p.assists}</td>
+                <td>{p.cs}</td>
+                <td>{p.gold.toLocaleString()}</td>
+                <td>#{p.rank}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}

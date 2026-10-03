@@ -1,0 +1,14 @@
+# Let git normalise line endings (the repo stores LF; Windows checkouts get CRLF where appropriate).
+* text=auto
+
+# Files that must keep LF endings even when checked out on Windows (they run on Linux).
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary

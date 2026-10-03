@@ -1,0 +1,67 @@
+import { useQueryClient } from '@tanstack/react-query'
+import { Link, NavLink, Route, Routes } from 'react-router-dom'
+import { useAuth } from './auth/AuthContext'
+import { RequireAuth } from './components/common'
+import GamePage from './pages/GamePage'
+import HomePage from './pages/HomePage'
+import LoginPage from './pages/LoginPage'
+import RiotImportPage from './pages/RiotImportPage'
+import { CoachesPage, PlayerEditorPage, PlayersPage, TeamEditorPage, TeamsPage } from './pages/ManagementPages'
+
+function Shell({ children }: { children: React.ReactNode }) {
+  const { user, logout } = useAuth()
+  const qc = useQueryClient()
+  return (
+    <>
+      <header className="topbar">
+        <Link to="/" className="brand">League Draft Manager</Link>
+        <nav>
+          <NavLink to="/" end>Play</NavLink>
+          <NavLink to="/teams">Teams</NavLink>
+          <NavLink to="/players">Players</NavLink>
+          <NavLink to="/coaches">Coaches</NavLink>
+        </nav>
+        <div className="row">
+          <span className="muted small">{user?.username}</span>
+          <button className="ghost small" onClick={() => { logout(); qc.clear() }}>Log out</button>
+        </div>
+      </header>
+      <main className="page">{children}</main>
+      <footer className="legal">
+        League Draft Manager isn't endorsed by Riot Games and doesn't reflect the views or opinions of Riot Games or anyone
+        officially involved in producing or managing Riot Games properties. Riot Games and all associated properties are
+        trademarks or registered trademarks of Riot Games, Inc.
+      </footer>
+    </>
+  )
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route
+        path="*"
+        element={
+          <RequireAuth>
+            <Shell>
+              <Routes>
+                <Route path="/" element={<HomePage />} />
+                <Route path="/game/:gameId" element={<GamePage />} />
+                <Route path="/teams" element={<TeamsPage />} />
+                <Route path="/teams/new" element={<TeamEditorPage />} />
+                <Route path="/teams/:teamId" element={<TeamEditorPage />} />
+                <Route path="/players" element={<PlayersPage />} />
+                <Route path="/players/import" element={<RiotImportPage />} />
+                <Route path="/players/new" element={<PlayerEditorPage />} />
+                <Route path="/players/:playerId" element={<PlayerEditorPage />} />
+                <Route path="/coaches" element={<CoachesPage />} />
+                <Route path="*" element={<p className="muted">Page not found.</p>} />
+              </Routes>
+            </Shell>
+          </RequireAuth>
+        }
+      />
+    </Routes>
+  )
+}

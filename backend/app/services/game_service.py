@@ -1,0 +1,657 @@
+"""Lobby, game state machine, draft, lineup and simulation orchestration.
+
+The backend is authoritative: every transition and every draft / lineup action is validated here.
+Service functions mutate the database and return the list of notification events the caller should
+broadcast over WebSockets (REST stays authoritative; events are only notifications).
+"""
+from __future__ import annotations
+
+import logging
+import random
+import secrets
+import string
+from datetime import timedelta
+
+from sqlalchemy import delete, select
+from sqlalchemy.orm import Session
+
+from app.core.clock import iso, utcnow
+from app.core.errors import bad_request, conflict, forbidden, not_found
+from app.game.comfort import comfort_modifier, comfort_tier
+from app.game.config import DRAFT_CONFIG, GAME_CONFIG, LANES, SIMULATION_CONFIG, simulation_config
+from app.game.draft_engine import DraftError, DraftState, new_draft, rebuild_draft
+from app.game.models import CoachSpec, PlayerSpec, TeamSetup
+from app.game.simulation_engine import simulate_match
+from app.models import (Champion, DraftActionRow, Game, GameTeamSnapshot, Lobby, MatchEventRow, MatchResultRow,
+                        Team, TeamLineup, User)
+from app.services import team_management_service as teams
+from app.services.analytics import track
+
+log = logging.getLogger(__name__)
+
+CODE_ALPHABET = "".join(c for c in string.ascii_uppercase + string.digits if c not in "O0I1L")
+PRE_DRAFT = ("WAITING_FOR_PLAYERS", "TEAM_SELECTION", "READY_CHECK")
+ACTIVE = PRE_DRAFT + ("DRAFTING", "LANE_ASSIGNMENT", "READY_TO_SIMULATE", "SIMULATING")
+
+# explicit state machine: allowed transitions (spec section 5.2)
+TRANSITIONS = {
+    "WAITING_FOR_PLAYERS": {"TEAM_SELECTION", "CANCELLED"},
+    "TEAM_SELECTION": {"READY_CHECK", "WAITING_FOR_PLAYERS", "CANCELLED"},
+    "READY_CHECK": {"TEAM_SELECTION", "DRAFTING", "CANCELLED", "WAITING_FOR_PLAYERS"},
+    "DRAFTING": {"LANE_ASSIGNMENT", "CANCELLED"},
+    "LANE_ASSIGNMENT": {"READY_TO_SIMULATE", "CANCELLED"},
+    "READY_TO_SIMULATE": {"SIMULATING", "CANCELLED"},
+    "SIMULATING": {"COMPLETED", "CANCELLED"},
+    "COMPLETED": set(),
+    "CANCELLED": set(),
+}
+
+Events = list[dict]
+
+
+def _transition(game: Game, new_status: str) -> None:
+    if new_status not in TRANSITIONS[game.status]:
+        raise conflict(f"Invalid state change {game.status} -> {new_status}.")
+    game.status = new_status
+
+
+def _event(game: Game, type_: str, **fields) -> dict:
+    return {"type": type_, "game_id": game.id, **fields}
+
+
+# ----------------------------------------------------------------- lookup
+def side_of(game: Game, user_id: int) -> str | None:
+    if game.blue_player_id == user_id:
+        return "BLUE"
+    if game.red_player_id == user_id:
+        return "RED"
+    return None
+
+
+def acting_side(game: Game, user: User, requested: str | None = None) -> str:
+    """Which side a request is for. Multiplayer: the caller's own side. Single player: the caller holds both
+    seats, so the request must say which side it is for."""
+    if not game.is_solo:
+        return side_of(game, user.id)
+    if requested not in ("BLUE", "RED"):
+        raise bad_request("Say which side this is for (BLUE or RED).")
+    return requested
+
+
+def get_game(db: Session, game_id: int, user_id: int) -> Game:
+    game = db.get(Game, game_id)
+    if game is None or side_of(game, user_id) is None:
+        raise not_found("Game not found.")
+    return game
+
+
+def get_lobby(db: Session, lobby_id: int) -> Lobby:
+    lobby = db.get(Lobby, lobby_id)
+    if lobby is None:
+        raise not_found("Lobby not found.")
+    return lobby
+
+
+def game_for_lobby(db: Session, lobby_id: int, user_id: int) -> Game:
+    game = db.scalar(select(Game).where(Game.lobby_id == lobby_id))
+    if game is None or side_of(game, user_id) is None:
+        raise not_found("Lobby not found.")
+    return game
+
+
+def user_games(db: Session, user_id: int, active_only: bool = False) -> list[Game]:
+    stmt = select(Game).where((Game.blue_player_id == user_id) | (Game.red_player_id == user_id))
+    if active_only:
+        stmt = stmt.where(Game.status.in_(ACTIVE))
+    return list(db.scalars(stmt.order_by(Game.created_at.desc())))
+
+
+def expire_if_needed(db: Session, game: Game) -> Events:
+    """Lobbies that never started the draft are cancelled once they pass their expiry."""
+    if game.status in PRE_DRAFT:
+        lobby = db.get(Lobby, game.lobby_id)
+        if lobby.expires_at <= utcnow():
+            game.status = "CANCELLED"
+            db.commit()
+            track("lobby_expired", game_id=game.id)
+            return [_event(game, "GAME_CANCELLED", reason="LOBBY_EXPIRED")]
+    return []
+
+
+# ------------------------------------------------------------------ lobby
+def _new_code(db: Session) -> str:
+    for _ in range(20):
+        code = "".join(secrets.choice(CODE_ALPHABET) for _ in range(6))
+        if db.scalar(select(Lobby).where(Lobby.code == code)) is None:
+            return code
+    raise RuntimeError("Could not generate a unique lobby code")
+
+
+DEFAULT_SETTINGS = {"hide_player_data": False, "bans_enabled": True, "timers_enabled": True,
+                    "pick_seconds": DRAFT_CONFIG["timer_seconds"], "ban_seconds": DRAFT_CONFIG["timer_seconds"]}
+
+
+def create_lobby(db: Session, user: User, settings: dict | None = None, mode: str = "MULTI") -> tuple[Lobby, Game]:
+    """Create a lobby and its game. `settings` are the creator's lobby options (see DEFAULT_SETTINGS).
+
+    mode "SOLO" makes a single player game: the creator holds both seats, so nobody needs to join, and
+    hiding player data from "the opponent" makes no sense."""
+    opts = {**DEFAULT_SETTINGS, **(settings or {})}
+    solo = mode == "SOLO"
+    if solo:
+        opts["hide_player_data"] = False
+    now = utcnow()
+    lobby = Lobby(code=_new_code(db), created_by=user.id, settings=opts,
+                  created_at=now, expires_at=now + timedelta(minutes=GAME_CONFIG["lobby_expiration_minutes"]))
+    db.add(lobby)
+    db.flush()
+    game = Game(lobby_id=lobby.id, status="TEAM_SELECTION" if solo else "WAITING_FOR_PLAYERS",
+                blue_player_id=user.id, red_player_id=user.id if solo else None, is_solo=solo,
+                hide_player_data=bool(opts["hide_player_data"]), bans_enabled=bool(opts["bans_enabled"]),
+                timers_enabled=bool(opts["timers_enabled"]), pick_seconds=int(opts["pick_seconds"]),
+                ban_seconds=int(opts["ban_seconds"]))
+    db.add(game)
+    db.commit()
+    track("lobby_created", lobby_id=lobby.id, game_id=game.id, user_id=user.id, mode=mode)
+    return lobby, game
+
+
+def join_lobby(db: Session, user: User, code: str) -> tuple[Lobby, Game, Events]:
+    lobby = db.scalar(select(Lobby).where(Lobby.code == code.strip().upper()))
+    if lobby is None:
+        raise not_found("No lobby with that code.")
+    game = db.scalar(select(Game).where(Game.lobby_id == lobby.id))
+    events = expire_if_needed(db, game)
+    if game.status == "CANCELLED":
+        raise conflict("That lobby has expired or was cancelled.")
+    if side_of(game, user.id):
+        return lobby, game, []  # already in: joining again is a no-op (reconnect)
+    if game.is_solo:
+        raise conflict("That is a single player game; it cannot be joined.")
+    if game.status != "WAITING_FOR_PLAYERS" or (game.blue_player_id is not None and game.red_player_id is not None):
+        raise conflict("That lobby is full.")
+    # the joiner takes whichever side the owner has left free
+    joined = "BLUE" if game.blue_player_id is None else "RED"
+    if joined == "BLUE":
+        game.blue_player_id = user.id
+    else:
+        game.red_player_id = user.id
+    _transition(game, "TEAM_SELECTION")
+    db.commit()
+    track("lobby_joined", lobby_id=lobby.id, game_id=game.id, user_id=user.id)
+    return lobby, game, [_event(game, "PLAYER_JOINED", team=joined)]
+
+
+def leave_lobby(db: Session, game: Game, user: User) -> Events:
+    side = side_of(game, user.id)
+    if game.status in ("COMPLETED", "CANCELLED"):
+        return []
+    owner_id = db.get(Lobby, game.lobby_id).created_by
+    if user.id != owner_id and game.status in PRE_DRAFT:
+        # the joiner leaves before the draft: their side opens up again
+        if side == "RED":
+            game.red_player_id, game.red_team_id = None, None
+        else:
+            game.blue_player_id, game.blue_team_id = None, None
+        game.red_ready = game.blue_ready = False
+        game.status = "WAITING_FOR_PLAYERS"
+        db.commit()
+        return [_event(game, "PLAYER_LEFT", team=side)]
+    game.status = "CANCELLED"
+    db.commit()
+    track("game_cancelled", game_id=game.id, user_id=user.id)
+    return [_event(game, "GAME_CANCELLED", reason="PLAYER_LEFT", team=side)]
+
+
+def set_side(db: Session, game: Game, user: User, side: str) -> Events:
+    """Lobby owner chooses Blue or Red. If the other player is already in, the two swap sides
+    (each keeps their own team); if the lobby is empty, the owner simply takes the chosen side."""
+    if side not in ("BLUE", "RED"):
+        raise bad_request("Side must be BLUE or RED.")
+    if game.is_solo:
+        raise conflict("Sides cannot be changed in a single player game.")
+    if db.get(Lobby, game.lobby_id).created_by != user.id:
+        raise forbidden("Only the lobby owner can change sides.")
+    if game.status not in PRE_DRAFT:
+        raise conflict("Sides can no longer be changed.")
+    if side_of(game, user.id) == side:
+        return []
+    game.blue_player_id, game.red_player_id = game.red_player_id, game.blue_player_id
+    game.blue_team_id, game.red_team_id = game.red_team_id, game.blue_team_id
+    game.blue_ready = game.red_ready = False
+    db.commit()
+    track("sides_changed", game_id=game.id, user_id=user.id, side=side)
+    return [_event(game, "SIDES_SWAPPED", owner_team=side)]
+
+
+# --------------------------------------------------------- team selection
+def select_team(db: Session, game: Game, user: User, team_id: int, requested_side: str | None = None) -> Events:
+    side = acting_side(game, user, requested_side)
+    if game.status not in ("WAITING_FOR_PLAYERS", "TEAM_SELECTION", "READY_CHECK"):
+        raise conflict("Teams can no longer be changed.")
+    team = teams.get_visible(db, Team, team_id, user.id)
+    issues = teams.team_issues(team)
+    if issues:
+        raise bad_request("That team cannot be used yet: " + "; ".join(issues))
+    if side == "BLUE":
+        game.blue_team_id, game.blue_ready = team.id, False
+    else:
+        game.red_team_id, game.red_ready = team.id, False
+    if game.status != "WAITING_FOR_PLAYERS":
+        target = "READY_CHECK" if game.blue_team_id and game.red_team_id else "TEAM_SELECTION"
+        if target != game.status:
+            _transition(game, target)
+    db.commit()
+    return [_event(game, "TEAM_SELECTED", team=side)]
+
+
+def set_ready(db: Session, game: Game, user: User, ready: bool = True) -> Events:
+    side = side_of(game, user.id)
+    if game.status != "READY_CHECK":
+        raise conflict("Both players must choose a team before readying up." if not game.is_solo
+                       else "Choose a team for both sides before starting.")
+    if game.is_solo:       # one person, two seats: starting means both sides are ready
+        game.blue_ready = game.red_ready = ready
+        events = [_event(game, "PLAYER_READY", team="BLUE", ready=ready), _event(game, "PLAYER_READY", team="RED", ready=ready)]
+        if ready:
+            events += _start_draft(db, game)
+        db.commit()
+        return events
+    if side == "BLUE":
+        game.blue_ready = ready
+    else:
+        game.red_ready = ready
+    events = [_event(game, "PLAYER_READY", team=side, ready=ready)]
+    if game.blue_ready and game.red_ready:
+        events += _start_draft(db, game)
+    db.commit()
+    return events
+
+
+# --------------------------------------------------------------- snapshots
+def build_snapshot(db: Session, team: Team) -> dict:
+    view = teams.team_view(db, team)
+    return {
+        "team_id": team.id, "owner_user_id": team.owner_user_id, "name": view["name"], "logo": view["logo"],
+        "region": view["region"], "fanbase": view["fanbase"], "style1": view["style1"], "style2": view["style2"],
+        "focus1": view["focus1"], "focus2": view["focus2"], "coach": view["coach"], "roster": view["roster"],
+        "over_budget": view["over_budget"], "over_budget_players": view["over_budget_players"],
+    }
+
+
+def snapshot_of(db: Session, game: Game, side: str) -> dict | None:
+    row = db.scalar(select(GameTeamSnapshot).where(GameTeamSnapshot.game_id == game.id,
+                                                   GameTeamSnapshot.team == side))
+    return row.snapshot if row else None
+
+
+def _snapshot_to_setup(snapshot: dict, lineup: dict[str, int]) -> TeamSetup:
+    roster = {}
+    for lane, p in snapshot["roster"].items():
+        roster[lane] = PlayerSpec(p["id"], p["name"], p["role"], p["age"], p["aggr"], p["aware"], p["pos"],
+                                  p["dmg"], p["cs"], tuple(p["pool"]))
+    c = snapshot["coach"]
+    styles = tuple(s for s in (snapshot["style1"], snapshot["style2"]) if s)
+    focus = tuple(f for f in (snapshot["focus1"], snapshot["focus2"]) if f)
+    return TeamSetup(snapshot["team_id"], snapshot["name"], styles, focus,
+                     CoachSpec(c["id"], c["name"], c["draft"], c["synergy"]), roster, lineup)
+
+
+# ------------------------------------------------------------------ draft
+def _enabled_champion_ids(db: Session) -> list[int]:
+    return list(db.scalars(select(Champion.id).where(Champion.enabled.is_(True))))
+
+
+def _start_draft(db: Session, game: Game) -> Events:
+    for side, team_id in (("BLUE", game.blue_team_id), ("RED", game.red_team_id)):
+        team = db.get(Team, team_id)
+        if team is None or teams.team_issues(team):
+            raise conflict(f"The {side.lower()} team is no longer valid.")
+        db.add(GameTeamSnapshot(game_id=game.id, team=side, snapshot=build_snapshot(db, team)))
+    _transition(game, "DRAFTING")
+    now = utcnow()
+    game.started_at = now
+    game.current_action = 0
+    _begin_action(game, now)
+    track("draft_started", game_id=game.id)
+    return [_event(game, "DRAFT_STARTED"), _action_started_event(game)]
+
+
+def draft_actions(game: Game) -> list[str]:
+    """The game's draft sequence: the configured order, without bans if the lobby disabled them."""
+    actions = DRAFT_CONFIG["actions"]
+    return actions if game.bans_enabled else [a for a in actions if not a.endswith("_BAN")]
+
+
+def _begin_action(game: Game, started_at) -> None:
+    """Start the timer for the game's current action (no expiry when timers are disabled)."""
+    game.action_started_at = started_at
+    if not game.timers_enabled:
+        game.action_expires_at = None
+        return
+    seconds = game.ban_seconds if draft_actions(game)[game.current_action].endswith("_BAN") else game.pick_seconds
+    game.action_expires_at = started_at + timedelta(seconds=seconds)
+
+
+def _action_started_event(game: Game) -> dict:
+    action = draft_actions(game)[game.current_action]
+    return _event(game, "DRAFT_ACTION_STARTED", draft_action=game.current_action, action=action,
+                  started_at=iso(game.action_started_at), expires_at=iso(game.action_expires_at))
+
+
+def load_draft(db: Session, game: Game) -> DraftState:
+    rows = db.scalars(select(DraftActionRow).where(DraftActionRow.game_id == game.id)
+                      .order_by(DraftActionRow.action_number)).all()
+    return rebuild_draft(draft_actions(game), _enabled_champion_ids(db),
+                         [(r.team, r.action_type, r.champion_id, r.auto) for r in rows])
+
+
+def _record_action(db: Session, game: Game, draft: DraftState, team: str, action_type: str,
+                   champion_id: int, auto: bool, completed_at) -> Events:
+    """Apply one validated action to the draft, persist it and move the game forward."""
+    number = draft.cursor
+    draft.apply(team, action_type, champion_id, auto=auto)
+    db.add(DraftActionRow(game_id=game.id, action_number=number, team=team, action_type=action_type,
+                          champion_id=champion_id, auto=auto, started_at=game.action_started_at,
+                          completed_at=completed_at))
+    events = [_event(game, "CHAMPION_PICKED" if action_type == "PICK" else "CHAMPION_BANNED",
+                     team=team, champion_id=champion_id, draft_action=number, auto=auto)]
+    track("champion_picked" if action_type == "PICK" else "champion_banned", game_id=game.id, team=team, auto=auto)
+    game.current_action = draft.cursor
+    if draft.complete:
+        game.action_started_at = game.action_expires_at = None
+        _transition(game, "LANE_ASSIGNMENT")
+        track("draft_completed", game_id=game.id)
+        events.append(_event(game, "DRAFT_COMPLETED"))
+    else:
+        _begin_action(game, game.action_expires_at if auto else completed_at)
+        events.append(_action_started_event(game))
+    return events
+
+
+def advance_timeouts(db: Session, game: Game, now=None) -> Events:
+    """Apply automatic random legal actions for every draft timer that has expired."""
+    events: Events = []
+    now = now or utcnow()
+    if game.status != "DRAFTING":
+        return events
+    draft = load_draft(db, game)
+    rng = random.Random(secrets.randbits(64))
+    while game.status == "DRAFTING" and game.action_expires_at and game.action_expires_at <= now:
+        action = draft.current
+        pool = draft.available()
+        champion_id = rng.choice(pool)
+        events += _record_action(db, game, draft, action.team, action.action_type, champion_id,
+                                 True, game.action_expires_at)
+    if events:
+        db.commit()
+    return events
+
+
+def draft_action(db: Session, game: Game, user: User, action_type: str, champion_id: int) -> Events:
+    events = advance_timeouts(db, game)
+    side = side_of(game, user.id)
+    if game.status != "DRAFTING":
+        raise conflict("The draft is not in progress.")
+    draft = load_draft(db, game)
+    if game.is_solo and draft.current is not None:
+        side = draft.current.team        # the single player acts for whichever side is up; type/duplicate checks still apply
+    try:
+        draft.validate(side, action_type, champion_id)
+    except DraftError as exc:
+        track("invalid_action", game_id=game.id, user_id=user.id, reason=str(exc))
+        raise conflict(str(exc)) from exc
+    events += _record_action(db, game, draft, side, action_type, champion_id, False, utcnow())
+    db.commit()
+    return events
+
+
+# ---------------------------------------------------------------- lineup
+def _own_lineup(db: Session, game: Game, side: str) -> dict[str, int]:
+    rows = db.scalars(select(TeamLineup).where(TeamLineup.game_id == game.id, TeamLineup.team == side))
+    return {r.lane: r.champion_id for r in rows}
+
+
+def set_lineup(db: Session, game: Game, user: User, assignments: list[dict], requested_side: str | None = None) -> Events:
+    side = acting_side(game, user, requested_side)
+    if game.status != "LANE_ASSIGNMENT":
+        raise conflict("Lineups can only be edited during lane assignment.")
+    if (game.blue_lineup_ready if side == "BLUE" else game.red_lineup_ready):
+        raise conflict("Your lineup is already confirmed.")
+    picks = set(load_draft(db, game).picks[side])
+    lanes_seen, champs_seen = set(), set()
+    for a in assignments:
+        lane, cid = a["lane"], a["champion_id"]
+        if lane not in LANES:
+            raise bad_request(f"Unknown lane {lane!r}.")
+        if cid not in picks:
+            raise bad_request("You can only assign champions your team picked.")
+        if lane in lanes_seen:
+            raise bad_request("Each lane can only have one champion.")
+        if cid in champs_seen:
+            raise bad_request("A champion can only be assigned once.")
+        lanes_seen.add(lane)
+        champs_seen.add(cid)
+    snap = snapshot_of(db, game, side)
+    db.execute(delete(TeamLineup).where(TeamLineup.game_id == game.id, TeamLineup.team == side))
+    for a in assignments:
+        db.add(TeamLineup(game_id=game.id, team=side, lane=a["lane"], champion_id=a["champion_id"],
+                          player_id=snap["roster"][a["lane"]]["id"]))
+    db.commit()
+    return [_event(game, "LINEUP_UPDATED", team=side)]
+
+
+def confirm_lineup(db: Session, game: Game, user: User, requested_side: str | None = None) -> Events:
+    side = acting_side(game, user, requested_side)
+    if game.status != "LANE_ASSIGNMENT":
+        raise conflict("Lineups can only be confirmed during lane assignment.")
+    lineup = _own_lineup(db, game, side)
+    if set(lineup) != set(LANES):
+        raise bad_request("Assign a champion to every lane before confirming.")
+    if side == "BLUE":
+        game.blue_lineup_ready = True
+    else:
+        game.red_lineup_ready = True
+    track("lineup_confirmed", game_id=game.id, team=side)
+    events = [_event(game, "PLAYER_READY", team=side, ready=True, phase="LINEUP")]
+    if game.blue_lineup_ready and game.red_lineup_ready:
+        _transition(game, "READY_TO_SIMULATE")
+        events += run_simulation(db, game)
+    db.commit()
+    return events
+
+
+def comfort_preview(db: Session, game: Game, user: User, requested_side: str | None = None) -> list[dict]:
+    side = acting_side(game, user, requested_side)
+    snap = snapshot_of(db, game, side)
+    if snap is None:
+        raise conflict("The draft has not started.")
+    cfg = SIMULATION_CONFIG
+    out = []
+    for lane, cid in _own_lineup(db, game, side).items():
+        p = snap["roster"][lane]
+        spec = PlayerSpec(p["id"], p["name"], p["role"], p["age"], p["aggr"], p["aware"], p["pos"],
+                          p["dmg"], p["cs"], tuple(p["pool"]))
+        tier = comfort_tier(spec, cid, cfg)
+        out.append({"lane": lane, "player_id": p["id"], "champion_id": cid, "tier": tier,
+                    "modifier": comfort_modifier(tier, cfg)})
+    return out
+
+
+# ------------------------------------------------------------- simulation
+def run_simulation(db: Session, game: Game) -> Events:
+    events = []
+    _transition(game, "SIMULATING")
+    game.seed = secrets.randbits(31)
+    cfg = simulation_config()
+    game.simulation_version = cfg["version"]
+    track("simulation_started", game_id=game.id, seed=game.seed, simulation_version=cfg["version"])
+    events.append(_event(game, "SIMULATION_STARTED"))
+
+    champions = {c.id: c.to_engine() for c in db.scalars(select(Champion))}
+    setups = {}
+    for side in ("BLUE", "RED"):
+        setups[side] = _snapshot_to_setup(snapshot_of(db, game, side), _own_lineup(db, game, side))
+    result = simulate_match(setups["BLUE"], setups["RED"], champions, game.seed, cfg)
+
+    data = result.to_dict(include_events=False)
+    db.add(MatchResultRow(game_id=game.id, winner=result.winner, win_condition=result.win_condition,
+                          duration_seconds=result.duration_seconds, mvp_player_id=result.mvp["player_id"],
+                          ace_player_id=result.ace["player_id"], blue_gold=result.teams["BLUE"]["gold"],
+                          red_gold=result.teams["RED"]["gold"], seed=game.seed,
+                          simulation_version=cfg["version"], data=data))
+    for e in result.events:
+        db.add(MatchEventRow(game_id=game.id, sequence=e.sequence, phase=e.phase, minute=e.minute,
+                             event_type=e.type, payload=e.payload))
+    _transition(game, "COMPLETED")
+    game.completed_at = utcnow()
+    track("game_completed", game_id=game.id, seed=game.seed, winner=result.winner,
+          win_condition=result.win_condition, simulation_version=cfg["version"])
+    log.info("game_id=%s simulation_version=%s seed=%s winner=%s", game.id, cfg["version"], game.seed, result.winner)
+    events.append(_event(game, "SIMULATION_COMPLETED", winner=result.winner))
+    return events
+
+
+# ---------------------------------------------------------- state views
+HIDDEN_PLAYER_FIELDS = ("age", "aggr", "aware", "pos", "dmg", "cs", "pool", "stat_total", "region", "riot")
+
+
+def _mask_player(p: dict | None) -> dict | None:
+    if p is None:
+        return None
+    masked = {k: v for k, v in p.items() if k not in HIDDEN_PLAYER_FIELDS}
+    masked["hidden"] = True
+    return masked
+
+
+def _mask_team(view: dict) -> dict:
+    out = dict(view)
+    out["roster"] = {lane: _mask_player(p) for lane, p in view["roster"].items()}
+    out["over_budget_players"] = [{k: v for k, v in o.items() if k != "total"} for o in view["over_budget_players"]]
+    out["hidden"] = True
+    return out
+
+
+def _team_view(db: Session, game: Game, side: str, viewer_side: str) -> dict | None:
+    snap = snapshot_of(db, game, side)
+    if snap is not None:
+        view = {k: snap[k] for k in ("name", "logo", "region", "fanbase", "style1", "style2", "focus1", "focus2",
+                                     "coach", "roster", "over_budget", "over_budget_players")}
+        view["id"] = snap["team_id"]
+    else:
+        team_id = game.blue_team_id if side == "BLUE" else game.red_team_id
+        if team_id is None:
+            return None
+        team = db.get(Team, team_id)
+        if team is None:
+            return None
+        full = teams.team_view(db, team)
+        view = {k: full[k] for k in ("id", "name", "logo", "region", "fanbase", "style1", "style2", "focus1",
+                                     "focus2", "coach", "roster", "over_budget", "over_budget_players")}
+    if side != viewer_side and game.hide_player_data and game.status != "COMPLETED":
+        return _mask_team(view)
+    return view
+
+
+def draft_view(db: Session, game: Game) -> dict:
+    draft = load_draft(db, game)
+    current = draft.current if game.status == "DRAFTING" else None
+    return {
+        "actions": draft_actions(game),
+        "timers_enabled": game.timers_enabled,
+        "pick_seconds": game.pick_seconds,
+        "ban_seconds": game.ban_seconds,
+        "current_action": draft.cursor,
+        "current_team": current.team if current else None,
+        "action_type": current.action_type if current else None,
+        "started_at": iso(game.action_started_at) if current else None,
+        "expires_at": iso(game.action_expires_at) if current else None,
+        "bans": [{"team": t, "champion_id": c} for t, c in draft.bans],
+        "blue_picks": draft.picks["BLUE"],
+        "red_picks": draft.picks["RED"],
+        "history": [{"action_number": i, "team": t, "action_type": k, "champion_id": c, "auto": a}
+                    for i, t, k, c, a in draft.history],
+        "complete": draft.complete,
+    }
+
+
+def _settings_view(game: Game) -> dict:
+    return {"hide_player_data": game.hide_player_data, "bans_enabled": game.bans_enabled,
+            "timers_enabled": game.timers_enabled, "pick_seconds": game.pick_seconds,
+            "ban_seconds": game.ban_seconds, "mode": "SOLO" if game.is_solo else "MULTI"}
+
+
+def game_state(db: Session, game: Game, viewer: User) -> dict:
+    side = side_of(game, viewer.id)
+    lobby = db.get(Lobby, game.lobby_id)
+    users = {u.id: u for u in db.scalars(select(User).where(User.id.in_(
+        [i for i in (game.blue_player_id, game.red_player_id) if i])))}
+
+    def player(uid, team_id, ready, lineup_ready):
+        return None if uid is None else {"id": uid, "username": users[uid].username, "team_id": team_id,
+                                         "ready": ready, "lineup_ready": lineup_ready}
+
+    state = {
+        "game_id": game.id,
+        "lobby_id": lobby.id,
+        "lobby_code": lobby.code,
+        "status": game.status,
+        "settings": _settings_view(game),
+        "expires_at": iso(lobby.expires_at) if game.status in PRE_DRAFT else None,
+        "you": {"user_id": viewer.id, "team": side, "is_owner": lobby.created_by == viewer.id},
+        "players": {
+            "blue": player(game.blue_player_id, game.blue_team_id, game.blue_ready, game.blue_lineup_ready),
+            "red": player(game.red_player_id, game.red_team_id, game.red_ready, game.red_lineup_ready),
+        },
+        "teams": {"BLUE": _team_view(db, game, "BLUE", side), "RED": _team_view(db, game, "RED", side)},
+        "draft": None,
+        "lineup": None,
+        "result_available": game.status == "COMPLETED",
+        "seed": game.seed if game.status == "COMPLETED" else None,
+        "simulation_version": game.simulation_version if game.status == "COMPLETED" else None,
+    }
+    if game.status in ("DRAFTING", "LANE_ASSIGNMENT", "READY_TO_SIMULATE", "SIMULATING", "COMPLETED"):
+        state["draft"] = draft_view(db, game)
+        lineups = {"yours": _own_lineup(db, game, side)}
+        if game.is_solo:        # one person sees (and edits) both lineups
+            lineups["blue"] = _own_lineup(db, game, "BLUE")
+            lineups["red"] = _own_lineup(db, game, "RED")
+        if game.status == "COMPLETED":  # the opponent's assignments stay hidden until the game is over
+            other = "RED" if side == "BLUE" else "BLUE"
+            lineups["opponent"] = _own_lineup(db, game, other)
+        state["lineup"] = lineups
+    return state
+
+
+def game_result(db: Session, game: Game) -> dict:
+    if game.status != "COMPLETED":
+        raise conflict("The match has not finished.")
+    row = db.scalar(select(MatchResultRow).where(MatchResultRow.game_id == game.id))
+    draft = draft_view(db, game)
+    return {
+        "game_id": game.id,
+        **row.data,
+        "draft": {"bans": draft["bans"], "blue_picks": draft["blue_picks"], "red_picks": draft["red_picks"],
+                  "history": draft["history"]},
+        "lineups": {side: _own_lineup(db, game, side) for side in ("BLUE", "RED")},
+        "teams_info": {side: snapshot_of(db, game, side) for side in ("BLUE", "RED")},
+    }
+
+
+def result_events(db: Session, game: Game, after: int = 0, limit: int = 200) -> dict:
+    if game.status != "COMPLETED":
+        raise conflict("The match has not finished.")
+    rows = db.scalars(select(MatchEventRow).where(MatchEventRow.game_id == game.id, MatchEventRow.sequence > after)
+                      .order_by(MatchEventRow.sequence).limit(limit)).all()
+    return {
+        "events": [{"sequence": r.sequence, "phase": r.phase, "minute": round(r.minute, 2),
+                    "type": r.event_type, "payload": r.payload} for r in rows],
+        "next_after": rows[-1].sequence if len(rows) == limit else None,
+    }
+
+
+def lobby_view(db: Session, game: Game, viewer: User) -> dict:
+    lobby = db.get(Lobby, game.lobby_id)
+    return {"id": lobby.id, "code": lobby.code, "game_id": game.id, "status": game.status,
+            "settings": _settings_view(game), "expires_at": iso(lobby.expires_at),
+            "created_by": lobby.created_by, "you": side_of(game, viewer.id)}

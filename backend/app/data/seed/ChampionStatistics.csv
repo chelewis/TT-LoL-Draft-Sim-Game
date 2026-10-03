@@ -1,0 +1,174 @@
+Champion,WinRate,PickRate
+Aatrox,49.8,6.5
+Ahri,51.2,12.3
+Akali,48.9,5.4
+Akshan,50.4,3.7
+Alistar,50.8,4.6
+Amumu,52.1,2.9
+Anivia,51.6,1.8
+Annie,52.9,3.4
+Aphelios,47.3,7.1
+Ashe,50.7,9.4
+Aurelion Sol,51.5,2.5
+Azir,46.8,3.1
+Bard,51.0,3.9
+Bel Veth,49.7,4.2
+Blitzcrank,52.4,8.6
+Brand,51.3,6.7
+Braum,50.5,2.2
+Briar,48.8,3.3
+Caitlyn,49.9,13.1
+Camille,50.6,4.8
+Cassiopeia,49.3,2.9
+Cho Gath,50.2,2.5
+Corki,46.5,1.7
+Darius,51.8,10.4
+Diana,50.7,6.1
+Dr.Mundo,51.9,2.6
+Draven,49.0,5.2
+Ekko,50.4,6.3
+Elise,48.7,1.4
+Evelynn,51.2,4.1
+Ezreal,49.8,20.2
+Fiddlesticks,52.5,3.0
+Fiora,50.1,7.9
+Fizz,51.0,6.0
+Galio,50.7,2.8
+Gangplank,48.5,3.9
+Garen,51.9,8.7
+Gnar,49.1,2.3
+Gragas,50.2,4.9
+Graves,50.6,6.5
+Gwen,49.5,3.1
+Hecarim,50.0,5.7
+Heimerdinger,52.2,1.9
+Hwei,51.17,51.30
+Illaoi,51.4,3.7
+Irelia,49.7,6.9
+Ivern,52.6,1.2
+Janna,52.3,3.5
+Jarvan IV,50.9,4.7
+Jax,50.5,7.2
+Jayce,48.8,2.7
+Jhin,51.1,17.8
+Jinx,50.9,16.5
+K Sante,48.4,4.0
+Kai Sa,54.2,22.0
+Kalista,46.7,1.8
+Karma,50.6,4.4
+Karthus,50.8,2.3
+Kassadin,51.3,3.6
+Katarina,49.2,7.8
+Kayle,50.0,4.5
+Kayn,50.3,9.6
+Kennen,50.5,2.1
+Kha Zix,50.9,6.8
+Kindred,49.6,2.5
+Kled,51.0,1.6
+Kog Maw,51.8,1.7
+LeBlanc,48.9,5.9
+Lee Sin,48.7,17.1
+Leona,51.4,6.3
+Lillia,50.5,3.2
+Lissandra,51.1,2.9
+Lucian,49.4,10.8
+Lulu,50.3,5.8
+Lux,51.5,18.2
+Malphite,52.0,7.1
+Malzahar,52.1,3.0
+Maokai,51.8,3.5
+Master Yi,50.7,12.9
+Milio,50.2,5.0
+Miss Fortune,50.8,14.7
+Mordekaiser,51.5,9.0
+Morgana,50.6,7.7
+Naafiri,49.5,1.9
+Nami,51.3,4.9
+Nasus,52.0,6.6
+Nautilus,50.7,6.2
+Neeko,51.2,3.4
+Nidalee,48.5,2.4
+Nilah,49.0,1.3
+Nocturne,51.0,4.8
+Nunu & Willump,51.9,5.6
+Olaf,50.8,3.5
+Orianna,50.9,4.1
+Ornn,52.2,3.6
+Pantheon,50.2,4.0
+Poppy,51.7,3.1
+Pyke,49.8,8.2
+Qiyana,48.6,2.5
+Quinn,50.9,1.9
+Rakan,51.1,5.4
+Rammus,52.4,2.2
+Rek Sai,50.1,1.5
+Rell,50.7,3.3
+Renata Glasc,50.5,2.7
+Renekton,49.0,6.0
+Rengar,49.5,4.6
+Riven,49.7,6.5
+Rumble,50.3,2.1
+Ryze,47.8,2.0
+Samira,49.3,6.4
+Sejuani,51.2,3.9
+Senna,50.4,8.1
+Seraphine,51.0,6.7
+Sett,50.8,7.0
+Shaco,51.6,5.2
+Shen,52.1,3.8
+Shyvana,51.5,2.6
+Singed,52.3,1.8
+Sion,51.0,6.1
+Sivir,50.2,4.0
+Skarner,49.9,1.0
+Smolder,50.0,4.8
+Sona,52.0,3.3
+Soraka,51.9,4.1
+Swain,50.7,3.5
+Sylas,49.6,6.2
+Syndra,50.3,4.5
+Tahm Kench,51.1,2.9
+Taliyah,50.9,2.2
+Talon,58.8,5.0
+Taric,51.5,1.6
+Teemo,51.7,7.6
+Thresh,49.9,11.2
+Tristana,50.7,8.9
+Trundle,51.2,2.4
+Tryndamere,50.8,3.0
+Twisted Fate,49.5,2.3
+Twitch,51.1,6.6
+Udyr,51.0,3.2
+Urgot,50.7,2.1
+Varus,49.8,9.1
+Vayne,50.0,11.0
+Veigar,52.0,6.5
+Vel Koz,51.3,3.0
+Vex,51.4,2.6
+Vi,50.9,7.5
+Viego,49.7,8.8
+Viktor,50.2,5.1
+Vladimir,50.0,4.4
+Volibear,50.8,4.7
+Warwick,51.9,5.9
+Wukong,50.6,4.9
+Xayah,50.4,7.2
+Xerath,51.5,4.0
+Xin Zhao,50.3,2.9
+Yasuo,48.7,13.9
+Yone,48.9,14.3
+Yorick,51.8,2.7
+Yuumi,49.0,7.0
+Zac,52.1,4.1
+Zed,49.1,14.7
+Zeri,48.8,6.8
+Ziggs,52.0,3.4
+Zilean,51.8,1.9
+Zoe,49.7,2.8
+Zyra,51.4,3.7
+Aurora,51.13,2.92
+Ambessa,49.39,3.83
+Mel,45.24,2.33
+Yunara,50.5,15.92
+Zaahen,49.84,2.78
+Locke,49.95,6.58

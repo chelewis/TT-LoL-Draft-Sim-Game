@@ -1,0 +1,191 @@
+"""Mutable per-match state shared by the simulation modules. One `Match` per simulation:
+there is no module-level state, so two simulations in one process cannot interfere."""
+from __future__ import annotations
+
+import random
+from dataclasses import dataclass, field
+from typing import Any, Mapping
+
+from .comfort import comfort_modifier, comfort_tier
+from .config import LANES
+from .models import Champion, CoachSpec, MatchEvent, PlayerSpec, TeamSetup
+from .structures import TeamStructures
+
+PHASE_SCALING_WEIGHT = {"lane": 0.0, "early": 0.0, "mid": 0.5, "late": 1.0, "overtime": 1.0}
+
+
+@dataclass
+class PlayerState:
+    lane: str
+    spec: PlayerSpec
+    champion: Champion
+    tier: str
+    comfort: float
+    team: str
+    matchup_label: str | None = None
+    matchup_multiplier: float = 1.0
+    base_score: float = 0.0
+    lane_score: float = 0.0
+    cs: float = 0.0
+    gold: float = 0.0
+    kills: int = 0
+    deaths: int = 0
+    assists: int = 0
+
+
+@dataclass
+class TeamState:
+    side: str  # "BLUE" | "RED"
+    setup: TeamSetup
+    players: dict[str, PlayerState]
+    structures: TeamStructures
+    synergy_factor: float
+    dragons: int = 0
+    soul: bool = False
+    elder_fights: int = 0
+    barons: int = 0
+    power_play: bool = False
+    kills: int = 0
+    fights_won: int = 0
+
+    @property
+    def gold(self) -> float:
+        return sum(p.gold for p in self.players.values())
+
+    @property
+    def coach(self) -> CoachSpec:
+        return self.setup.coach
+
+    @property
+    def name(self) -> str:
+        return self.setup.name
+
+    def ordered_players(self) -> list[PlayerState]:
+        return [self.players[l] for l in LANES]
+
+    def style_bonus(self, style: str, config: dict) -> float:
+        """Bonus for one playstyle, scaled by the coach's Synergy."""
+        ts = config["team_style"]
+        if not ts["enabled"] or style not in self.setup.styles:
+            return 0.0
+        base = ts["primary_bonus"] if self.setup.styles.index(style) == 0 else ts["secondary_bonus"]
+        return base * self.synergy_factor
+
+    def damage_profile(self) -> dict[str, float]:
+        phys = magic = 0.0
+        for p in self.players.values():
+            d = p.champion.damage
+            if p.champion.damage_type == "P":
+                phys += d
+            elif p.champion.damage_type == "M":
+                magic += d
+            else:
+                phys += d / 2
+                magic += d / 2
+        return {"physical": round(phys, 1), "magic": round(magic, 1)}
+
+
+class Match:
+    def __init__(self, blue: TeamSetup, red: TeamSetup, champions: Mapping[int, Champion],
+                 seed: int, config: dict):
+        self.config = config
+        self.seed = seed
+        self.rng = random.Random(seed)
+        self.events: list[MatchEvent] = []
+        self.phase = "setup"
+        self.minute = 0.0
+        self.cs_minute = 0.0
+        self.winner: str | None = None
+        self.win_condition: str | None = None
+        self.end_minute: float | None = None
+        self.elementals_taken = 0
+        self.teams: dict[str, TeamState] = {
+            "BLUE": self._build_team("BLUE", blue, champions),
+            "RED": self._build_team("RED", red, champions),
+        }
+
+    # ---- construction ----
+    def _build_team(self, side: str, setup: TeamSetup, champions: Mapping[int, Champion]) -> TeamState:
+        missing = [l for l in LANES if l not in setup.roster or l not in setup.lineup]
+        if missing:
+            raise ValueError(f"{side} team is missing lanes: {missing}")
+        ids = [setup.lineup[l] for l in LANES]
+        if len(set(ids)) != len(ids):
+            raise ValueError(f"{side} lineup contains a duplicate champion")
+        st = self.config["structures"]
+        players: dict[str, PlayerState] = {}
+        for lane in LANES:
+            spec = setup.roster[lane]
+            try:
+                champ = champions[setup.lineup[lane]]
+            except KeyError as exc:
+                raise ValueError(f"Unknown champion id {setup.lineup[lane]}") from exc
+            tier = comfort_tier(spec, champ.id, self.config)
+            players[lane] = PlayerState(lane, spec, champ, tier, comfort_modifier(tier, self.config), side)
+        synergy = 1.0 + (setup.coach.synergy - 5) * self.config["coach"]["synergy_scale"]
+        return TeamState(side, setup, players,
+                         TeamStructures(st["towers_per_lane"], st["nexus_towers"]), max(synergy, 0.0))
+
+    # ---- helpers ----
+    def other(self, team: TeamState) -> TeamState:
+        return self.teams["RED" if team.side == "BLUE" else "BLUE"]
+
+    @property
+    def sides(self) -> tuple[TeamState, TeamState]:
+        return self.teams["BLUE"], self.teams["RED"]
+
+    def emit(self, type_: str, **payload: Any) -> MatchEvent:
+        event = MatchEvent(len(self.events) + 1, self.phase, self.minute, type_, payload)
+        self.events.append(event)
+        return event
+
+    def update_cs(self, minute: float) -> None:
+        """Advance everyone's CS (and CS gold) to `minute`. Never moves backwards."""
+        if minute <= self.cs_minute:
+            return
+        eco = self.config["economy"]
+        for team in self.teams.values():
+            for p in team.players.values():
+                factor = eco["support_cs_factor"] if p.lane == "SUPPORT" else 1.0
+                target = p.spec.cs * minute * factor
+                gained = target - p.cs
+                if gained > 0:
+                    p.gold += gained * eco["gold_per_cs"]
+                    p.cs = target
+        self.cs_minute = minute
+
+    # ---- derived strength ----
+    def gold_factor(self, team: TeamState) -> float:
+        """Objective-control multiplier from the current gold lead (gold = strength, spec 9.10)."""
+        obj = self.config["objectives"]
+        mine, theirs = team.gold, self.other(team).gold
+        total = mine + theirs
+        lead = 0.0 if total <= 0 else (mine - theirs) / total
+        lead = max(-obj["gold_lead_cap"], min(obj["gold_lead_cap"], lead))
+        return 1.0 + lead * obj["gold_control_scale"]
+
+    def objective_control(self, team: TeamState, roll: bool = True) -> float:
+        """(sum aware + sum pos) * roll, scaled by scaling-style, gold lead and power play."""
+        base = sum(p.spec.aware + p.spec.pos for p in team.players.values())
+        lo, hi = self.config["objectives"]["control_roll_range"]
+        multiplier = self.rng.randint(lo, hi) if roll else (lo + hi) / 2
+        value = base * multiplier
+        value *= 1.0 + team.style_bonus("scaling", self.config) * PHASE_SCALING_WEIGHT.get(self.phase, 0.0)
+        value *= self.gold_factor(team)
+        if team.power_play:
+            value += self.config["objectives"]["baron_power_play_bonus"]
+        return value
+
+    def control_ratio(self, team: TeamState, roll: bool = True) -> float:
+        a = self.objective_control(team, roll)
+        b = self.objective_control(self.other(team), roll)
+        return a / (a + b) if a + b > 0 else 0.5
+
+    def end(self, winner: str, condition: str) -> None:
+        self.winner = winner
+        self.win_condition = condition
+        self.end_minute = self.minute
+
+    @property
+    def ended(self) -> bool:
+        return self.winner is not None

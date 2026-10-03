@@ -1,0 +1,11 @@
+ID,Name,Logo,Style1,Style2,Focus1,Focus2,Fanbase,Region
+1,Nu Logic Gaming,NLG,scaling,early,top,jg,small,TT
+2,Team Shadow Isle,TSI,scaling,early,bot,mid,small,TT
+3,Team Void,TV,early,teamfight,top,mid,small,TT
+4,Team Radiant,TR,early,teamfight,jg,bot,small,TT
+5,Team Arcane,TA,scaling,teamfight,mid,sup,small,TT
+6,Team Demacia,TD,early,teamfight,top,jg,medium,TT
+7,Team Noxus,TN,early,skirmish,mid,bot,medium,TT
+8,Team Ionia,TI,scaling,teamfight,jg,sup,medium,TT
+9,Team Freljord,TF,early,skirmish,top,mid,medium,TT
+10,Team Piltover & Zaun,TPZ,scaling,skirmish,top,jg,medium,TT
