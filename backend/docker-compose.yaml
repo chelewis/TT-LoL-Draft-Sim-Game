@@ -1,0 +1,15 @@
+version: "3.5"
+services:
+  tt-lol-draft-sim-server:
+    image: tt-lol-draft-sim-server
+    ports:
+      - "8003:8003"
+    restart: always
+    env_file: ".env"
+    environment:
+      # overrides any LDM_DATABASE_URL in .env so the database always lands on the volume
+      LDM_DATABASE_URL: "sqlite:////data/league_draft_manager.db"
+    volumes:
+      - db_data:/data
+volumes:
+  db_data:
