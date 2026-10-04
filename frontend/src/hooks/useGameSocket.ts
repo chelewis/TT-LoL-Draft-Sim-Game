@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { tokenStore } from '../api/client'
+import { wsUrl } from '../api/config'
 
 export interface SocketEvent {
   type: string
@@ -28,8 +29,7 @@ export function useGameSocket(gameId: number | undefined, onEvent: (event: Socke
     const connect = () => {
       const token = tokenStore.get()
       if (!token || closed) return
-      const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
-      socket = new WebSocket(`${scheme}://${window.location.host}/ws/games/${gameId}?token=${encodeURIComponent(token)}`)
+      socket = new WebSocket(wsUrl(`/ws/games/${gameId}?token=${encodeURIComponent(token)}`))
       socket.onopen = () => {
         retry = 0
         setConnected(true)

@@ -1,4 +1,6 @@
-const BASE = '/api/v1'
+import { API_BASE } from './config'
+
+const BASE = API_BASE
 const TOKEN_KEY = 'ldm_token'
 
 export const tokenStore = {

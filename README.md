@@ -20,7 +20,7 @@ python -m venv .venv
 # frontend (second terminal)
 cd frontend
 npm install
-npm run dev                                            # http://localhost:5173 (proxies /api and /ws)
+npm run dev                                            # http://localhost:5173 (backend URL from VITE_API_URL, copy frontend/.env.example to .env)
 ```
 
 Or build the web app once and let the backend serve everything on port 8000:
