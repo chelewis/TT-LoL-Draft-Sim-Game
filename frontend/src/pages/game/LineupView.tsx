@@ -2,6 +2,7 @@ import { useMutation } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api/client'
 import type { GameState, Lane, Player, Side } from '../../api/types'
+import { ChampionIcon, LaneIcon } from '../../components/ChampionArt'
 import { LANES } from '../../api/types'
 import { ErrorNotice } from '../../components/common'
 import { OverBudgetBadge } from '../../components/TeamCard'
@@ -114,6 +115,7 @@ function LineupEditor({ game, side: me, onChange }: { game: GameState; side: Sid
                 disabled={confirmed}
                 onClick={() => setSelected(selected === id ? null : id)}
               >
+                <ChampionIcon champion={c} size={56} />
                 <strong>{c?.name ?? id}</strong>
                 <span className="muted small">{placed ? 'assigned' : 'tap, then pick a lane'}</span>
               </button>
@@ -146,7 +148,7 @@ function LineupEditor({ game, side: me, onChange }: { game: GameState; side: Sid
               aria-label={`${LANE_LABEL[lane]} slot`}
             >
               <div className="row between">
-                <strong>{LANE_LABEL[lane]}</strong>
+                <strong className="row"><LaneIcon lane={lane} />{LANE_LABEL[lane]}</strong>
                 <span className="muted small">{player?.name}</span>
               </div>
               {player && (
@@ -156,7 +158,7 @@ function LineupEditor({ game, side: me, onChange }: { game: GameState; side: Sid
               )}
               {cid !== undefined ? (
                 <div className="assigned">
-                  <strong>{champions.get(cid)?.name}</strong>
+                  <strong className="row"><ChampionIcon champion={champions.get(cid)} size={40} />{champions.get(cid)?.name}</strong>
                   {tier && (
                     <span className={`badge tier-${tier.toLowerCase()}`}>
                       {TIER_LABEL[tier]} {TIER_MODIFIER[tier] > 0 ? '+' : ''}

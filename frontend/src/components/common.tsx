@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import type { Champion } from '../api/types'
+import { ChampionIcon } from './ChampionArt'
 
 export function ErrorNotice({ error }: { error: unknown }) {
   if (!error) return null
@@ -29,6 +30,7 @@ export function ChampionTag({ champion }: { champion: Champion | undefined }) {
   if (!champion) return <span className="muted">?</span>
   return (
     <span className="champ-tag" title={`${champion.class} · ${champion.strength} · win rate ${champion.win_rate}%`}>
+      <ChampionIcon champion={champion} size={22} />
       {champion.name}
     </span>
   )

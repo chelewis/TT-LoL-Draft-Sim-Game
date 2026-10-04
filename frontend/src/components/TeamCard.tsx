@@ -1,4 +1,5 @@
-import { LANES, type HiddenPlayer, type Player, type Side, type Team } from '../api/types'
+import { LANES, type HiddenPlayer, type Lane, type Player, type Side, type Team } from '../api/types'
+import { LaneIcon } from './ChampionArt'
 import { LANE_LABEL, isHidden, overBudgetNotice, riotSourceLabel, riotSourceTag, titleCase } from '../lib/format'
 
 export function OverBudgetBadge({ team }: { team: Pick<Team, 'over_budget' | 'over_budget_players'> }) {
@@ -11,11 +12,11 @@ export function OverBudgetBadge({ team }: { team: Pick<Team, 'over_budget' | 'ov
   )
 }
 
-function PlayerRow({ lane, player }: { lane: string; player: Player | HiddenPlayer | null }) {
+function PlayerRow({ lane, player }: { lane: Lane; player: Player | HiddenPlayer | null }) {
   if (!player) {
     return (
       <tr>
-        <td className="muted">{lane}</td>
+        <td className="muted" title={LANE_LABEL[lane]}><LaneIcon lane={lane} size={16} /></td>
         <td colSpan={6} className="muted">
           Empty
         </td>
@@ -25,7 +26,7 @@ function PlayerRow({ lane, player }: { lane: string; player: Player | HiddenPlay
   if (isHidden(player)) {
     return (
       <tr>
-        <td className="muted">{lane}</td>
+        <td className="muted" title={LANE_LABEL[lane]}><LaneIcon lane={lane} size={16} /></td>
         <td>
           {player.name}
           {!!player.over_budget_by && (
@@ -42,7 +43,7 @@ function PlayerRow({ lane, player }: { lane: string; player: Player | HiddenPlay
   }
   return (
     <tr>
-      <td className="muted">{lane}</td>
+      <td className="muted" title={LANE_LABEL[lane]}><LaneIcon lane={lane} size={16} /></td>
       <td>
         {player.name}
         {player.riot && (
@@ -108,7 +109,7 @@ export default function TeamCard({ team, side, you }: { team: Team | null; side:
           </thead>
           <tbody>
             {LANES.map((lane) => (
-              <PlayerRow key={lane} lane={LANE_LABEL[lane]} player={team.roster[lane]} />
+              <PlayerRow key={lane} lane={lane} player={team.roster[lane]} />
             ))}
           </tbody>
         </table>
