@@ -224,11 +224,19 @@ table.compact th, table.compact td { padding: 4px 6px; font-size: 0.85rem; }
 .cs .cs-tab.active { color: var(--hex-gold-light); border-bottom-color: var(--hex-gold); }
 .cs input.cs-search { background: var(--hex-bg); border: 1px solid var(--hex-line); border-radius: 0; color: var(--hex-gold-light); min-height: 32px; padding: 4px 10px; width: 200px; }
 .cs input.cs-search:focus { border-color: var(--hex-gold); outline: none; }
-.cs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 10px 6px; align-content: start; overflow-y: auto; max-height: 520px; padding: 4px 4px 4px 2px; }
-.cs .cs-champ { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0; background: transparent; border: 0; border-radius: 0; color: #a09b8c; }
+/* the scroll box wraps the grid: a scrolling grid lets some browsers (Safari) squash its rows to fit */
+.cs-grid-scroll { height: 560px; overflow-y: auto; overscroll-behavior: contain; padding-right: 6px; }
+/* Chrome/Safari: a styled scrollbar is always visible (macOS otherwise hides it until you scroll) */
+.cs-grid-scroll::-webkit-scrollbar { width: 8px; }
+.cs-grid-scroll::-webkit-scrollbar-track { background: var(--hex-bg); }
+.cs-grid-scroll::-webkit-scrollbar-thumb { background: var(--hex-gold-dark); border: 1px solid var(--hex-bg); }
+.cs-grid-scroll::-webkit-scrollbar-thumb:hover { background: var(--hex-gold); }
+@supports not selector(::-webkit-scrollbar) { .cs-grid-scroll { scrollbar-width: thin; scrollbar-color: var(--hex-gold-dark) var(--hex-bg); } }
+.cs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); grid-auto-rows: max-content; gap: 10px 6px; align-content: start; padding: 4px 2px; }
+.cs .cs-champ { display: flex; flex-direction: column; height: auto; align-items: center; gap: 4px; padding: 0; background: transparent; border: 0; border-radius: 0; color: #a09b8c; }
 .cs .cs-champ:hover:not(:disabled) { color: var(--hex-gold-light); }
-.cs-champ-frame { position: relative; display: block; line-height: 0; border: 1px solid var(--hex-line); }
-.cs-champ-frame .champ-icon { border-radius: 0; }
+.cs-champ-frame { position: relative; display: block; flex: none; line-height: 0; border: 1px solid var(--hex-line); }
+.cs-champ-frame .champ-icon { display: block; border-radius: 0; aspect-ratio: 1; }
 .cs-champ:hover:not(:disabled) .cs-champ-frame { border-color: var(--hex-gold); }
 .cs-champ.selected .cs-champ-frame { border-color: var(--hex-gold-light); box-shadow: 0 0 0 1px var(--hex-gold), 0 0 12px rgba(200, 170, 110, 0.6); }
 .cs .cs-champ.selected { color: var(--hex-gold-light); }
@@ -282,7 +290,8 @@ table.compact th, table.compact td { padding: 4px 6px; font-size: 0.85rem; }
   .cs-header { gap: 10px; }
   .cs-bans { gap: 3px; flex-wrap: wrap; }
   .cs-ban { width: 30px; height: 30px; } .cs-ban .champ-icon { width: 30px !important; height: 30px !important; }
-  .cs-grid { grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); max-height: 60vh; }
+  .cs-grid-scroll { height: 60vh; }
+  .cs-grid { grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); }
   .cs-champ-frame .champ-icon { width: 56px !important; height: 56px !important; }
   .cs input.cs-search { width: 100%; }
   .cs-roster { display: none; }

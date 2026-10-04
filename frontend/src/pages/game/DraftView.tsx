@@ -151,32 +151,34 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
                 aria-label="Search champions"
               />
             </div>
-            <div className="cs-grid">
-              {visible.map((c) => {
-                const isUsed = used.has(c.id)
-                const best = hints.get(c.id)?.[0]
-                return (
-                  <button
-                    key={c.id}
-                    className={`cs-champ ${selected === c.id ? 'selected' : ''} ${isUsed ? 'used' : ''}`}
-                    disabled={isUsed}
-                    onClick={() => setSelected(c.id)}
-                    onDoubleClick={() => myTurn && !isUsed && !act.isPending && act.mutate(c.id)}
-                    title={`${c.name} · ${c.class}${best ? ` · ${best.player} (${LANE_LABEL[best.lane]}): ${TIER_LABEL[best.tier]}` : ''}`}
-                  >
-                    <span className="cs-champ-frame">
-                      <ChampionIcon champion={c} size={64} />
-                      {best && (
-                        <span className={`cs-comfort tier-${best.tier.toLowerCase()}`} aria-label={TIER_LABEL[best.tier]}>
-                          {TIER_MARK[best.tier]}
-                        </span>
-                      )}
-                    </span>
-                    <span className="cs-champ-name">{c.name}</span>
-                  </button>
-                )
-              })}
-              {visible.length === 0 && <p className="muted">No champions match.</p>}
+            <div className="cs-grid-scroll">
+              <div className="cs-grid">
+                {visible.map((c) => {
+                  const isUsed = used.has(c.id)
+                  const best = hints.get(c.id)?.[0]
+                  return (
+                    <button
+                      key={c.id}
+                      className={`cs-champ ${selected === c.id ? 'selected' : ''} ${isUsed ? 'used' : ''}`}
+                      disabled={isUsed}
+                      onClick={() => setSelected(c.id)}
+                      onDoubleClick={() => myTurn && !isUsed && !act.isPending && act.mutate(c.id)}
+                      title={`${c.name} · ${c.class}${best ? ` · ${best.player} (${LANE_LABEL[best.lane]}): ${TIER_LABEL[best.tier]}` : ''}`}
+                    >
+                      <span className="cs-champ-frame">
+                        <ChampionIcon champion={c} size={64} />
+                        {best && (
+                          <span className={`cs-comfort tier-${best.tier.toLowerCase()}`} aria-label={TIER_LABEL[best.tier]}>
+                            {TIER_MARK[best.tier]}
+                          </span>
+                        )}
+                      </span>
+                      <span className="cs-champ-name">{c.name}</span>
+                    </button>
+                  )
+                })}
+                {visible.length === 0 && <p className="muted">No champions match.</p>}
+              </div>
             </div>
           </section>
 
