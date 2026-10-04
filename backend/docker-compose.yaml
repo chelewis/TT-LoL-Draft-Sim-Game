@@ -9,6 +9,8 @@ services:
     environment:
       # overrides any LDM_DATABASE_URL in .env so the database always lands on the volume
       LDM_DATABASE_URL: "sqlite:////data/league_draft_manager.db"
+      # browsers allowed to call the API from another origin (JSON list); the deployed frontend
+      LDM_CORS_ORIGINS: '["https://tt-lol-sim.intelesport.com","http://localhost:5173"]'
     volumes:
       - db_data:/data
 volumes:
