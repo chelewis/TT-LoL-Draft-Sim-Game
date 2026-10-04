@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
 import type { Champion, Coach, Player, Team } from '../api/types'
+import { fetchLatestVersion } from '../lib/ddragon'
 
 export function useChampions() {
   return useQuery({
@@ -8,6 +9,12 @@ export function useChampions() {
     queryFn: () => api<Champion[]>('/champions'),
     staleTime: Infinity,
   })
+}
+
+/** Latest Data Dragon version for champion art; null until known (falls back to a pinned version on failure). */
+export function useDDragonVersion(): string | null {
+  const { data } = useQuery({ queryKey: ['ddragon-version'], queryFn: fetchLatestVersion, staleTime: Infinity, retry: false })
+  return data ?? null
 }
 
 export function useChampionMap(): Map<number, Champion> {
