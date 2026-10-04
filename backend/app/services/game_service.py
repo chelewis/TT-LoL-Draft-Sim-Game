@@ -285,11 +285,19 @@ def snapshot_of(db: Session, game: Game, side: str) -> dict | None:
     return row.snapshot if row else None
 
 
-def _snapshot_to_setup(snapshot: dict, lineup: dict[str, int]) -> TeamSetup:
-    roster = {}
-    for lane, p in snapshot["roster"].items():
-        roster[lane] = PlayerSpec(p["id"], p["name"], p["role"], p["age"], p["aggr"], p["aware"], p["pos"],
-                                  p["dmg"], p["cs"], tuple(p["pool"]))
+def _player_spec(p: dict) -> PlayerSpec:
+    return PlayerSpec(p["id"], p["name"], p["role"], p["age"], p["aggr"], p["aware"], p["pos"],
+                      p["dmg"], p["cs"], tuple(p["pool"]))
+
+
+def _lane_players(snapshot: dict, players: dict[str, int] | None) -> dict[str, dict]:
+    """lane -> snapshot player for the match: the roster, with any position swaps from the lineup applied."""
+    by_id = {p["id"]: p for p in snapshot["roster"].values() if p}
+    return {lane: by_id.get((players or {}).get(lane), p) for lane, p in snapshot["roster"].items()}
+
+
+def _snapshot_to_setup(snapshot: dict, lineup: dict[str, int], players: dict[str, int] | None = None) -> TeamSetup:
+    roster = {lane: _player_spec(p) for lane, p in _lane_players(snapshot, players).items()}
     c = snapshot["coach"]
     styles = tuple(s for s in (snapshot["style1"], snapshot["style2"]) if s)
     focus = tuple(f for f in (snapshot["focus1"], snapshot["focus2"]) if f)
@@ -361,6 +369,7 @@ def _record_action(db: Session, game: Game, draft: DraftState, team: str, action
     if draft.complete:
         game.action_started_at = game.action_expires_at = None
         _transition(game, "LANE_ASSIGNMENT")
+        _default_lineups(db, game, draft)
         track("draft_completed", game_id=game.id)
         events.append(_event(game, "DRAFT_COMPLETED"))
     else:
@@ -412,6 +421,25 @@ def _own_lineup(db: Session, game: Game, side: str) -> dict[str, int]:
     return {r.lane: r.champion_id for r in rows}
 
 
+def _own_players(db: Session, game: Game, side: str) -> dict[str, int]:
+    """lane -> player id for the lanes in the saved lineup (differs from the roster after a position swap)."""
+    rows = db.scalars(select(TeamLineup).where(TeamLineup.game_id == game.id, TeamLineup.team == side))
+    return {r.lane: r.player_id for r in rows}
+
+
+def _default_lineups(db: Session, game: Game, draft: DraftState) -> None:
+    """When the draft ends, each side starts with its picks in pick order (top, jungle, mid, bot, support),
+    matching the champ select rows. Players then swap champions or positions before confirming."""
+    for side in ("BLUE", "RED"):
+        snap = snapshot_of(db, game, side)
+        if snap is None:
+            continue
+        for lane, cid in zip(LANES, draft.picks[side]):
+            p = snap["roster"].get(lane)
+            if p:
+                db.add(TeamLineup(game_id=game.id, team=side, lane=lane, champion_id=cid, player_id=p["id"]))
+
+
 def set_lineup(db: Session, game: Game, user: User, assignments: list[dict], requested_side: str | None = None) -> Events:
     side = acting_side(game, user, requested_side)
     if game.status != "LANE_ASSIGNMENT":
@@ -419,6 +447,14 @@ def set_lineup(db: Session, game: Game, user: User, assignments: list[dict], req
     if (game.blue_lineup_ready if side == "BLUE" else game.red_lineup_ready):
         raise conflict("Your lineup is already confirmed.")
     picks = set(load_draft(db, game).picks[side])
+    snap = snapshot_of(db, game, side)
+    roster_ids = {lane: p["id"] for lane, p in snap["roster"].items() if p}
+    given = [a.get("player_id") for a in assignments]
+    if any(pid is not None for pid in given):
+        # a position swap: every lane names its player, and each roster player plays exactly one lane
+        if any(pid is None for pid in given) or len(set(given)) != len(given) \
+                or not set(given) <= set(roster_ids.values()):
+            raise bad_request("Each lane needs a different player from your roster.")
     lanes_seen, champs_seen = set(), set()
     for a in assignments:
         lane, cid = a["lane"], a["champion_id"]
@@ -432,11 +468,10 @@ def set_lineup(db: Session, game: Game, user: User, assignments: list[dict], req
             raise bad_request("A champion can only be assigned once.")
         lanes_seen.add(lane)
         champs_seen.add(cid)
-    snap = snapshot_of(db, game, side)
     db.execute(delete(TeamLineup).where(TeamLineup.game_id == game.id, TeamLineup.team == side))
     for a in assignments:
         db.add(TeamLineup(game_id=game.id, team=side, lane=a["lane"], champion_id=a["champion_id"],
-                          player_id=snap["roster"][a["lane"]]["id"]))
+                          player_id=a.get("player_id") or roster_ids[a["lane"]]))
     db.commit()
     return [_event(game, "LINEUP_UPDATED", team=side)]
 
@@ -468,10 +503,10 @@ def comfort_preview(db: Session, game: Game, user: User, requested_side: str | N
         raise conflict("The draft has not started.")
     cfg = SIMULATION_CONFIG
     out = []
+    lane_players = _lane_players(snap, _own_players(db, game, side))
     for lane, cid in _own_lineup(db, game, side).items():
-        p = snap["roster"][lane]
-        spec = PlayerSpec(p["id"], p["name"], p["role"], p["age"], p["aggr"], p["aware"], p["pos"],
-                          p["dmg"], p["cs"], tuple(p["pool"]))
+        p = lane_players[lane]
+        spec = _player_spec(p)
         tier = comfort_tier(spec, cid, cfg)
         out.append({"lane": lane, "player_id": p["id"], "champion_id": cid, "tier": tier,
                     "modifier": comfort_modifier(tier, cfg)})
@@ -491,7 +526,8 @@ def run_simulation(db: Session, game: Game) -> Events:
     champions = {c.id: c.to_engine() for c in db.scalars(select(Champion))}
     setups = {}
     for side in ("BLUE", "RED"):
-        setups[side] = _snapshot_to_setup(snapshot_of(db, game, side), _own_lineup(db, game, side))
+        setups[side] = _snapshot_to_setup(snapshot_of(db, game, side), _own_lineup(db, game, side),
+                                          _own_players(db, game, side))
     result = simulate_match(setups["BLUE"], setups["RED"], champions, game.seed, cfg)
 
     data = result.to_dict(include_events=False)
@@ -613,12 +649,17 @@ def game_state(db: Session, game: Game, viewer: User) -> dict:
     if game.status in ("DRAFTING", "LANE_ASSIGNMENT", "READY_TO_SIMULATE", "SIMULATING", "COMPLETED"):
         state["draft"] = draft_view(db, game)
         lineups = {"yours": _own_lineup(db, game, side)}
+        visible = [side]
         if game.is_solo:        # one person sees (and edits) both lineups
             lineups["blue"] = _own_lineup(db, game, "BLUE")
             lineups["red"] = _own_lineup(db, game, "RED")
+            visible = ["BLUE", "RED"]
         if game.status == "COMPLETED":  # the opponent's assignments stay hidden until the game is over
             other = "RED" if side == "BLUE" else "BLUE"
             lineups["opponent"] = _own_lineup(db, game, other)
+            visible = ["BLUE", "RED"]
+        # lane -> player id per visible side (a position swap moves players off their roster lane)
+        lineups["players"] = {s: _own_players(db, game, s) for s in visible}
         state["lineup"] = lineups
     return state
 

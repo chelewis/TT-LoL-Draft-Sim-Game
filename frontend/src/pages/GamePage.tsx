@@ -7,7 +7,6 @@ import { ErrorNotice, Loading } from '../components/common'
 import { useGameSocket } from '../hooks/useGameSocket'
 import SideBanner from '../components/SideBanner'
 import DraftView from './game/DraftView'
-import LineupView from './game/LineupView'
 import LobbyView from './game/LobbyView'
 import ResultView from './game/ResultView'
 
@@ -49,9 +48,9 @@ export default function GamePage() {
       {(game.status === 'WAITING_FOR_PLAYERS' || game.status === 'TEAM_SELECTION' || game.status === 'READY_CHECK') && (
         <LobbyView game={game} onChange={refresh} />
       )}
-      {game.status === 'DRAFTING' && <DraftView game={game} onChange={refresh} />}
-      {(game.status === 'LANE_ASSIGNMENT' || game.status === 'READY_TO_SIMULATE' || game.status === 'SIMULATING') && (
-        <LineupView game={game} onChange={refresh} />
+      {/* champ select covers the draft and the lineup finalization that follows it */}
+      {(game.status === 'DRAFTING' || game.status === 'LANE_ASSIGNMENT' || game.status === 'READY_TO_SIMULATE' || game.status === 'SIMULATING') && (
+        <DraftView game={game} onChange={refresh} />
       )}
       {game.status === 'COMPLETED' && <ResultView game={game} />}
       {game.status === 'CANCELLED' && (

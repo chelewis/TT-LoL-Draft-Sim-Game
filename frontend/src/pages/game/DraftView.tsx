@@ -1,13 +1,14 @@
 import { useMutation } from '@tanstack/react-query'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../api/client'
-import type { Champion, GameState, Lane, Player, Side } from '../../api/types'
+import type { Champion, GameState, HiddenPlayer, Lane, Player, Side } from '../../api/types'
 import { LANES } from '../../api/types'
 import { ChampionIcon, LaneIcon, championArt } from '../../components/ChampionArt'
 import { ErrorNotice, Pips } from '../../components/common'
 import TeamCard from '../../components/TeamCard'
 import { useChampions, useCountdown } from '../../hooks/useData'
 import { LANE_LABEL, TIER_LABEL, comfortTier, isHidden, isSolo } from '../../lib/format'
+import { lineupAssignments, swapLanes, type Lineup, type SwapKind } from '../../lib/lineup'
 
 interface PoolHint {
   player: string
@@ -79,6 +80,33 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
     onError: onChange,
   })
 
+  // ----- finalization: after the last pick, each side swaps champions or positions, then locks in
+  const finalizing = draft.complete
+  const editing = game.status === 'LANE_ASSIGNMENT'
+  const [swapMenu, setSwapMenu] = useState<{ side: Side; lane: Lane } | null>(null)
+  const lineups = useMemo(() => ({ BLUE: lineupOf(game, 'BLUE'), RED: lineupOf(game, 'RED') }), [game])
+  const isReady = (side: Side) => !!(side === 'BLUE' ? game.players.blue : game.players.red)?.lineup_ready
+  const canEdit = (side: Side) => finalizing && editing && (solo || side === game.you.team) && !!lineups[side] && !isReady(side)
+
+  const saveLineup = useMutation({
+    mutationFn: ({ side, lineup }: { side: Side; lineup: Lineup }) =>
+      api(`/games/${game.game_id}/lineup`, { method: 'PUT', body: { assignments: lineupAssignments(lineup), side: solo ? side : undefined } }),
+    onSuccess: onChange,
+    onError: onChange,
+  })
+  const lockLineup = useMutation({
+    mutationFn: (side: Side) => api(`/games/${game.game_id}/lineup/ready${solo ? `?side=${side}` : ''}`, { method: 'POST' }),
+    onSuccess: onChange,
+    onError: onChange,
+  })
+
+  function swap(side: Side, a: Lane, b: Lane, kind: SwapKind) {
+    const current = lineups[side]
+    if (!current) return
+    setSwapMenu(null)
+    saveLineup.mutate({ side, lineup: swapLanes(current, a, b, kind) })
+  }
+
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
     return (champions.data ?? [])
@@ -90,14 +118,23 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
   // the champion I'm hovering shows in my active slot, like the client's pre-lock preview
   const preview = myTurn ? selectedChampion : undefined
 
-  const phaseTitle = draft.current_team
-    ? `${sideName(draft.current_team)} ${action === 'PICK' ? 'pick' : 'ban'}`
-    : 'Draft complete'
-  const phaseSub = myTurn
-    ? solo
-      ? `${sideName(me)}: choose a champion to ${action === 'PICK' ? 'pick' : 'ban'}`
-      : `Your turn: choose a champion to ${action === 'PICK' ? 'pick' : 'ban'}`
-    : 'Waiting for your opponent…'
+  const editableSides: Side[] = (solo ? (['BLUE', 'RED'] as Side[]) : [game.you.team]).filter((s) => lineups[s])
+  const phaseTitle = finalizing
+    ? editing ? 'Finalization' : 'Simulating match…'
+    : draft.current_team
+      ? `${sideName(draft.current_team)} ${action === 'PICK' ? 'pick' : 'ban'}`
+      : 'Draft complete'
+  const phaseSub = finalizing
+    ? !editing
+      ? 'Both lineups are locked in.'
+      : editableSides.some(canEdit)
+        ? 'Swap champions or positions with the ⇅ buttons, then lock in your lineup.'
+        : 'Waiting for your opponent to lock in…'
+    : myTurn
+      ? solo
+        ? `${sideName(me)}: choose a champion to ${action === 'PICK' ? 'pick' : 'ban'}`
+        : `Your turn: choose a champion to ${action === 'PICK' ? 'pick' : 'ban'}`
+      : 'Waiting for your opponent…'
 
   return (
     <div className="stack">
@@ -106,12 +143,20 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
           <SideHeader side="BLUE" game={game} byId={byId} preview={preview} me={me} />
           <div className="cs-phase">
             <div className="cs-phase-title">{phaseTitle}</div>
-            {draft.timers_enabled ? (
+            {finalizing ? (
+              <div className="cs-timer cs-timer-off">
+                {(['BLUE', 'RED'] as Side[]).map((s) => (
+                  <span key={s} className={`cs-ready ${s.toLowerCase()} ${isReady(s) ? 'done' : ''}`}>
+                    {sideName(s)}: {isReady(s) ? 'locked in' : 'finalizing'}
+                  </span>
+                ))}
+              </div>
+            ) : draft.timers_enabled ? (
               <DraftTimer seconds={seconds} startedAt={draft.started_at} expiresAt={draft.expires_at} />
             ) : (
               <div className="cs-timer cs-timer-off">No time limit</div>
             )}
-            <div className={`cs-phase-sub ${myTurn ? 'mine' : ''}`}>{phaseSub}</div>
+            <div className={`cs-phase-sub ${myTurn || editableSides.some(canEdit) ? 'mine' : ''}`}>{phaseSub}</div>
             <div className="cs-steps" aria-label={`Action ${draft.current_action + 1} of ${draft.actions.length}`}>
               {draft.actions.map((a, i) => (
                 <span
@@ -126,7 +171,20 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
         </header>
 
         <div className="cs-body">
-          <PickColumn side="BLUE" game={game} byId={byId} preview={preview} me={me} solo={solo} seconds={draft.timers_enabled ? seconds : null} />
+          <PickColumn
+            side="BLUE"
+            game={game}
+            byId={byId}
+            preview={preview}
+            me={me}
+            solo={solo}
+            seconds={draft.timers_enabled ? seconds : null}
+            lineup={finalizing ? lineups.BLUE : null}
+            editable={canEdit('BLUE')}
+            menuLane={swapMenu?.side === 'BLUE' ? swapMenu.lane : null}
+            onOpenMenu={(lane) => setSwapMenu(lane ? { side: 'BLUE', lane } : null)}
+            onSwap={(a, b, kind) => swap('BLUE', a, b, kind)}
+          />
 
           <section className="cs-center" aria-label="Champions">
             <div className="cs-filters">
@@ -182,20 +240,50 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
             </div>
           </section>
 
-          <PickColumn side="RED" game={game} byId={byId} preview={preview} me={me} solo={solo} seconds={draft.timers_enabled ? seconds : null} />
+          <PickColumn
+            side="RED"
+            game={game}
+            byId={byId}
+            preview={preview}
+            me={me}
+            solo={solo}
+            seconds={draft.timers_enabled ? seconds : null}
+            lineup={finalizing ? lineups.RED : null}
+            editable={canEdit('RED')}
+            menuLane={swapMenu?.side === 'RED' ? swapMenu.lane : null}
+            onOpenMenu={(lane) => setSwapMenu(lane ? { side: 'RED', lane } : null)}
+            onSwap={(a, b, kind) => swap('RED', a, b, kind)}
+          />
         </div>
 
         <footer className="cs-footer">
           <ChampionDetail champion={selectedChampion} hints={selectedChampion ? hints.get(selectedChampion.id) : undefined} />
           <div className="cs-lock">
-            <ErrorNotice error={act.error} />
-            <button
-              className={`cs-lock-in ${action === 'BAN' ? 'ban' : ''}`}
-              disabled={!myTurn || !selected || act.isPending}
-              onClick={() => selected && act.mutate(selected)}
-            >
-              {action === 'BAN' ? 'Ban' : 'Lock in'}
-            </button>
+            <ErrorNotice error={act.error ?? saveLineup.error ?? lockLineup.error} />
+            {finalizing ? (
+              <div className="row">
+                {editableSides.map((s) => (
+                  <button
+                    key={s}
+                    className="cs-lock-in"
+                    disabled={!canEdit(s) || lockLineup.isPending || saveLineup.isPending}
+                    onClick={() => lockLineup.mutate(s)}
+                  >
+                    {isReady(s)
+                      ? solo ? `${sideName(s)} locked` : 'Locked in'
+                      : solo ? `Lock in ${sideName(s)}` : 'Lock in lineup'}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <button
+                className={`cs-lock-in ${action === 'BAN' ? 'ban' : ''}`}
+                disabled={!myTurn || !selected || act.isPending}
+                onClick={() => selected && act.mutate(selected)}
+              >
+                {action === 'BAN' ? 'Ban' : 'Lock in'}
+              </button>
+            )}
           </div>
         </footer>
       </div>
@@ -249,7 +337,14 @@ function SideHeader({ side, game, byId, preview, me }: SideProps) {
     <div className={`cs-side-header ${side.toLowerCase()}`}>
       <div className="cs-team-name">
         {team?.name ?? `${sideName(side)} team`}
-        {me === side && <span className="cs-you">{isSolo(game) ? 'up now' : 'you'}</span>}
+        {draft.complete ? (
+          <>
+            {!isSolo(game) && me === side && <span className="cs-you">you</span>}
+            {(side === 'BLUE' ? game.players.blue : game.players.red)?.lineup_ready && <span className="cs-you">locked in</span>}
+          </>
+        ) : (
+          me === side && <span className="cs-you">{isSolo(game) ? 'up now' : 'you'}</span>
+        )}
       </div>
       {banSlots > 0 && (
         <div className="cs-bans" aria-label={`${sideName(side)} bans`}>
@@ -270,43 +365,116 @@ function SideHeader({ side, game, byId, preview, me }: SideProps) {
 /** Lane names as the League client writes them in champ select. */
 const ROW_LANE_LABEL: Record<Lane, string> = { TOP: 'Top', JUNGLE: 'Jungle', MID: 'Mid', BOT: 'Bottom', SUPPORT: 'Support' }
 
+/** The saved lineup of a side, if this viewer may see it (own side; both in single player; both when the game is over). */
+function lineupOf(game: GameState, side: Side): Lineup | null {
+  const l = game.lineup
+  if (!l) return null
+  const champions = isSolo(game)
+    ? l[side === 'BLUE' ? 'blue' : 'red']
+    : side === game.you.team ? l.yours : l.opponent
+  if (!champions) return null
+  return { champions: champions as Lineup['champions'], players: (l.players?.[side] ?? {}) as Lineup['players'] }
+}
+
+type RosterPlayer = Player | HiddenPlayer
+
+function playerById(game: GameState, side: Side, id: number | undefined): RosterPlayer | null {
+  const roster = game.teams[side]?.roster
+  if (!roster || id === undefined) return null
+  return Object.values(roster).find((p) => p?.id === id) ?? null
+}
+
+function SwapIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5 2v11M2 10l3 3 3-3" />
+      <path d="M11 14V3M8 6l3-3 3 3" />
+    </svg>
+  )
+}
+
+interface ColumnProps extends SideProps {
+  solo: boolean
+  seconds: number | null
+  /** The side's lineup once the draft is over (null while drafting, or when it is the opponent's hidden lineup). */
+  lineup: Lineup | null
+  editable: boolean
+  menuLane: Lane | null
+  onOpenMenu: (lane: Lane | null) => void
+  onSwap: (a: Lane, b: Lane, kind: SwapKind) => void
+}
+
 /**
- * One row per roster lane (lane icon, lane, player), like the client's team list. Picks fill the
- * rows in pick order; who actually plays each champion is decided on the lineup screen.
+ * One row per lane (lane icon, lane, player), like the client's team list. While drafting, picks fill
+ * the rows in pick order. Afterwards the rows show the side's lineup, and its own rows get a swap menu.
  */
-function PickColumn({ side, game, byId, preview, me, solo, seconds }: SideProps & { solo: boolean; seconds: number | null }) {
+function PickColumn({ side, game, byId, preview, me, solo, seconds, lineup, editable, menuLane, onOpenMenu, onSwap }: ColumnProps) {
   const draft = game.draft!
   const picks = side === 'BLUE' ? draft.blue_picks : draft.red_picks
   const now = activeSlot(game, side, 'PICK')
   const roster = game.teams[side]?.roster
+
+  const rows = LANES.map((lane, i) => {
+    const player: RosterPlayer | null = (lineup ? playerById(game, side, lineup.players[lane]) : null) ?? roster?.[lane] ?? null
+    const championId = lineup ? lineup.champions[lane] : picks[i]
+    const locked = championId !== undefined ? byId.get(championId) : undefined
+    const hovering = !locked && i === now && side === me ? preview : undefined
+    const tier = lineup && locked && player && !isHidden(player) ? comfortTier((player as Player).pool, locked.id) : null
+    return { lane, i, player, locked, hovering, champ: locked ?? hovering, tier }
+  })
+
   return (
     <aside className={`cs-picks ${side.toLowerCase()}`} aria-label={`${sideName(side)} team`}>
-      {LANES.map((lane, i) => {
-        const locked = picks[i] !== undefined ? byId.get(picks[i]) : undefined
-        const hovering = !locked && i === now && side === me ? preview : undefined
-        const champ = locked ?? hovering
+      {rows.map(({ lane, i, player, locked, hovering, champ, tier }) => {
         const active = i === now
+        const open = menuLane === lane
         return (
-          <div
-            key={lane}
-            className={`cs-row ${locked ? 'locked' : ''} ${hovering ? 'hovering' : ''} ${active ? 'now' : ''}`}
-            style={{ backgroundImage: championArt(champ) }}
-          >
-            <div className="cs-row-portrait">
-              {champ ? <ChampionIcon champion={champ} size={60} /> : <LaneIcon lane={lane} size={30} />}
-              {champ && (
-                <span className="cs-row-badge">
-                  <LaneIcon lane={lane} size={12} />
-                </span>
-              )}
+          <div key={lane} className="cs-row-wrap">
+            <div
+              className={`cs-row ${locked ? 'locked' : ''} ${hovering ? 'hovering' : ''} ${active ? 'now' : ''} ${open ? 'swapping' : ''}`}
+              style={{ backgroundImage: championArt(champ) }}
+            >
+              <div className="cs-row-portrait">
+                {champ ? <ChampionIcon champion={champ} size={60} /> : <LaneIcon lane={lane} size={30} />}
+                {champ && (
+                  <span className="cs-row-badge">
+                    <LaneIcon lane={lane} size={12} />
+                  </span>
+                )}
+                {editable && (
+                  <button
+                    className={`cs-swap-btn ${open ? 'open' : ''}`}
+                    onClick={() => onOpenMenu(open ? null : lane)}
+                    aria-label={`Swap ${LANE_LABEL[lane]}`}
+                    aria-expanded={open}
+                    title="Swap champion or position"
+                  >
+                    <SwapIcon />
+                  </button>
+                )}
+              </div>
+              <div className="cs-row-text">
+                {active && <span className="cs-row-status">{solo || side === me ? 'Picking…' : 'Opponent picking…'}</span>}
+                <span className="cs-row-lane">{ROW_LANE_LABEL[lane]}</span>
+                <span className="cs-row-player">{player?.name ?? 'Empty'}</span>
+                {champ && (
+                  <span className="cs-row-champ">
+                    {champ.name}
+                    {tier && <span className={`cs-row-tier tier-${tier.toLowerCase()}`}> · {TIER_LABEL[tier]}</span>}
+                  </span>
+                )}
+              </div>
+              {active && seconds !== null && <span className="cs-row-timer">{seconds}</span>}
             </div>
-            <div className="cs-row-text">
-              {active && <span className="cs-row-status">{solo || side === me ? 'Picking…' : 'Opponent picking…'}</span>}
-              <span className="cs-row-lane">{ROW_LANE_LABEL[lane]}</span>
-              <span className="cs-row-player">{roster?.[lane]?.name ?? 'Empty'}</span>
-              {champ && <span className="cs-row-champ">{champ.name}</span>}
-            </div>
-            {active && seconds !== null && <span className="cs-row-timer">{seconds}</span>}
+            {open && (
+              <SwapMenu
+                lane={lane}
+                up={i >= 3}
+                rows={rows.filter((r) => r.lane !== lane)}
+                onSwap={(other, kind) => onSwap(lane, other, kind)}
+                onClose={() => onOpenMenu(null)}
+              />
+            )}
           </div>
         )
       })}
@@ -314,8 +482,59 @@ function PickColumn({ side, game, byId, preview, me, solo, seconds }: SideProps 
   )
 }
 
+interface SwapRow {
+  lane: Lane
+  player: RosterPlayer | null
+  locked: Champion | undefined
+}
+
+/** "Swap for…": trade positions with a teammate (each keeps their champion) or trade champions. */
+function SwapMenu({ lane, up, rows, onSwap, onClose }: { lane: Lane; up: boolean; rows: SwapRow[]; onSwap: (other: Lane, kind: SwapKind) => void; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.parentElement?.contains(e.target as Node)) onClose()
+    }
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [onClose])
+  return (
+    <div ref={ref} className={`cs-swap-menu ${up ? 'up' : ''}`} role="dialog" aria-label={`Swap ${LANE_LABEL[lane]}`}>
+      <div className="cs-swap-head">
+        <span>Swap for…</span>
+        <button className="cs-swap-close" onClick={onClose} aria-label="Close">✕</button>
+      </div>
+      <div className="cs-swap-group">Position</div>
+      {rows.map((r) => (
+        <button key={`p-${r.lane}`} className="cs-swap-option" onClick={() => onSwap(r.lane, 'position')}>
+          <span className="cs-swap-icon lane"><LaneIcon lane={r.lane} size={26} /></span>
+          <span className="cs-swap-text">
+            <strong>{ROW_LANE_LABEL[r.lane]}</strong>
+            <span>with {r.player?.name ?? 'empty lane'}</span>
+          </span>
+        </button>
+      ))}
+      <div className="cs-swap-group">Champion</div>
+      {rows.map((r) => (
+        <button key={`c-${r.lane}`} className="cs-swap-option" onClick={() => onSwap(r.lane, 'champion')} disabled={!r.locked}>
+          <span className="cs-swap-icon"><ChampionIcon champion={r.locked} size={34} /></span>
+          <span className="cs-swap-text">
+            <strong>{r.locked?.name ?? '—'}</strong>
+            <span>from {r.player?.name ?? ROW_LANE_LABEL[r.lane]}</span>
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function ChampionDetail({ champion: c, hints }: { champion: Champion | undefined; hints?: PoolHint[] }) {
-  if (!c) return <div className="cs-detail muted">Select a champion to see its stats. Double-click to lock in.</div>
+  if (!c) return <div className="cs-detail muted">Select a champion to see its stats.</div>
   return (
     <div className="cs-detail">
       <ChampionIcon champion={c} size={56} className="cs-detail-icon" />

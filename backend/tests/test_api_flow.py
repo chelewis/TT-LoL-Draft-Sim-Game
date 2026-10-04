@@ -46,6 +46,8 @@ def test_full_game(alice, bob, default_team_ids):
     blue, red = draft["blue_picks"], draft["red_picks"]
     bad = alice.put(f"/games/{gid}/lineup", {"assignments": [{"lane": "TOP", "champion_id": red[0]}]})
     assert bad.status_code == 400
+    # the draft leaves each side a full lineup in pick order; save a partial one to test the check
+    assert alice.put(f"/games/{gid}/lineup", {"assignments": [{"lane": "TOP", "champion_id": blue[0]}]}).status_code == 200
     assert alice.post(f"/games/{gid}/lineup/ready").status_code == 400   # incomplete
     dup = alice.put(f"/games/{gid}/lineup", {"assignments": [
         {"lane": "TOP", "champion_id": blue[0]}, {"lane": "MID", "champion_id": blue[0]}]})
@@ -58,7 +60,9 @@ def test_full_game(alice, bob, default_team_ids):
     assert len(preview) == 5 and {p["tier"] for p in preview} <= {"BEST", "COMFORT", "FAMILIAR", "VULNERABLE"}
 
     # opponent's lineup is hidden until the end
-    assert bob.get(f"/games/{gid}/state").json()["lineup"]["yours"] == {}
+    bob_view = bob.get(f"/games/{gid}/state").json()["lineup"]
+    assert bob_view["yours"] == dict(zip(LANES, red))   # his own default lineup (pick order), not Alice's
+    assert "opponent" not in bob_view and set(bob_view["players"]) == {"RED"}
     assert alice.post(f"/games/{gid}/lineup/ready").status_code == 200
     assert bob.get(f"/games/{gid}/state").json()["status"] == "LANE_ASSIGNMENT"
     assert bob.get(f"/games/{gid}/result").status_code == 409

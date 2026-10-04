@@ -183,7 +183,14 @@ export interface GameState {
   players: { blue: GameUser | null; red: GameUser | null }
   teams: { BLUE: Team | null; RED: Team | null }
   draft: DraftView | null
-  lineup: { yours: Record<string, number>; opponent?: Record<string, number>; blue?: Record<string, number>; red?: Record<string, number> } | null
+  lineup: {
+    yours: Record<string, number>
+    opponent?: Record<string, number>
+    blue?: Record<string, number>
+    red?: Record<string, number>
+    /** lane -> player id for each side this viewer may see (a position swap moves players off their roster lane) */
+    players?: Partial<Record<Side, Record<string, number>>>
+  } | null
   result_available: boolean
 }
 

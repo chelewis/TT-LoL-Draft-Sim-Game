@@ -36,6 +36,7 @@ class DraftActionIn(BaseModel):
 class LaneAssignment(BaseModel):
     lane: str
     champion_id: int
+    player_id: int | None = None   # who plays the lane; defaults to the roster player for that lane
 
 
 class LineupIn(BaseModel):
