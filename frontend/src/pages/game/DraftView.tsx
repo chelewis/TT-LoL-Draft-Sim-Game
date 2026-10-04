@@ -126,7 +126,7 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
         </header>
 
         <div className="cs-body">
-          <PickColumn side="BLUE" game={game} byId={byId} preview={preview} me={me} solo={solo} />
+          <PickColumn side="BLUE" game={game} byId={byId} preview={preview} me={me} solo={solo} seconds={draft.timers_enabled ? seconds : null} />
 
           <section className="cs-center" aria-label="Champions">
             <div className="cs-filters">
@@ -182,7 +182,7 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
             </div>
           </section>
 
-          <PickColumn side="RED" game={game} byId={byId} preview={preview} me={me} solo={solo} />
+          <PickColumn side="RED" game={game} byId={byId} preview={preview} me={me} solo={solo} seconds={draft.timers_enabled ? seconds : null} />
         </div>
 
         <footer className="cs-footer">
@@ -267,43 +267,49 @@ function SideHeader({ side, game, byId, preview, me }: SideProps) {
   )
 }
 
-function PickColumn({ side, game, byId, preview, me, solo }: SideProps & { solo: boolean }) {
+/** Lane names as the League client writes them in champ select. */
+const ROW_LANE_LABEL: Record<Lane, string> = { TOP: 'Top', JUNGLE: 'Jungle', MID: 'Mid', BOT: 'Bottom', SUPPORT: 'Support' }
+
+/**
+ * One row per roster lane (lane icon, lane, player), like the client's team list. Picks fill the
+ * rows in pick order; who actually plays each champion is decided on the lineup screen.
+ */
+function PickColumn({ side, game, byId, preview, me, solo, seconds }: SideProps & { solo: boolean; seconds: number | null }) {
   const draft = game.draft!
   const picks = side === 'BLUE' ? draft.blue_picks : draft.red_picks
-  const pickSlots = draft.actions.filter((a) => a === `${side}_PICK`).length
   const now = activeSlot(game, side, 'PICK')
   const roster = game.teams[side]?.roster
   return (
-    <aside className={`cs-picks ${side.toLowerCase()}`} aria-label={`${sideName(side)} picks`}>
-      {Array.from({ length: pickSlots }, (_, i) => {
+    <aside className={`cs-picks ${side.toLowerCase()}`} aria-label={`${sideName(side)} team`}>
+      {LANES.map((lane, i) => {
         const locked = picks[i] !== undefined ? byId.get(picks[i]) : undefined
         const hovering = !locked && i === now && side === me ? preview : undefined
         const champ = locked ?? hovering
+        const active = i === now
         return (
           <div
-            key={i}
-            className={`cs-slot ${locked ? 'locked' : ''} ${hovering ? 'hovering' : ''} ${i === now ? 'now' : ''}`}
+            key={lane}
+            className={`cs-row ${locked ? 'locked' : ''} ${hovering ? 'hovering' : ''} ${active ? 'now' : ''}`}
             style={{ backgroundImage: championArt(champ) }}
           >
-            <div className="cs-slot-text">
-              <span className="cs-slot-label">
-                {i === now ? (solo || side === me ? 'Picking…' : 'Opponent picking…') : `Pick ${i + 1}`}
-              </span>
-              <span className="cs-slot-champ">{champ?.name ?? ''}</span>
+            <div className="cs-row-portrait">
+              {champ ? <ChampionIcon champion={champ} size={60} /> : <LaneIcon lane={lane} size={30} />}
+              {champ && (
+                <span className="cs-row-badge">
+                  <LaneIcon lane={lane} size={12} />
+                </span>
+              )}
             </div>
+            <div className="cs-row-text">
+              {active && <span className="cs-row-status">{solo || side === me ? 'Picking…' : 'Opponent picking…'}</span>}
+              <span className="cs-row-lane">{ROW_LANE_LABEL[lane]}</span>
+              <span className="cs-row-player">{roster?.[lane]?.name ?? 'Empty'}</span>
+              {champ && <span className="cs-row-champ">{champ.name}</span>}
+            </div>
+            {active && seconds !== null && <span className="cs-row-timer">{seconds}</span>}
           </div>
         )
       })}
-      {roster && (
-        <ul className="cs-roster" aria-label={`${sideName(side)} roster`}>
-          {LANES.map((lane) => (
-            <li key={lane} title={LANE_LABEL[lane]}>
-              <LaneIcon lane={lane} size={16} />
-              <span>{roster[lane]?.name ?? '—'}</span>
-            </li>
-          ))}
-        </ul>
-      )}
     </aside>
   )
 }

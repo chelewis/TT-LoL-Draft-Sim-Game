@@ -192,29 +192,36 @@ table.compact th, table.compact td { padding: 4px 6px; font-size: 0.85rem; }
 .cs-step.blue { background: var(--cs-blue); } .cs-step.red { background: var(--cs-red); }
 .cs-step.done { opacity: 0.85; } .cs-step.now { opacity: 1; outline: 1px solid var(--hex-gold-light); outline-offset: 1px; }
 
-.cs-body { display: grid; grid-template-columns: 230px minmax(0, 1fr) 230px; gap: 0; min-height: 520px; }
-.cs-picks { display: flex; flex-direction: column; gap: 6px; padding: 12px; }
+.cs-body { display: grid; grid-template-columns: 260px minmax(0, 1fr) 260px; gap: 0; min-height: 520px; }
+.cs-picks { display: flex; flex-direction: column; padding: 8px 0; }
 .cs-picks.blue { border-right: 1px solid var(--hex-line); }
 .cs-picks.red { border-left: 1px solid var(--hex-line); }
-.cs-slot { position: relative; height: 78px; border: 1px solid var(--hex-line); background-color: var(--hex-panel); background-size: cover; background-position: center 22%; overflow: hidden; display: flex; align-items: flex-end; }
-.cs-slot::before { content: ''; position: absolute; inset: 0; }
-.cs-picks.blue .cs-slot::before { background: linear-gradient(90deg, rgba(1, 10, 19, 0.92) 0%, rgba(1, 10, 19, 0.35) 70%, rgba(58, 141, 222, 0.15)); }
-.cs-picks.red .cs-slot::before { background: linear-gradient(270deg, rgba(1, 10, 19, 0.92) 0%, rgba(1, 10, 19, 0.35) 70%, rgba(232, 64, 87, 0.15)); }
-.cs-picks.blue .cs-slot { border-left: 3px solid rgba(58, 141, 222, 0.4); }
-.cs-picks.red .cs-slot { border-right: 3px solid rgba(232, 64, 87, 0.4); justify-content: flex-end; }
-.cs-picks.blue .cs-slot.locked { border-left-color: var(--cs-blue); }
-.cs-picks.red .cs-slot.locked { border-right-color: var(--cs-red); }
-.cs-slot.now { border-color: var(--hex-gold); box-shadow: 0 0 0 1px var(--hex-gold), inset 0 0 18px rgba(200, 170, 110, 0.35); }
-.cs-slot.hovering { filter: saturate(0.6); }
-.cs-slot-text { position: relative; display: flex; flex-direction: column; padding: 6px 10px; }
-.cs-picks.red .cs-slot-text { text-align: right; }
-.cs-slot-label { font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase; color: #a09b8c; }
-.cs-slot.now .cs-slot-label { color: var(--hex-gold); }
-.cs-slot-champ { font-size: 1rem; font-weight: 700; color: var(--hex-gold-light); text-shadow: 0 1px 3px #000; min-height: 1.2em; }
-.cs-roster { list-style: none; margin: 8px 0 0; padding: 8px 0 0; border-top: 1px solid var(--hex-line); display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: #a09b8c; }
-.cs-roster li { display: flex; align-items: center; gap: 8px; }
-.cs-roster .lane-icon { color: var(--hex-gold); }
-.cs-picks.red .cs-roster li { flex-direction: row-reverse; }
+.cs-row { position: relative; display: flex; align-items: center; gap: 12px; min-height: 88px; padding: 8px 12px; background-color: transparent; background-size: cover; background-position: center 22%; border-bottom: 1px solid rgba(70, 55, 20, 0.6); overflow: hidden; }
+.cs-row::before { content: ''; position: absolute; inset: 0; background: rgba(1, 10, 19, 0.82); }
+.cs-row.locked::before { background: linear-gradient(90deg, rgba(1, 10, 19, 0.92) 30%, rgba(1, 10, 19, 0.55)); }
+.cs-picks.red .cs-row { flex-direction: row-reverse; text-align: right; }
+.cs-picks.red .cs-row.locked::before { background: linear-gradient(270deg, rgba(1, 10, 19, 0.92) 30%, rgba(1, 10, 19, 0.55)); }
+.cs-row > * { position: relative; }
+/* the row that is picking: gold bar on the outer edge, like the client's "declaring intent" row */
+.cs-row.now { background-color: rgba(200, 170, 110, 0.08); }
+.cs-row.now::after { content: ''; position: absolute; top: 0; bottom: 0; width: 4px; background: #f0b232; }
+.cs-picks.blue .cs-row.now::after { left: 0; }
+.cs-picks.red .cs-row.now::after { right: 0; }
+.cs-row-portrait { flex: none; width: 64px; height: 64px; border-radius: 50%; border: 2px solid var(--hex-gold-dark); background: radial-gradient(circle, #1e2328, var(--hex-bg)); display: grid; place-items: center; color: var(--hex-gold); box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.8); }
+.cs-row-portrait .champ-icon { width: 60px !important; height: 60px !important; border-radius: 50%; }
+.cs-row.now .cs-row-portrait { border-color: var(--hex-gold); }
+.cs-row.hovering .cs-row-portrait .champ-icon { opacity: 0.6; }
+.cs-row-badge { position: absolute; bottom: -4px; left: -4px; width: 22px; height: 22px; display: grid; place-items: center; transform: rotate(45deg); background: #0a3a40; border: 1px solid var(--hex-teal); color: var(--hex-gold-light); }
+.cs-row-badge .lane-icon { transform: rotate(-45deg); }
+.cs-picks.red .cs-row-badge { left: auto; right: -4px; }
+.cs-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.cs-row-status { font-size: 0.78rem; color: #f0b232; }
+.cs-row-lane { font-size: 0.95rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--hex-gold-light); }
+.cs-row.now .cs-row-lane { color: #f0b232; }
+.cs-row-player { font-size: 0.82rem; color: #a09b8c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cs-row.now .cs-row-player { color: #f0b232; }
+.cs-row-champ { font-size: 0.82rem; font-weight: 600; color: var(--hex-gold); }
+.cs-row-timer { flex: none; font-size: 1.9rem; font-weight: 300; color: var(--hex-gold-light); font-variant-numeric: tabular-nums; }
 
 .cs-center { display: flex; flex-direction: column; min-width: 0; padding: 12px 14px; gap: 10px; }
 .cs-filters { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -281,7 +288,7 @@ table.compact th, table.compact td { padding: 4px 6px; font-size: 0.85rem; }
   .cs-body { grid-template-columns: 1fr 1fr; }
   .cs-center { grid-column: 1 / -1; grid-row: 2; border-top: 1px solid var(--hex-line); }
   .cs-picks.blue, .cs-picks.red { border: 0; }
-  .cs-slot { height: 56px; }
+  .cs-row { min-height: 72px; }
   .cs-footer { flex-direction: column; align-items: stretch; }
   .cs-lock .cs-lock-in { width: 100%; }
 }
@@ -291,8 +298,15 @@ table.compact th, table.compact td { padding: 4px 6px; font-size: 0.85rem; }
   .cs-bans { gap: 3px; flex-wrap: wrap; }
   .cs-ban { width: 30px; height: 30px; } .cs-ban .champ-icon { width: 30px !important; height: 30px !important; }
   .cs-grid-scroll { height: 60vh; }
+  .cs-row { gap: 8px; padding: 6px 8px; min-height: 60px; }
+  .cs-row-portrait { width: 44px; height: 44px; }
+  .cs-row-portrait .champ-icon { width: 40px !important; height: 40px !important; }
+  .cs-row-portrait .lane-icon { width: 22px; height: 22px; }
+  .cs-row-badge { width: 18px; height: 18px; }
+  .cs-row-lane { font-size: 0.78rem; letter-spacing: 0.06em; }
+  .cs-row-player, .cs-row-champ, .cs-row-status { font-size: 0.72rem; }
+  .cs-row-timer { font-size: 1.3rem; }
   .cs-grid { grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); }
   .cs-champ-frame .champ-icon { width: 56px !important; height: 56px !important; }
   .cs input.cs-search { width: 100%; }
-  .cs-roster { display: none; }
 }
