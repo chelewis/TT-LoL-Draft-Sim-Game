@@ -282,3 +282,13 @@ export interface ComfortPreview {
   tier: string
   modifier: number
 }
+
+/** One line of a game's all-chat. */
+export interface ChatMessage {
+  id: number
+  user_id: number
+  username: string
+  team: Side
+  body: string
+  created_at: string
+}

@@ -67,3 +67,15 @@ class TeamLineup(Base):
     lane: Mapped[str] = mapped_column(String(10))
     champion_id: Mapped[int] = mapped_column(ForeignKey("champions.id"))
     player_id: Mapped[int] = mapped_column(Integer)
+
+
+class ChatMessage(Base):
+    """All-chat between the two players of a game."""
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    team: Mapped[str] = mapped_column(String(4))
+    body: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

@@ -42,3 +42,7 @@ class LaneAssignment(BaseModel):
 class LineupIn(BaseModel):
     assignments: list[LaneAssignment]
     side: str | None = None        # required in single player
+
+
+class ChatIn(BaseModel):
+    text: str = Field(max_length=1000)   # trimmed and checked against the real limit by the service

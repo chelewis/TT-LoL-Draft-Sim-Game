@@ -5,6 +5,7 @@ import type { Champion, GameState, HiddenPlayer, Lane, Player, Side } from '../.
 import { LANES } from '../../api/types'
 import { ChampionIcon, LaneIcon, championArt } from '../../components/ChampionArt'
 import { ErrorNotice, Pips } from '../../components/common'
+import ChatPanel from '../../components/ChatPanel'
 import TeamCard from '../../components/TeamCard'
 import { useChampions, useCountdown } from '../../hooks/useData'
 import { LANE_LABEL, TIER_LABEL, comfortTier, isHidden, isSolo } from '../../lib/format'
@@ -170,7 +171,7 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
           <SideHeader side="RED" game={game} byId={byId} preview={preview} me={me} />
         </header>
 
-        <div className="cs-body">
+        <div className={`cs-body ${solo ? '' : 'with-chat'}`}>
           <PickColumn
             side="BLUE"
             game={game}
@@ -239,6 +240,8 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
               </div>
             </div>
           </section>
+
+          {!solo && <ChatPanel gameId={game.game_id} myUserId={game.you.user_id} />}
 
           <PickColumn
             side="RED"

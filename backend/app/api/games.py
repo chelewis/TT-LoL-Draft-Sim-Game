@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models import Game, User
-from app.schemas.game import DraftActionIn, LineupIn, ReadyIn
+from app.schemas.game import ChatIn, DraftActionIn, LineupIn, ReadyIn
 from app.services import game_service as svc
 from app.websocket.manager import manager
 
@@ -103,3 +103,18 @@ async def result_events(game_id: int, after: int = 0, limit: int = 200, db: Sess
                         user: User = Depends(get_current_user)):
     game = await _load(db, game_id, user)
     return svc.result_events(db, game, after, max(1, min(limit, 500)))
+
+
+# ------------------------------------------------------------------- chat
+@router.get("/{game_id}/chat")
+async def get_chat(game_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return svc.chat_history(db, await _load(db, game_id, user))
+
+
+@router.post("/{game_id}/chat", status_code=201)
+async def post_chat(game_id: int, body: ChatIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    game = await _load(db, game_id, user)
+    message, events = svc.send_chat(db, game, user, body.text)
+    await manager.publish(events)
+    return message
+
