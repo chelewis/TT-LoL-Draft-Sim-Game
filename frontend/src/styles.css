@@ -342,3 +342,26 @@ table.compact th, table.compact td { padding: 4px 6px; font-size: 0.85rem; }
   .cs-picks.blue .cs-swap-menu { left: 8px; } .cs-picks.red .cs-swap-menu { right: 8px; }
   .cs-swap-menu { width: min(260px, 92vw); }
 }
+
+/* ---------- champ select: all chat (multiplayer) ---------- */
+.cs-body.with-chat { grid-template-areas: "blue center red" "chat center red"; grid-template-rows: auto 1fr; }
+.cs-body.with-chat .cs-picks.blue { grid-area: blue; }
+.cs-body.with-chat .cs-picks.red { grid-area: red; }
+.cs-body.with-chat .cs-center { grid-area: center; }
+.cs-chat { grid-area: chat; display: flex; flex-direction: column; min-height: 170px; border-right: 1px solid var(--hex-line); border-top: 1px solid var(--hex-line); }
+.cs-chat-title { padding: 6px 12px 2px; font-size: 0.68rem; letter-spacing: 0.16em; text-transform: uppercase; color: #a09b8c; }
+.cs-chat-log { flex: 1 1 0; min-height: 90px; overflow-y: auto; list-style: none; margin: 0; padding: 4px 12px; font-size: 0.82rem; line-height: 1.35; overflow-wrap: anywhere; scrollbar-width: thin; scrollbar-color: var(--hex-gold-dark) transparent; }
+.cs-chat-log li { padding: 1px 0; }
+.cs-chat-empty { color: #5b5a56; font-style: italic; }
+.cs-chat-name { font-weight: 700; }
+.cs-chat-name.blue { color: var(--cs-blue); } .cs-chat-name.red { color: var(--cs-red); }
+.cs-chat-body { color: var(--hex-gold-light); }
+.cs-chat-error { padding: 0 12px; font-size: 0.75rem; color: var(--cs-red); }
+.cs-chat-form { padding: 8px 12px 10px; }
+.cs .cs-chat-form input { width: 100%; min-height: 32px; padding: 4px 10px; background: var(--hex-bg); border: 1px solid var(--hex-line); border-radius: 0; color: var(--hex-gold-light); }
+.cs .cs-chat-form input:focus { border-color: var(--hex-gold); outline: none; }
+@media (max-width: 1000px) {
+  .cs-body.with-chat { grid-template-areas: "blue red" "center center" "chat chat"; grid-template-rows: auto auto auto; }
+  .cs-chat { border-right: 0; }
+  .cs-chat-log { flex: none; height: 140px; }
+}

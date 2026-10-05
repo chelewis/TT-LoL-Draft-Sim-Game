@@ -22,7 +22,7 @@ from app.game.config import DRAFT_CONFIG, GAME_CONFIG, LANES, SIMULATION_CONFIG,
 from app.game.draft_engine import DraftError, DraftState, new_draft, rebuild_draft
 from app.game.models import CoachSpec, PlayerSpec, TeamSetup
 from app.game.simulation_engine import simulate_match
-from app.models import (Champion, DraftActionRow, Game, GameTeamSnapshot, Lobby, MatchEventRow, MatchResultRow,
+from app.models import (ChatMessage, Champion, DraftActionRow, Game, GameTeamSnapshot, Lobby, MatchEventRow, MatchResultRow,
                         Team, TeamLineup, User)
 from app.services import team_management_service as teams
 from app.services.analytics import track
@@ -696,3 +696,44 @@ def lobby_view(db: Session, game: Game, viewer: User) -> dict:
     return {"id": lobby.id, "code": lobby.code, "game_id": game.id, "status": game.status,
             "settings": _settings_view(game), "expires_at": iso(lobby.expires_at),
             "created_by": lobby.created_by, "you": side_of(game, viewer.id)}
+
+
+# ------------------------------------------------------------------- chat
+CHAT_MAX_LENGTH = 200
+CHAT_HISTORY = 100
+CHAT_BURST = (5, timedelta(seconds=10))   # at most 5 messages per 10 seconds per player
+
+
+def _chat_view(msg: ChatMessage, username: str) -> dict:
+    return {"id": msg.id, "user_id": msg.user_id, "username": username, "team": msg.team,
+            "body": msg.body, "created_at": iso(msg.created_at)}
+
+
+def chat_history(db: Session, game: Game) -> list[dict]:
+    """The latest messages of a game's all-chat, oldest first."""
+    rows = db.execute(select(ChatMessage, User.username).join(User, User.id == ChatMessage.user_id)
+                      .where(ChatMessage.game_id == game.id)
+                      .order_by(ChatMessage.id.desc()).limit(CHAT_HISTORY)).all()
+    return [_chat_view(m, name) for m, name in reversed(rows)]
+
+
+def send_chat(db: Session, game: Game, user: User, text: str) -> tuple[dict, Events]:
+    """Post to the game's all-chat; both players see it. Plain text only (the client never renders HTML)."""
+    body = " ".join(text.split())          # collapse newlines and runs of spaces
+    if not body:
+        raise bad_request("Type a message first.")
+    if len(body) > CHAT_MAX_LENGTH:
+        raise bad_request(f"Messages are limited to {CHAT_MAX_LENGTH} characters.")
+    if game.status == "CANCELLED":
+        raise conflict("This game was cancelled.")
+    limit, window = CHAT_BURST
+    recent = db.scalars(select(ChatMessage.id).where(ChatMessage.game_id == game.id, ChatMessage.user_id == user.id,
+                                                     ChatMessage.created_at > utcnow() - window)).all()
+    if len(recent) >= limit:
+        raise bad_request("Slow down: you're sending messages too fast.")
+    msg = ChatMessage(game_id=game.id, user_id=user.id, team=side_of(game, user.id), body=body, created_at=utcnow())
+    db.add(msg)
+    db.commit()
+    view = _chat_view(msg, user.username)
+    return view, [_event(game, "CHAT_MESSAGE", message=view)]
+

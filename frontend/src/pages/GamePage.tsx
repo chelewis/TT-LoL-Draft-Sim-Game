@@ -2,9 +2,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
-import type { GameState } from '../api/types'
+import type { ChatMessage, GameState } from '../api/types'
 import { ErrorNotice, Loading } from '../components/common'
-import { useGameSocket } from '../hooks/useGameSocket'
+import { useGameSocket, type SocketEvent } from '../hooks/useGameSocket'
+import { addChatMessage } from '../hooks/useChat'
 import SideBanner from '../components/SideBanner'
 import DraftView from './game/DraftView'
 import LobbyView from './game/LobbyView'
@@ -27,7 +28,16 @@ export default function GamePage() {
     qc.invalidateQueries({ queryKey: ['game', gameId] })
   }, [qc, gameId])
 
-  const connected = useGameSocket(gameId, refresh)
+  // chat messages arrive whole over the socket; everything else means "refetch the game state"
+  const onEvent = useCallback(
+    (event: SocketEvent) => {
+      if (event.type === 'CHAT_MESSAGE') addChatMessage(qc, gameId, event.message as ChatMessage)
+      else refresh()
+    },
+    [qc, gameId, refresh],
+  )
+
+  const connected = useGameSocket(gameId, onEvent)
 
   if (isLoading) return <Loading label="Loading game…" />
   if (error || !game) {
