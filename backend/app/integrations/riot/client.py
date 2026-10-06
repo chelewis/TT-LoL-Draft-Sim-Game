@@ -88,6 +88,13 @@ class RiotClient:
         return self._get(f"https://{platform.lower()}.api.riotgames.com/lol/league/v4/entries/by-puuid/"
                          f"{quote(puuid, safe='')}")
 
+    def league_entries_page(self, platform: str, tier: str, division: str, page: int = 1,
+                            queue: str = "RANKED_SOLO_5x5") -> list[dict]:
+        """One page of the players in a tier and division (Iron to Diamond). An empty list means no more pages."""
+        return self._get(f"https://{platform.lower()}.api.riotgames.com/lol/league/v4/entries/"
+                         f"{quote(queue, safe='')}/{quote(tier, safe='')}/{quote(division, safe='')}",
+                         params={"page": page})
+
     def ddragon_json(self, url: str) -> Any:
         """Data Dragon is a static CDN: no key and no rate limit."""
         try:

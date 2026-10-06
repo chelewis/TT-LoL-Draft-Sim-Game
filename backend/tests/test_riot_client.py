@@ -33,6 +33,9 @@ def test_routing_and_key_header():
     assert seen[1].url.host == "na1.api.riotgames.com"
     assert seen[2].url.host == "euw1.api.riotgames.com"             # rank is per platform, not per cluster
     assert seen[2].url.path == "/lol/league/v4/entries/by-puuid/p"
+    c.league_entries_page("KR", "EMERALD", "I", page=3)
+    assert seen[3].url.host == "kr.api.riotgames.com"
+    assert seen[3].url.path == "/lol/league/v4/entries/RANKED_SOLO_5x5/EMERALD/I" and seen[3].url.params["page"] == "3"
 
 
 @pytest.mark.parametrize("status,error", [(404, RiotNotFound), (401, RiotAuthError), (403, RiotAuthError),

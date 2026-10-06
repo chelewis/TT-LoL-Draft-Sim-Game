@@ -50,6 +50,9 @@ desktop.ini
 .idea/
 *.swp
 
+# ---- regenerable data caches (sampled Riot matches) ----
+Data/cache/
+
 # ---- Claude Code local settings and scratch files ----
 .claude/settings.local.json
 scratch*/
