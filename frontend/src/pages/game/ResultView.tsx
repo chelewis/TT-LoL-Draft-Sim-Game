@@ -5,6 +5,7 @@ import { api } from '../../api/client'
 import type { GameState, Lane, MatchEvent, MatchResult, ResultPlayer, Side } from '../../api/types'
 import { LANES } from '../../api/types'
 import { ChampionTag, ErrorNotice, Loading } from '../../components/common'
+import MatchMap from '../../components/MatchMap'
 import { OverBudgetBadge } from '../../components/TeamCard'
 import { useChampionMap } from '../../hooks/useData'
 import { LANE_LABEL, TIER_LABEL, formatDuration, isSolo, matchupText, titleCase } from '../../lib/format'
@@ -18,6 +19,7 @@ export default function ResultView({ game }: { game: GameState }) {
     queryFn: () => api<{ events: MatchEvent[] }>(`/games/${game.game_id}/result/events?limit=500`),
   })
   const [showLog, setShowLog] = useState(false)
+  const [showMap, setShowMap] = useState(true)
 
   if (result.isLoading) return <Loading label="Loading results…" />
   if (result.error || !result.data) return <ErrorNotice error={result.error ?? new Error('No result.')} />
@@ -50,6 +52,16 @@ export default function ResultView({ game }: { game: GameState }) {
         {summarize(r).map((line) => (
           <p key={line}>{line}</p>
         ))}
+      </div>
+
+      <div className="card stack">
+        <div className="row between wrap">
+          <h2>Final map</h2>
+          <button className="ghost" aria-expanded={showMap} onClick={() => setShowMap(!showMap)}>{showMap ? 'Hide' : 'Show'}</button>
+        </div>
+        {!showMap ? null : events.isLoading ? <Loading label="Loading the map…" />
+          : events.error || !events.data ? <ErrorNotice error={events.error ?? new Error('The map could not be loaded.')} />
+            : <MatchMap result={r} events={events.data.events} champions={champions} names={names} />}
       </div>
 
       <div className="grid two">
