@@ -1,4 +1,4 @@
-import type { Lane, Player, Team, HiddenPlayer } from '../api/types'
+import type { Lane, Player, RiotRank, Team, HiddenPlayer } from '../api/types'
 
 export const LANE_LABEL: Record<Lane, string> = {
   TOP: 'Top',
@@ -47,6 +47,13 @@ export function riotSourceLabel(source: string | null | undefined): string {
 /** Short tag for badges, only for non-solo sources (empty for solo). */
 export function riotSourceTag(source: string | null | undefined): string {
   return isSoloSource(source) ? '' : (RIOT_SOURCE_SHORT[source as string] ?? 'Other')
+}
+
+/** "Emerald II", "Master" or "Unranked"; with `withLp`, "Emerald II · 45 LP". */
+export function rankLabel(rank: Pick<RiotRank, 'tier' | 'division' | 'lp'> | null | undefined, withLp = false): string {
+  if (!rank?.tier) return 'Unranked'
+  const name = [titleCase(rank.tier), rank.division].filter(Boolean).join(' ')
+  return withLp && rank.lp != null ? `${name} · ${rank.lp} LP` : name
 }
 
 /** Show a metric value the way people read it: percentages as 47%, everything else with 2 decimals. */

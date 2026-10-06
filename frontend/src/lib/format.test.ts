@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { comfortTier, draftRules, isSolo, formatDuration, formatMetric, isSoloSource, matchupText, overBudgetNotice, remainingSeconds, riotSourceLabel, riotSourceTag } from './format'
+import { comfortTier, draftRules, isSolo, formatDuration, formatMetric, isSoloSource, matchupText, overBudgetNotice, rankLabel, remainingSeconds, riotSourceLabel, riotSourceTag } from './format'
 
 describe('comfortTier', () => {
   const pool = [10, 20, 30, 40, 50]
@@ -38,6 +38,19 @@ describe('riot data source', () => {
     expect(riotSourceTag('SOLO')).toBe('')
     expect(riotSourceTag('FLEX')).toBe('Flex')
     expect(riotSourceTag('NORMAL')).toBe('Normals')
+  })
+})
+
+describe('rankLabel', () => {
+  it('names the tier and division, with LP on request', () => {
+    expect(rankLabel({ tier: 'EMERALD', division: 'II', lp: 45 })).toBe('Emerald II')
+    expect(rankLabel({ tier: 'EMERALD', division: 'II', lp: 45 }, true)).toBe('Emerald II · 45 LP')
+    expect(rankLabel({ tier: 'GRANDMASTER', division: null, lp: 210 }, true)).toBe('Grandmaster · 210 LP')
+  })
+  it('says unranked when there is no tier', () => {
+    expect(rankLabel(null)).toBe('Unranked')
+    expect(rankLabel(undefined, true)).toBe('Unranked')
+    expect(rankLabel({ tier: null, division: null, lp: null })).toBe('Unranked')
   })
 })
 

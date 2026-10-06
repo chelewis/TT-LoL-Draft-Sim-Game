@@ -34,6 +34,16 @@ GAME_CONFIG: dict[str, Any] = {
 
 MANAGEMENT_CONFIG: dict[str, Any] = {
     "player_stat_budget": 32,        # soft ceiling for custom players
+    # ceiling for players imported from a ranked Riot account, by tier; anyone else gets player_stat_budget
+    "rank_stat_budgets": {
+        "IRON": 28, "BRONZE": 28, "SILVER": 32, "GOLD": 32, "PLATINUM": 32, "EMERALD": 36, "DIAMOND": 36,
+        "MASTER": 40, "GRANDMASTER": 40, "CHALLENGER": 48,
+    },
+    # minimum stat total an import from a ranked Riot account is raised to, by tier; anyone else has no floor
+    "rank_stat_floors": {
+        "IRON": 10, "BRONZE": 10, "SILVER": 28, "GOLD": 28, "PLATINUM": 28, "EMERALD": 28, "DIAMOND": 28,
+        "MASTER": 36, "GRANDMASTER": 36, "CHALLENGER": 40,
+    },
     "enforce_budget": False,         # True would turn the ceiling into a hard limit
     "system_players_exempt": True,
     "coach_stat_budget": 12,

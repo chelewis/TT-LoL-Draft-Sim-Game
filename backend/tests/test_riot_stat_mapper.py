@@ -40,6 +40,29 @@ def test_fit_to_budget_trims_to_exactly_within_budget():
         assert changed and sum(fitted.values()) <= 32 and min(fitted.values()) >= 1
 
 
+def test_raise_to_floor_scales_up_to_exactly_the_floor():
+    stats = {"aggr": 2, "aware": 3, "pos": 1, "dmg": 4, "cs": 5}             # 15
+    assert stat_mapper.raise_to_floor(stats, 15) == (stats, False)
+    assert stat_mapper.raise_to_floor(stats, 0) == (stats, False)
+    for floor in (16, 28, 36, 40, 50):
+        raised, changed = stat_mapper.raise_to_floor(stats, floor)
+        assert changed and sum(raised.values()) == floor and max(raised.values()) <= 10
+        assert all(raised[k] >= stats[k] for k in stats)                     # nothing goes down
+        assert sorted(raised, key=raised.get) == sorted(stats, key=stats.get) or floor == 50   # order of strengths kept
+    # a stat already near 10 cannot absorb its share, so the others take it
+    lopsided, _ = stat_mapper.raise_to_floor({"aggr": 9, "aware": 1, "pos": 1, "dmg": 1, "cs": 1}, 28)
+    assert sum(lopsided.values()) == 28 and lopsided["aggr"] == 10
+
+
+def test_floor_applies_to_weak_games_and_not_to_strong_ones():
+    weak = stat_mapper.analyse(games(12, mine=WEAK), "me", 40, floor=36)
+    assert weak.raised_to_floor is True and sum(weak.stats.values()) == 36 and weak.floor == 36
+    assert weak.total_before_fit < 36                                        # what the games alone were worth
+    strong = stat_mapper.analyse(games(12, mine=STRONG), "me", 40, floor=36)
+    assert strong.raised_to_floor is False and strong.fitted_to_budget is True
+    assert stat_mapper.analyse(games(12, mine=WEAK), "me", 40).raised_to_floor is False      # no floor by default
+
+
 def test_role_is_the_most_played_lane_and_can_be_overridden():
     matches = games(8, lane="JUNGLE") + games(4, lane="MIDDLE")
     assert stat_mapper.analyse(matches, "me", BUDGET).lane == "JUNGLE"
@@ -90,6 +113,26 @@ def test_pool_prefers_games_played_then_mastery_and_skips_unknown_champions():
         a, [{"championId": 62, "championPoints": 5}, {"championId": 266, "championPoints": 9}], mapping.get)
     assert pool == [1, 2, 3]               # no duplicates, ordered by games then mastery
     assert unmapped == [9999]
+
+
+def entry(queue_type, tier, division="II", lp=45, wins=60, losses=40):
+    return {"queueType": queue_type, "tier": tier, "rank": division, "leaguePoints": lp, "wins": wins, "losses": losses}
+
+
+def test_rank_comes_from_the_queue_the_stats_came_from():
+    entries = [entry("RANKED_SOLO_5x5", "EMERALD"), entry("RANKED_FLEX_SR", "GOLD", "IV")]
+    solo = stat_mapper.pick_rank(entries, "SOLO")
+    assert solo == {"queue": "SOLO", "tier": "EMERALD", "division": "II", "lp": 45, "wins": 60, "losses": 40}
+    assert stat_mapper.pick_rank(entries, "FLEX")["tier"] == "GOLD"
+    assert stat_mapper.pick_rank(entries, "NORMAL")["queue"] == "SOLO"          # normals borrow solo rank first
+    assert stat_mapper.pick_rank(entries[1:], "NORMAL")["queue"] == "FLEX"      # then flex
+    assert stat_mapper.pick_rank(entries[1:], "SOLO") is None                   # a flex rank never stands in for solo
+    assert stat_mapper.pick_rank([], "SOLO") is None
+    assert stat_mapper.pick_rank([entry("RANKED_SOLO_5x5", "WOOD")], "SOLO") is None      # unknown tier
+
+
+def test_apex_tiers_have_no_division():
+    assert stat_mapper.pick_rank([entry("RANKED_SOLO_5x5", "CHALLENGER", "I", lp=900)], "SOLO")["division"] is None
 
 
 def test_breakdown_explains_every_stat_and_adds_up():

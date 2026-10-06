@@ -6,7 +6,7 @@ from app.core.config import settings
 from app.main import app
 from app.services import riot_import_service
 from tests.conftest import Api
-from tests.riot_fixtures import STRONG, FakeRiotClient
+from tests.riot_fixtures import STRONG, WEAK, FakeRiotClient
 
 BODY = {"riot_id": "Faker#KR1", "region": "KR"}
 
@@ -92,6 +92,99 @@ def test_saving_a_preview_creates_a_linked_player(alice, riot):
     # a hand-made player has no link
     manual = alice.post("/players", {**preview["player"], "name": "Manual"}).json()
     assert manual["riot"] is None
+
+
+def test_preview_reports_rank_and_saving_keeps_it(alice, riot):
+    riot.ranks = {"SOLO": "EMERALD", "FLEX": "GOLD"}
+    preview = alice.post("/riot/preview", BODY).json()
+    assert preview["analysis"]["rank"] == {"queue": "SOLO", "tier": "EMERALD", "division": "II", "lp": 45,
+                                           "wins": 60, "losses": 40, "budget": 36, "floor": 28}
+    assert preview["analysis"]["fit"]["budget"] == 36
+    assert "league" in riot.calls
+    # the browser cannot claim a better rank: it comes from the signed token only
+    saved = alice.post("/players", {**preview["player"], "riot_ref": preview["riot_ref"],
+                                    "riot_rank_tier": "CHALLENGER"}).json()
+    assert saved["riot"]["rank"] == {"queue": "SOLO", "tier": "EMERALD", "division": "II", "lp": 45,
+                                     "wins": 60, "losses": 40}
+    assert saved["stat_budget"] == 36
+    assert alice.get(f"/players/{saved['id']}").json()["riot"]["rank"]["tier"] == "EMERALD"
+
+
+def preview_at(alice, riot, rank):
+    riot.ranks = {"SOLO": rank, "FLEX": None}
+    riot_import_service.reset_state()
+    return alice.post("/riot/preview", BODY).json()
+
+
+def stat_total(player):
+    return sum(player[s] for s in ("aggr", "aware", "pos", "dmg", "cs"))
+
+
+def test_stat_ceiling_rises_with_rank(alice, riot):
+    totals = []
+    for rank, cap in (("BRONZE", 28), ("GOLD", 32), ("DIAMOND", 36), ("MASTER", 40), ("CHALLENGER", 48)):
+        data = preview_at(alice, riot, rank)             # the same dominant games every time
+        assert data["analysis"]["rank"]["budget"] == data["analysis"]["fit"]["budget"] == cap
+        assert stat_total(data["player"]) <= cap
+        totals.append(stat_total(data["player"]))
+    assert totals == sorted(totals) and len(set(totals)) == len(totals)         # strictly higher at each step
+    assert any(f"{48}-point ceiling for Challenger" in n for n in data["analysis"]["notes"])
+
+
+def test_weak_games_are_raised_to_the_floor_for_the_rank(alice, riot):
+    riot.mine = WEAK
+    unranked = preview_at(alice, riot, None)
+    raw_total = stat_total(unranked["player"])
+    assert unranked["analysis"]["raised_to_floor"] is False and raw_total < 10       # no rank, no floor
+    for rank, floor in (("BRONZE", 10), ("GOLD", 28), ("DIAMOND", 28), ("MASTER", 36), ("CHALLENGER", 40)):
+        data = preview_at(alice, riot, rank)
+        assert data["analysis"]["rank"]["floor"] == data["analysis"]["fit"]["floor"] == floor
+        assert data["analysis"]["raised_to_floor"] is True and stat_total(data["player"]) == floor
+        assert all(1 <= data["player"][s] <= 10 for s in ("aggr", "aware", "pos", "dmg", "cs"))
+        assert data["analysis"]["fit"]["total_before"] == raw_total            # the tooltip shows where they started
+        assert any(f"{floor}-point floor" in n for n in data["analysis"]["notes"])
+
+
+def test_stats_between_floor_and_ceiling_are_left_alone(alice, riot):
+    riot.mine = None                                     # an ordinary stat line
+    gold, diamond = preview_at(alice, riot, "GOLD"), preview_at(alice, riot, "DIAMOND")
+    assert 28 <= stat_total(gold["player"]) <= 32
+    assert gold["analysis"]["fitted_to_budget"] is False and gold["analysis"]["raised_to_floor"] is False
+    assert gold["player"] == diamond["player"]
+
+
+def test_saved_players_are_flagged_against_their_own_ceiling(alice, riot):
+    high = preview_at(alice, riot, "CHALLENGER")
+    saved = save_from_preview(alice, high).json()
+    assert saved["stat_total"] > 32 and saved["stat_budget"] == 48 and saved["over_budget_by"] == 0
+    low = preview_at(alice, riot, "BRONZE")
+    edited = save_from_preview(alice, low, name="Padded", aggr=7, aware=7, pos=6, dmg=6, cs=6).json()    # 32
+    assert edited["stat_budget"] == 28 and edited["over_budget_by"] == 4
+    # a hand-made player with the same stats keeps the standard ceiling
+    manual = alice.post("/players", {**low["player"], "name": "Manual", "aggr": 7, "aware": 7, "pos": 6, "dmg": 6,
+                                     "cs": 6}).json()
+    assert manual["stat_budget"] == 32 and manual["over_budget_by"] == 0
+
+
+def test_unranked_account_gets_the_standard_ceiling_and_says_so(alice, riot):
+    riot.ranks = {"SOLO": None, "FLEX": "DIAMOND"}          # solo stats never borrow the flex rank
+    preview = alice.post("/riot/preview", BODY).json()
+    rank = preview["analysis"]["rank"]
+    assert rank["tier"] is None and rank["budget"] == 32 and rank["floor"] == 0
+    assert any("No rank was found" in n for n in preview["analysis"]["notes"])
+    saved = save_from_preview(alice, preview).json()
+    assert saved["riot"]["rank"] is None and saved["stat_budget"] == 32
+
+
+def test_refreshing_updates_the_saved_rank(alice, riot):
+    riot.ranks = {"SOLO": "GOLD", "FLEX": None}
+    saved = save_from_preview(alice, alice.post("/riot/preview", BODY).json()).json()
+    assert saved["riot"]["rank"]["tier"] == "GOLD"
+    riot.ranks = {"SOLO": None, "FLEX": None}               # the season reset: no rank any more
+    riot_import_service.reset_state()
+    refreshed = alice.post(f"/players/{saved['id']}/riot-refresh").json()
+    updated = alice.put(f"/players/{saved['id']}", {**refreshed["player"], "riot_ref": refreshed["riot_ref"]}).json()
+    assert updated["riot"]["rank"] is None
 
 
 def test_user_can_edit_the_preview_before_saving(alice, riot):

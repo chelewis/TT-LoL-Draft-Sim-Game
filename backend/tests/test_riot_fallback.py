@@ -75,6 +75,15 @@ def test_falls_back_to_normals_and_skips_aram(alice, setup):
     assert "ranked solo (2 usable games)" in note and "ranked flex (3 usable games)" in note and "normal games" in note
 
 
+def test_rank_follows_the_queue_that_was_used(alice, setup):
+    setup(games=0, flex=12, rank={"SOLO": "DIAMOND", "FLEX": "SILVER"})
+    rank = alice.post("/riot/preview", BODY).json()["analysis"]["rank"]
+    assert rank["tier"] == "SILVER" and rank["budget"] == 32              # not the Diamond solo rank and its 36
+    setup(games=0, flex=0, normal=12, rank={"SOLO": None, "FLEX": "EMERALD"})
+    rank = alice.post("/riot/preview", BODY).json()["analysis"]["rank"]
+    assert rank["tier"] == "EMERALD" and rank["queue"] == "FLEX" and rank["budget"] == 36   # normals borrow whatever rank exists
+
+
 def test_remakes_do_not_count_towards_the_minimum(alice, setup):
     setup(games=12, flex=15, remakes={"420": 4})          # 12 solo ids but only 8 real games
     data = alice.post("/riot/preview", BODY).json()

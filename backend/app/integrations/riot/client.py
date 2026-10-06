@@ -83,6 +83,11 @@ class RiotClient:
         return self._get(f"https://{platform.lower()}.api.riotgames.com/lol/champion-mastery/v4/champion-masteries/"
                          f"by-puuid/{quote(puuid, safe='')}/top", params={"count": count})
 
+    def league_entries(self, platform: str, puuid: str) -> list[dict]:
+        """Current ranked standing, one entry per ranked queue. An unranked account gives an empty list."""
+        return self._get(f"https://{platform.lower()}.api.riotgames.com/lol/league/v4/entries/by-puuid/"
+                         f"{quote(puuid, safe='')}")
+
     def ddragon_json(self, url: str) -> Any:
         """Data Dragon is a static CDN: no key and no rate limit."""
         try:

@@ -282,6 +282,8 @@ Logged-in users manage their own content outside of any lobby. This replaces fil
 
 - Each player stat is an integer 1–10.
 - **Soft stat ceiling:** `aggr + aware + pos + dmg + cs` has a soft ceiling of `player_stat_budget` (default **32**). Users **may exceed it** on custom players (each stat is still capped at 10, so the absolute maximum is 50); the server does not reject the save. The Player Editor shows the running total and a warning when it goes over. Default (system) players are exempt from the flag even though some total up to 36.
+- **Ceiling by rank:** a player imported from a ranked Riot account uses the ceiling for the rank it had when imported (`rank_stat_budgets`): Iron–Bronze **28**, Silver–Platinum **32**, Emerald–Diamond **36**, Master–Grandmaster **40**, Challenger **48**. Hand-made players and unranked imports use `player_stat_budget`. The rank only sets the ceiling the imported stats are fitted to and flagged against; it never raises stats that are already under it.
+- **Floor by rank:** when a ranked Riot account is imported and its stats total less than the floor for its rank (`rank_stat_floors`), they are scaled up proportionally to exactly the floor: Iron–Bronze **10**, Silver–Diamond **28**, Master–Grandmaster **36**, Challenger **40**. Hand-made players and unranked imports have no floor. The floor only shapes the imported numbers; the user may lower them in the editor and nothing is flagged.
 - **Over-budget flag ("potentially illegal team"):** a team is flagged `over_budget` when any custom player on its roster exceeds the ceiling. The flag is computed by the server (never trusted from the client), stored in the game snapshot (§4.8), and shown as a warning icon plus notice on that team:
   - on the team in My Teams and the Team Editor;
   - in the lobby, on the team card visible to **both** players, with a tooltip listing which players are over budget and by how much;
@@ -641,7 +643,12 @@ SIMULATION_CONFIG = {
     "team_style": {"enabled": True, "primary_bonus": 0.10, "secondary_bonus": 0.05,
                    "scaling_lane_penalty": 0.05, "focus_lane_bonus": 0.08},
     "coach": {"draft_matchup_scale": 0.05, "synergy_scale": 0.02},
-    "management": {"player_stat_budget": 32, "enforce_budget": False, "system_players_exempt": True, "champion_pool_size": 5, "coach_stat_budget": 12, "stat_range": [1, 10],
+    "management": {"player_stat_budget": 32,
+                   "rank_stat_budgets": {"IRON": 28, "BRONZE": 28, "SILVER": 32, "GOLD": 32, "PLATINUM": 32, "EMERALD": 36, "DIAMOND": 36,
+                                         "MASTER": 40, "GRANDMASTER": 40, "CHALLENGER": 48},
+                   "rank_stat_floors": {"IRON": 10, "BRONZE": 10, "SILVER": 28, "GOLD": 28, "PLATINUM": 28, "EMERALD": 28, "DIAMOND": 28,
+                                        "MASTER": 36, "GRANDMASTER": 36, "CHALLENGER": 40},
+                   "enforce_budget": False, "system_players_exempt": True, "champion_pool_size": 5, "coach_stat_budget": 12, "stat_range": [1, 10],
                    "allow_off_role_roster": False,
                    "max_teams_per_user": 20, "max_players_per_user": 100, "max_coaches_per_user": 10},
     "damage_profile_penalty": {"enabled": False}

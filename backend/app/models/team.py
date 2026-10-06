@@ -52,6 +52,13 @@ class Player(Base):
     riot_region: Mapped[str | None] = mapped_column(String(8))
     riot_data_source: Mapped[str | None] = mapped_column(String(8))   # SOLO / FLEX / NORMAL: which queue the stats came from
     riot_games_used: Mapped[int | None] = mapped_column(Integer)
+    # rank at import time, used to scale the imported stats; all null when the account was unranked
+    riot_rank_queue: Mapped[str | None] = mapped_column(String(8))    # SOLO / FLEX: which queue the rank is from
+    riot_rank_tier: Mapped[str | None] = mapped_column(String(12))
+    riot_rank_division: Mapped[str | None] = mapped_column(String(4))
+    riot_rank_lp: Mapped[int | None] = mapped_column(Integer)
+    riot_rank_wins: Mapped[int | None] = mapped_column(Integer)
+    riot_rank_losses: Mapped[int | None] = mapped_column(Integer)
     riot_imported_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

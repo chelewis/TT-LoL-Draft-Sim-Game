@@ -18,23 +18,37 @@ STYLES = ("early", "scaling", "teamfight", "skirmish")
 
 
 # ------------------------------------------------------------------ views
+def stat_budget(rank_tier: str | None, cfg: dict = CFG) -> int:
+    """The soft stat ceiling: set by rank for players imported from a ranked Riot account, the default otherwise."""
+    return cfg["rank_stat_budgets"].get(rank_tier, cfg["player_stat_budget"])
+
+
+def stat_floor(rank_tier: str | None, cfg: dict = CFG) -> int:
+    """The stat total a Riot import of this rank is raised to (0: no floor). Only used when importing."""
+    return cfg["rank_stat_floors"].get(rank_tier, 0)
+
+
 def over_budget_by(player: Player, cfg: dict = CFG) -> int:
     """Points over the soft stat ceiling (0 for default players and within-budget players)."""
     if player.owner_user_id is None and cfg["system_players_exempt"]:
         return 0
-    return max(0, player.stat_total - cfg["player_stat_budget"])
+    return max(0, player.stat_total - stat_budget(player.riot_rank_tier, cfg))
 
 
 def player_view(p: Player) -> dict:
     return {
         "id": p.id, "name": p.name, "role": p.role, "age": p.age, "region": p.region,
         "aggr": p.aggr, "aware": p.aware, "pos": p.pos, "dmg": p.dmg, "cs": p.cs,
-        "pool": p.pool, "stat_total": p.stat_total, "over_budget_by": over_budget_by(p),
+        "pool": p.pool, "stat_total": p.stat_total, "stat_budget": stat_budget(p.riot_rank_tier),
+        "over_budget_by": over_budget_by(p),
         "is_default": p.owner_user_id is None,
         "riot": None if not p.riot_puuid else {
             "game_name": p.riot_game_name, "tag_line": p.riot_tag_line, "region": p.riot_region,
             "imported_at": iso(p.riot_imported_at), "verified": False, "data_source": p.riot_data_source,
-            "games_used": p.riot_games_used, "is_solo_source": p.riot_data_source in (None, "SOLO")},
+            "games_used": p.riot_games_used, "is_solo_source": p.riot_data_source in (None, "SOLO"),
+            "rank": None if not p.riot_rank_tier else {
+                "queue": p.riot_rank_queue, "tier": p.riot_rank_tier, "division": p.riot_rank_division,
+                "lp": p.riot_rank_lp, "wins": p.riot_rank_wins, "losses": p.riot_rank_losses}},
     }
 
 
@@ -113,9 +127,12 @@ def _validate_player(db: Session, body: PlayerIn) -> None:
     known = set(db.scalars(select(Champion.id).where(Champion.id.in_(body.pool), Champion.enabled.is_(True))))
     if known != set(body.pool):
         raise bad_request("The champion pool contains an unknown champion.")
-    total = body.aggr + body.aware + body.pos + body.dmg + body.cs
-    if CFG["enforce_budget"] and total > CFG["player_stat_budget"]:
-        raise bad_request(f"Stats may total at most {CFG['player_stat_budget']}.")
+
+
+def _check_budget(player: Player) -> None:
+    """Hard limit, only when enforce_budget is on. Runs once stats and rank are on the player, before the commit."""
+    if CFG["enforce_budget"] and over_budget_by(player) > 0:
+        raise bad_request(f"Stats may total at most {stat_budget(player.riot_rank_tier)}.")
 
 
 def _apply_riot(player: Player, body: PlayerIn, user_id: int) -> None:
@@ -128,6 +145,10 @@ def _apply_riot(player: Player, body: PlayerIn, user_id: int) -> None:
     player.riot_tag_line, player.riot_region = ref["tag_line"], ref["region"]
     player.riot_imported_at = utcnow()
     player.riot_data_source, player.riot_games_used = ref.get("source"), ref.get("games")
+    rank = ref.get("rank") or {}
+    player.riot_rank_queue, player.riot_rank_tier = rank.get("queue"), rank.get("tier")
+    player.riot_rank_division, player.riot_rank_lp = rank.get("division"), rank.get("lp")
+    player.riot_rank_wins, player.riot_rank_losses = rank.get("wins"), rank.get("losses")
 
 
 def _apply_player(player: Player, body: PlayerIn) -> None:
@@ -142,6 +163,7 @@ def create_player(db: Session, user_id: int, body: PlayerIn) -> Player:
     player = Player(owner_user_id=user_id)
     _apply_player(player, body)
     _apply_riot(player, body, user_id)
+    _check_budget(player)
     db.add(player)
     db.commit()
     return player
@@ -158,6 +180,7 @@ def update_player(db: Session, user_id: int, player_id: int, body: PlayerIn) -> 
     db.flush()
     _apply_player(player, body)
     _apply_riot(player, body, user_id)
+    _check_budget(player)
     db.commit()
     return player
 

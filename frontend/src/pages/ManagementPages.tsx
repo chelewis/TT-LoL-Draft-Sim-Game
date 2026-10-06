@@ -7,7 +7,7 @@ import { LANES, STYLES } from '../api/types'
 import { ErrorNotice, Loading } from '../components/common'
 import { OverBudgetBadge } from '../components/TeamCard'
 import { useChampions, useCoaches, usePlayers, useTeams } from '../hooks/useData'
-import { LANE_LABEL, isHidden, riotSourceLabel, riotSourceTag, titleCase } from '../lib/format'
+import { LANE_LABEL, isHidden, rankLabel, riotSourceLabel, riotSourceTag, titleCase } from '../lib/format'
 import { useRiotStatus } from './RiotImportPage'
 
 interface GameConfig {
@@ -209,6 +209,7 @@ export function PlayersPage() {
   const row = (p: Player) => (
     <tr key={p.id}>
       <td>{p.name} {p.riot && <span className="badge" title="Imported from a Riot account (unverified)">Riot {p.riot.game_name}#{p.riot.tag_line}</span>}
+        {p.riot?.rank && <span className="badge" title={`${riotSourceLabel(p.riot.rank.queue)} rank when imported: ${rankLabel(p.riot.rank, true)}`}>{rankLabel(p.riot.rank)}</span>}
         {p.riot && riotSourceTag(p.riot.data_source) && <span className="badge badge-warn" title={`Stats come from ${riotSourceLabel(p.riot.data_source)} (${p.riot.games_used ?? '?'} games), not solo queue`}>⚠ {riotSourceTag(p.riot.data_source)}</span>} {p.over_budget_by > 0 && <span className="badge badge-warn" title="Above the soft stat ceiling">⚠ +{p.over_budget_by}</span>}</td>
       <td>{LANE_LABEL[p.role]}</td>
       <td>{p.aggr}/{p.aware}/{p.pos}/{p.dmg}/{p.cs}</td>
@@ -257,6 +258,7 @@ export function PlayerEditorPage() {
   const [riotRef, setRiotRef] = useState<string | null>(null)
   const [riotNotes, setRiotNotes] = useState<string[]>([])
   const [riotSource, setRiotSource] = useState<{ queue: string; games: number } | null>(null)
+  const [riotRank, setRiotRank] = useState<RiotPreview['analysis']['rank'] | null>(null)
   const location = useLocation()
   const riotStatus = useRiotStatus()
 
@@ -269,6 +271,7 @@ export function PlayerEditorPage() {
     setRiotRef(draft.riot_ref)
     setRiotNotes(draft.analysis.notes)
     setRiotSource({ queue: draft.analysis.source.queue, games: draft.analysis.source.games })
+    setRiotRank(draft.analysis.rank)
   }
 
   useEffect(() => {
@@ -291,7 +294,9 @@ export function PlayerEditorPage() {
   })
 
   const total = stats.aggr + stats.aware + stats.pos + stats.dmg + stats.cs
-  const budget = config.data?.player_stat_budget ?? 32
+  // the ceiling follows the rank of a Riot import: a draft being reviewed first, then the saved player
+  const rank = riotRank ?? existing.data?.riot?.rank
+  const budget = riotRank?.budget ?? existing.data?.stat_budget ?? config.data?.player_stat_budget ?? 32
   const over = total - budget
   const sorted = useMemo(() => [...(champs.data ?? [])].sort((a, b) => a.name.localeCompare(b.name)), [champs.data])
 
@@ -345,7 +350,7 @@ export function PlayerEditorPage() {
       <div className="card stack">
         <div className="row between wrap">
           <h2>Stats</h2>
-          <span className={`badge ${over > 0 ? 'badge-warn' : 'ok'}`}>Total {total} / {budget}</span>
+          <span className={`badge ${over > 0 ? 'badge-warn' : 'ok'}`} title={rank?.tier ? `The stat ceiling for ${rankLabel(rank)} is ${budget}` : undefined}>Total {total} / {budget}{rank?.tier ? ` (${rankLabel(rank)})` : ''}</span>
         </div>
         <div className="grid stats-inputs">
           {([['aggr', 'Aggression'], ['aware', 'Awareness'], ['pos', 'Positioning'], ['dmg', 'Damage'], ['cs', 'Farming (CS)']] as const).map(([key, label]) => (

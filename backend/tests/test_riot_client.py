@@ -26,10 +26,13 @@ def test_routing_and_key_header():
     c = client(handler)
     c.account_by_riot_id("EUW1", "Some Name", "EUW")
     c.top_mastery("NA1", "p")
+    c.league_entries("EUW1", "p")
     assert seen[0].url.host == "europe.api.riotgames.com"
     assert seen[0].url.raw_path.endswith(b"/by-riot-id/Some%20Name/EUW")
     assert seen[0].headers["X-Riot-Token"] == "test-key"
     assert seen[1].url.host == "na1.api.riotgames.com"
+    assert seen[2].url.host == "euw1.api.riotgames.com"             # rank is per platform, not per cluster
+    assert seen[2].url.path == "/lol/league/v4/entries/by-puuid/p"
 
 
 @pytest.mark.parametrize("status,error", [(404, RiotNotFound), (401, RiotAuthError), (403, RiotAuthError),

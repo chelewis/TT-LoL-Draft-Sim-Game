@@ -84,6 +84,7 @@ def test_soft_stat_ceiling_flags_team_but_allows_it(alice):
     assert len(team["over_budget_players"]) == 5
     assert team["over_budget_players"][0]["over_by"] == 13
     assert team["roster"]["TOP"]["over_budget_by"] == 13
+    assert team["roster"]["TOP"]["stat_budget"] == 32          # hand-made players always get the standard ceiling
 
 
 def test_coach_budget_is_enforced(alice):

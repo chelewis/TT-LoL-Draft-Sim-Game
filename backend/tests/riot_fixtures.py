@@ -42,11 +42,14 @@ class FakeRiotClient:
 
     Game counts per queue: `games` is solo (420), `flex` is 440, `normal` is the `type=normal` list (400/430 games,
     plus `aram` ARAM games mixed in). `remakes` is how many of each queue's newest games are remakes.
+    `rank` is the tier in both ranked queues, a {"SOLO": tier, "FLEX": tier} dict, or None for unranked. The default
+    is Gold, whose stat ceiling is the standard 32.
     """
 
     def __init__(self, games=14, champion_cycle=(103, 266, 84, 12, 32, 34, 62, 9999), mine=None, lane="MIDDLE",
-                 flex=0, normal=0, aram=0, remakes=None):
+                 flex=0, normal=0, aram=0, remakes=None, rank="GOLD"):
         self.calls: list[str] = []
+        self.ranks = rank if isinstance(rank, dict) else {"SOLO": rank, "FLEX": rank}
         self.accounts = {("faker", "kr1"): {"puuid": "puuid-faker", "gameName": "Faker", "tagLine": "KR1"}}
         self.queue_games = {"420": games, "440": flex, "normal": normal}
         self.aram = aram
@@ -98,6 +101,12 @@ class FakeRiotClient:
     def top_mastery(self, platform, puuid, count=10):
         self._log("mastery")
         return [{"championId": 266, "championPoints": 900000}, {"championId": 62, "championPoints": 500000}]
+
+    def league_entries(self, platform, puuid):
+        self._log("league")
+        types = {"SOLO": "RANKED_SOLO_5x5", "FLEX": "RANKED_FLEX_SR"}
+        return [{"queueType": types[q], "tier": tier, "rank": "II", "leaguePoints": 45, "wins": 60, "losses": 40}
+                for q, tier in self.ranks.items() if tier]
 
     def ddragon_json(self, url):
         if url.endswith("versions.json"):

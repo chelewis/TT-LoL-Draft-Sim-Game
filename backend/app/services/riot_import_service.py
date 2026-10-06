@@ -21,6 +21,7 @@ from app.integrations.riot.client import RiotClient
 from app.integrations.riot.config import MATCH_COUNT, MIN_GAMES, PLATFORM_CLUSTER, QUEUE_TIERS
 from app.integrations.riot.errors import RiotError, RiotNotFound, RiotRateLimited
 from app.models import Champion, Player
+from app.services.team_management_service import stat_budget, stat_floor
 
 _cache: dict[tuple, tuple[float, dict]] = {}
 _last_import: dict[int, float] = {}
@@ -37,9 +38,10 @@ def reset_state() -> None:
 
 # ------------------------------------------------------------ signed token
 def make_riot_ref(user_id: int, puuid: str, game_name: str, tag_line: str, region: str,
-                  source: str | None = None, games: int | None = None) -> str:
+                  source: str | None = None, games: int | None = None, rank: dict | None = None) -> str:
     payload = {"typ": "riot_ref", "uid": user_id, "puuid": puuid, "game_name": game_name, "tag_line": tag_line,
-               "region": region, "source": source, "games": games, "exp": datetime.now(timezone.utc) + timedelta(hours=2)}
+               "region": region, "source": source, "games": games, "rank": rank,
+               "exp": datetime.now(timezone.utc) + timedelta(hours=2)}
     return jwt.encode(payload, settings.secret_key, algorithm="HS256")
 
 
@@ -111,8 +113,17 @@ def preview(db: Session, client: RiotClient, user_id: int, riot_id: str | None =
     except RiotNotFound:
         mastery = []
 
-    analysis = stat_mapper.analyse(choice.matches, puuid, MANAGEMENT_CONFIG["player_stat_budget"], role=role,
-                                   min_games=MIN_GAMES, queue_ids=tier["queue_ids"])
+    try:
+        rank = stat_mapper.pick_rank(client.league_entries(region, puuid), tier["key"])
+    except RiotNotFound:
+        rank = None
+    # the rank sets the stat ceiling and floor; an unranked account gets the default ceiling and no floor
+    budget = stat_budget(rank["tier"] if rank else None)
+    floor = stat_floor(rank["tier"] if rank else None)
+    rank_name = " ".join(filter(None, [rank["tier"].title(), rank["division"]])) if rank else "unranked players"
+
+    analysis = stat_mapper.analyse(choice.matches, puuid, budget, role=role,
+                                   min_games=MIN_GAMES, queue_ids=tier["queue_ids"], floor=floor)
     riot_champions = ddragon.load_riot_champions(client.ddragon_json)
     mapper = ddragon.ChampionMapper(riot_champions, _our_champions(db))
     pool, unmapped = stat_mapper.build_pool(analysis, mastery, mapper.to_ours, MANAGEMENT_CONFIG["champion_pool_size"])
@@ -125,8 +136,14 @@ def preview(db: Session, client: RiotClient, user_id: int, riot_id: str | None =
                             for t in QUEUE_TIERS[:QUEUE_TIERS.index(tier)])
         notes.append(f"Not enough {skipped} to build a player, so these stats come from {analysis.games} "
                      f"{tier['noun']}. Treat them as less reliable.")
+    if rank is None:
+        notes.append(f"No rank was found for this account, so the standard {budget}-point stat ceiling applies "
+                     "and there is no stat floor.")
+    if analysis.raised_to_floor:
+        notes.append(f"Stats were scaled up to the {floor}-point floor for {rank_name} "
+                     "(your raw performance was lower).")
     if analysis.fitted_to_budget:
-        notes.append(f"Stats were scaled down to fit the {MANAGEMENT_CONFIG['player_stat_budget']}-point ceiling "
+        notes.append(f"Stats were scaled down to fit the {budget}-point ceiling for {rank_name} "
                      "(your raw performance was higher). You can raise them in the editor; the team will then be flagged.")
     if len(pool) < MANAGEMENT_CONFIG["champion_pool_size"]:
         notes.append(f"Only {len(pool)} of this player's champions exist in the game; pick the rest in the editor.")
@@ -142,14 +159,18 @@ def preview(db: Session, client: RiotClient, user_id: int, riot_id: str | None =
                    **analysis.stats, "pool": pool},
         "riot": {"game_name": game_name, "tag_line": tag_line, "region": region},
         "analysis": {"games": analysis.games, "lane_counts": analysis.lane_counts, "raw_stats": analysis.raw_stats,
-                     "fitted_to_budget": analysis.fitted_to_budget, "source": source, "breakdown": analysis.breakdown,
-                     "fit": {"budget": analysis.budget, "total_before": analysis.total_before_fit,
+                     "rank": {**(rank or dict.fromkeys(("queue", "tier", "division", "lp", "wins", "losses"))),
+                              "budget": budget, "floor": floor},
+                     "fitted_to_budget": analysis.fitted_to_budget, "raised_to_floor": analysis.raised_to_floor,
+                     "source": source, "breakdown": analysis.breakdown,
+                     "fit": {"budget": analysis.budget, "floor": analysis.floor, "total_before": analysis.total_before_fit,
                              "total_after": sum(analysis.stats.values())},
                      "missing_pool_slots":
                          MANAGEMENT_CONFIG["champion_pool_size"] - len(pool), "notes": notes},
         "_puuid": puuid,
         "_source": source["queue"],
         "_games": analysis.games,
+        "_rank": rank,
     }
     with _lock:
         _cache[cache_key] = (time.monotonic(), result)
@@ -161,7 +182,7 @@ def _with_fresh_ref(result: dict, user_id: int) -> dict:
     out = {k: v for k, v in result.items() if not k.startswith("_")}
     r = result["riot"]
     out["riot_ref"] = make_riot_ref(user_id, result["_puuid"], r["game_name"], r["tag_line"], r["region"],
-                                    result["_source"], result["_games"])
+                                    result["_source"], result["_games"], result["_rank"])
     return out
 
 

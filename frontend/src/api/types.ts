@@ -39,6 +39,7 @@ export interface Player {
   cs: number
   pool: number[]
   stat_total: number
+  stat_budget: number             // this player's soft stat ceiling (higher for high-rank Riot imports)
   over_budget_by: number
   is_default: boolean
   riot?: {
@@ -50,7 +51,18 @@ export interface Player {
     data_source?: string | null   // SOLO | FLEX | NORMAL: which queue the stats came from
     games_used?: number | null
     is_solo_source?: boolean
+    rank?: RiotRank | null        // rank at import time; null when unranked or imported before ranks were read
   } | null
+}
+
+/** A ranked standing from Riot. Master and above have no division. */
+export interface RiotRank {
+  queue: string | null            // SOLO | FLEX: which queue the rank is from
+  tier: string | null             // e.g. EMERALD; null when unranked
+  division: string | null
+  lp: number | null
+  wins: number | null
+  losses: number | null
 }
 
 /** One real-world measurement behind a stat: the player's average, the role benchmark and the 1-10 score it earned. */
@@ -73,12 +85,14 @@ export interface RiotPreview {
   analysis: {
     games: number
     raw_stats: Record<string, number>
+    rank: RiotRank & { budget: number; floor: number }   // the stat ceiling and floor for this rank (floor 0: none)
     fitted_to_budget: boolean
+    raised_to_floor: boolean
     missing_pool_slots: number
     notes: string[]
     source: { queue: string; label: string; games: number; is_solo: boolean; tried: Record<string, number> }
     breakdown: Record<string, RiotMetric[]>
-    fit: { budget: number; total_before: number; total_after: number }
+    fit: { budget: number; floor: number; total_before: number; total_after: number }
   }
 }
 

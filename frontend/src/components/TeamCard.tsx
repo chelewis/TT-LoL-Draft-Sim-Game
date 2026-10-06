@@ -1,6 +1,6 @@
 import { LANES, type HiddenPlayer, type Lane, type Player, type Side, type Team } from '../api/types'
 import { LaneIcon } from './ChampionArt'
-import { LANE_LABEL, isHidden, overBudgetNotice, riotSourceLabel, riotSourceTag, titleCase } from '../lib/format'
+import { LANE_LABEL, isHidden, overBudgetNotice, rankLabel, riotSourceLabel, riotSourceTag, titleCase } from '../lib/format'
 
 export function OverBudgetBadge({ team }: { team: Pick<Team, 'over_budget' | 'over_budget_players'> }) {
   if (!team.over_budget) return null
@@ -48,6 +48,9 @@ function PlayerRow({ lane, player }: { lane: Lane; player: Player | HiddenPlayer
         {player.name}
         {player.riot && (
           <span className="badge" title={`Imported from Riot: ${player.riot.game_name}#${player.riot.tag_line} (unverified)`}>Riot</span>
+        )}
+        {player.riot?.rank && (
+          <span className="badge" title={`${riotSourceLabel(player.riot.rank.queue)} rank when imported: ${rankLabel(player.riot.rank, true)}`}>{rankLabel(player.riot.rank)}</span>
         )}
         {player.riot && riotSourceTag(player.riot.data_source) && (
           <span className="badge badge-warn" title={`Stats come from ${riotSourceLabel(player.riot.data_source)}, not solo queue`}>⚠ {riotSourceTag(player.riot.data_source)}</span>

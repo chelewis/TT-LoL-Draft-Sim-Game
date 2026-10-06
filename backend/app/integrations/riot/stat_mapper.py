@@ -11,7 +11,8 @@ from dataclasses import dataclass, field
 from statistics import mean
 from typing import Any
 
-from .config import BENCHMARKS, METRIC_INFO, MIN_GAME_SECONDS, STAT_METRICS, TEAM_POSITION_TO_LANE
+from .config import (APEX_TIERS, BENCHMARKS, METRIC_INFO, MIN_GAME_SECONDS, RANK_FOR_SOURCE, RANK_QUEUE_TYPES,
+                     RANK_TIERS, STAT_METRICS, TEAM_POSITION_TO_LANE)
 from .errors import NotEnoughData, RiotNotFound
 
 STATS = ("aggr", "aware", "pos", "dmg", "cs")
@@ -37,6 +38,8 @@ class Analysis:
     breakdown: dict[str, list[dict]] = field(default_factory=dict)
     total_before_fit: int = 0                                  # sum of the rounded stats before fitting to the budget
     budget: int = 0
+    floor: int = 0
+    raised_to_floor: bool = False
 
 
 def scale(value: float, low: float, high: float, lower_is_better: bool = False) -> float:
@@ -107,8 +110,40 @@ def fit_to_budget(stats: dict[str, float], budget: int) -> tuple[dict[str, int],
     return fitted, True
 
 
+def raise_to_floor(stats: dict[str, int], floor: int) -> tuple[dict[str, int], bool]:
+    """If the whole stats total less than `floor`, grow them proportionally (each still at most 10) to exactly `floor`."""
+    total = sum(stats.values())
+    if total >= floor:
+        return stats, False
+    ideal = {k: min(10.0, v * floor / total) for k, v in stats.items()}
+    raised = {k: int(v) for k, v in ideal.items()}
+    # hand out the points lost to rounding down, to the stats furthest below their share first
+    while sum(raised.values()) < floor:
+        room = [k for k in raised if raised[k] < 10]
+        if not room:
+            break
+        raised[max(room, key=lambda k: (ideal[k] - raised[k], k))] += 1
+    return raised, True
+
+
+def pick_rank(entries: list[dict], source_key: str) -> dict | None:
+    """The rank that belongs to the queue the stats came from, or None when the player has none.
+
+    `entries` is the league-v4 response; `source_key` is the queue tier key (SOLO / FLEX / NORMAL).
+    """
+    by_type = {e.get("queueType"): e for e in entries}
+    for queue in RANK_FOR_SOURCE.get(source_key, []):
+        entry = by_type.get(RANK_QUEUE_TYPES[queue])
+        if entry is None or entry.get("tier") not in RANK_TIERS:
+            continue
+        tier = entry["tier"]
+        return {"queue": queue, "tier": tier, "division": None if tier in APEX_TIERS else entry.get("rank"),
+                "lp": entry.get("leaguePoints", 0), "wins": entry.get("wins", 0), "losses": entry.get("losses", 0)}
+    return None
+
+
 def analyse(matches: list[dict], puuid: str, budget: int, role: str | None = None, min_games: int = 10,
-            queue_ids=None) -> Analysis:
+            queue_ids=None, floor: int = 0) -> Analysis:
     samples = [s for s in (sample_game(m, puuid, queue_ids) for m in matches) if s is not None]
     if len(samples) < min_games:
         raise NotEnoughData(
@@ -137,9 +172,10 @@ def analyse(matches: list[dict], puuid: str, budget: int, role: str | None = Non
                                     "lower_is_better": lower, "score": round(score, 2)})
         raw[stat] = mean(parts)
     stats, fitted = fit_to_budget(raw, budget)
+    stats, raised = raise_to_floor(stats, floor)
     before = sum(max(1, min(10, round(v))) for v in raw.values())
     return Analysis(len(samples), lane, dict(lane_counts), {k: round(v, 2) for k, v in raw.items()}, stats, fitted,
-                    Counter(s.champion_key for s in samples), breakdown, before, budget)
+                    Counter(s.champion_key for s in samples), breakdown, before, budget, floor, raised)
 
 
 @dataclass

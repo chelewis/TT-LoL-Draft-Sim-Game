@@ -69,6 +69,15 @@ METRIC_INFO = {
     "cs_per_min": {"label": "CS per minute", "unit": "number", "how": "(lane minions + jungle monsters) / game minutes"},
 }
 
-# Calls per import: 1 account + 1 match list + N matches + 1 mastery. Keep N modest for the 100/2min key.
+# Rank: the tier sets the player's stat ceiling (MANAGEMENT_CONFIG["rank_stat_budgets"]). Division and LP are
+# shown to the user but change nothing.
+RANK_TIERS = ("IRON", "BRONZE", "SILVER", "GOLD", "PLATINUM", "EMERALD", "DIAMOND", "MASTER", "GRANDMASTER", "CHALLENGER")
+APEX_TIERS = frozenset({"MASTER", "GRANDMASTER", "CHALLENGER"})   # no divisions
+# our queue tier key -> league-v4 queueType
+RANK_QUEUE_TYPES = {"SOLO": "RANKED_SOLO_5x5", "FLEX": "RANKED_FLEX_SR"}
+# which ranks may stand in for each stats source, in order of preference (normal games have no rank of their own)
+RANK_FOR_SOURCE = {"SOLO": ["SOLO"], "FLEX": ["FLEX"], "NORMAL": ["SOLO", "FLEX"]}
+
+# Calls per import: 1 account + 1 match list + N matches + 1 rank + 1 mastery. Keep N modest for the 100/2min key.
 MATCH_COUNT = 20
 MIN_GAMES = 10
