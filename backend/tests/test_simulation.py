@@ -19,6 +19,19 @@ def test_same_seed_reproduces_result_and_events(make_teams, champions):
     assert a.to_dict() == b.to_dict()
 
 
+def test_events_carry_gold_from_everything_but_cs(make_teams, champions):
+    res = run(make_teams, champions, seed=7)
+    per_cs = simulation_config()["economy"]["gold_per_cs"]
+    for e in res.events:
+        gold = e.payload["event_gold"]
+        assert all(len(gold[side]) == len(LANES) and min(gold[side]) >= 0 for side in ("BLUE", "RED"))
+    final = res.events[-1].payload["event_gold"]
+    for p in res.players:
+        other_gold = final[p["team"]][LANES.index(p["lane"])]
+        # the result rounds CS, so the rebuilt total can be off by up to one creep's gold
+        assert abs(other_gold + p["cs"] * per_cs - p["gold"]) <= per_cs
+
+
 def test_different_seeds_differ(make_teams, champions):
     results = {run(make_teams, champions, seed=s).duration_seconds for s in range(10)}
     assert len(results) > 1

@@ -134,9 +134,13 @@ function Objective({ p, name, state, extra }: { p: Point; name: string; state: M
   )
 }
 
-/** The map as it stood when the game ended: champions by role with their scores, structures, objectives and nexuses. */
-export default function MatchMap({ result, events, champions, names }: {
-  result: MatchResult; events: MatchEvent[]; champions: Map<number, Champion>; names: Record<Side, string>
+/**
+ * The map as it stood when the game ended: champions by role with their scores, structures, objectives and nexuses.
+ * With `live` it is the map mid-game for the events so far: nothing that gives the outcome away (scores, MVP and
+ * ACE, the verdict) is shown.
+ */
+export default function MatchMap({ result, events, champions, names, live = false }: {
+  result: MatchResult; events: MatchEvent[]; champions: Map<number, Champion>; names: Record<Side, string>; live?: boolean
 }) {
   const state = buildMapState(events)
   const fallen = SIDES.find((side) => state[side].nexusDestroyed)
@@ -158,12 +162,17 @@ export default function MatchMap({ result, events, champions, names }: {
         )}
         <Objective p={BARON_PIT} name="Baron" state={state} />
         <Objective p={DRAGON_PIT} name="Dragon" state={state} extra={dragonExtra} />
-        {result.players.map((p) => (
+        {result.players.map((p) => live ? (
+          <div key={`${p.team}:${p.lane}`} className={`map-champ map-champ-${p.team.toLowerCase()}`} style={at(MAP_LAYOUT[p.team].champions[p.lane])}
+            role="img" aria-label={`${p.name}, ${p.champion}, ${LANE_LABEL[p.lane]}, ${names[p.team]}`}>
+            <ChampionIcon champion={champions.get(p.champion_id)} size={40} />
+          </div>
+        ) : (
           <PlayerMarker key={p.player_id} player={p} champion={champions.get(p.champion_id)} teamName={names[p.team]}
             mvp={p.player_id === result.mvp.player_id} ace={p.player_id === result.ace.player_id} />
         ))}
       </div>
-      <figcaption className="stack">
+      {!live && <figcaption className="stack">
         <p>
           {fallen
             ? <><strong>{names[other(fallen)]}</strong> destroyed <strong>{names[fallen]}</strong>'s nexus.</>
@@ -180,7 +189,7 @@ export default function MatchMap({ result, events, champions, names }: {
           <li>Number under a champion: performance score (hover for details)</li>
           <li>Dragon and Baron: taken by blue : red</li>
         </ul>
-      </figcaption>
+      </figcaption>}
     </figure>
   )
 }

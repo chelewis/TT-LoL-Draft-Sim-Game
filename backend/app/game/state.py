@@ -134,7 +134,15 @@ class Match:
     def sides(self) -> tuple[TeamState, TeamState]:
         return self.teams["BLUE"], self.teams["RED"]
 
+    def _event_gold(self) -> dict[str, list[int]]:
+        """Each player's gold from everything except CS, per side in lane order. CS gold grows steadily with
+        the clock, so a viewer can rebuild anyone's gold at any moment from this and the final result."""
+        per_cs = self.config["economy"]["gold_per_cs"]
+        return {side: [round(p.gold - p.cs * per_cs) for p in team.ordered_players()]
+                for side, team in self.teams.items()}
+
     def emit(self, type_: str, **payload: Any) -> MatchEvent:
+        payload["event_gold"] = self._event_gold()
         event = MatchEvent(len(self.events) + 1, self.phase, self.minute, type_, payload)
         self.events.append(event)
         return event
