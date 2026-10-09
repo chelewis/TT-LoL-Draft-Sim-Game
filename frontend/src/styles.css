@@ -498,6 +498,31 @@ table.compact th, table.compact td { padding: 4px 6px; font-size: 0.85rem; }
   .cs-swap-menu { width: min(260px, 92vw); }
 }
 
+/* ---------- champ select: player card (stats and champion pool, opened from the player's name) ---------- */
+.cs .cs-row-player-btn { display: inline-flex; justify-content: flex-start; gap: 5px; align-self: flex-start; max-width: 100%; padding: 0; background: none; border: 0; border-radius: 0; font-family: inherit; line-height: inherit; text-align: inherit; }
+.cs-row-player-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; text-decoration: underline dotted; text-underline-offset: 3px; }
+.cs-info-icon { flex: none; color: var(--hex-gold); opacity: 0.85; }
+.cs .cs-row-player-btn:hover .cs-info-icon, .cs .cs-row-player-btn[aria-expanded="true"] .cs-info-icon { color: var(--hex-teal); opacity: 1; }
+.cs-picks.red .cs-row-player-btn { align-self: flex-end; }
+.cs .cs-row-player-btn:hover, .cs .cs-row-player-btn[aria-expanded="true"] { color: var(--hex-gold-light); }
+.cs-player-card .cs-swap-head span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-player-note { margin: 0; padding: 8px 12px 0; font-size: 0.78rem; color: #a09b8c; }
+.cs-player-note:last-child { padding-bottom: 12px; }
+.cs-player-stats { margin: 0; padding: 0 12px; font-size: 0.8rem; }
+.cs-player-stats > div { display: grid; grid-template-columns: 84px 1fr; align-items: center; padding: 2px 0; }
+.cs-player-stats dt { color: #a09b8c; }
+.cs-player-stats dd { margin: 0; display: grid; grid-template-columns: 1fr 2ch; align-items: center; gap: 8px; text-align: right; font-variant-numeric: tabular-nums; }
+.cs-player-bar { height: 6px; background: var(--hex-line); }
+.cs-player-bar i { display: block; height: 100%; background: var(--hex-gold); }
+.cs-player-pool { list-style: none; margin: 0; padding: 0 12px 10px; }
+.cs-player-pool li { display: flex; align-items: center; gap: 10px; padding: 3px 0; font-size: 0.8rem; }
+.cs-player-pool .champ-icon { flex: none; border: 1px solid var(--hex-gold-dark); }
+.cs-player-pool-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cs-player-pool .cs-row-tier { flex: none; font-size: 0.72rem; }
+.cs-player-pool li.gone .champ-icon { filter: grayscale(1) brightness(0.45); }
+.cs-player-pool li.gone .cs-player-pool-name { text-decoration: line-through; opacity: 0.5; }
+.cs-player-pool li.gone .cs-row-tier { color: #a09b8c; }
+
 /* ---------- champ select: all chat (multiplayer) ---------- */
 .cs-body.with-chat { grid-template-areas: "blue center red" "chat center red"; grid-template-rows: auto 1fr; }
 .cs-body.with-chat .cs-picks.blue { grid-area: blue; }
