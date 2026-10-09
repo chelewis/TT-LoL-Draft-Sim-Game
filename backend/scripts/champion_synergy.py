@@ -1,4 +1,4 @@
-"""Build a matrix of champion win rates when paired on the same team, from real ranked solo games.
+"""Build champion win rates when paired on the same team, and when facing each other, from real ranked solo games.
 
     python -m scripts.champion_synergy                    # fetch 3000 new matches (about an hour), then write the files
     python -m scripts.champion_synergy --matches 50       # a short run
@@ -28,7 +28,8 @@ from app.integrations.riot.client import RiotClient
 from app.integrations.riot.config import PLATFORM_CLUSTER
 from app.integrations.riot.errors import RiotError, RiotNotFound, RiotRateLimited
 from app.integrations.riot.limiter import RateLimiter
-from app.integrations.riot.synergy import SOLO_QUEUE, aggregate, reduce_match, write_matrix_csv, write_pairs_csv
+from app.integrations.riot.synergy import (SOLO_QUEUE, aggregate, reduce_match, write_counter_csv, write_matrix_csv,
+                                           write_pairs_csv)
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "Data"
 TIERS = ("IRON", "BRONZE", "SILVER", "GOLD", "PLATINUM", "EMERALD", "DIAMOND")     # league-v4 pages stop at Diamond
@@ -131,6 +132,7 @@ def write_outputs(cache: MatchCache, to_name, riot_name, out_dir: Path, min_game
     table = aggregate(cache.records, to_name)
     pairs = write_pairs_csv(table, out_dir / "champion_synergy.csv")
     filled = write_matrix_csv(table, out_dir / "champion_synergy_matrix.csv", min_games)
+    opponents = write_counter_csv(table, out_dir / "champion_counter.csv")
     possible = len(table.champions) * (len(table.champions) - 1) // 2
     patches = ", ".join(f"{v} ({n})" for v, n in sorted(table.versions.items(), key=lambda item: -item[1]))
     log(f"{table.matches} matches, patches: {patches}")
@@ -139,6 +141,9 @@ def write_outputs(cache: MatchCache, to_name, riot_name, out_dir: Path, min_game
     if table.unmapped:
         log("Not in this game, so left out: " + ", ".join(sorted(riot_name(k) for k in table.unmapped)))
     log(f"Wrote {out_dir / 'champion_synergy.csv'} and {out_dir / 'champion_synergy_matrix.csv'}")
+    log(f"Wrote {out_dir / 'champion_counter.csv'}: {opponents} pairs of opponents seen at least once")
+    log("To use them as the Admin tab's starting values, copy champion_synergy.csv and champion_counter.csv into "
+        "backend/app/data/seed/ and press 'Reset to seed data' there.")
 
 
 def main(argv: list[str]) -> int:

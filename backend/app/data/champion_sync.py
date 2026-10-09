@@ -21,6 +21,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.data.loader import SeedData
+from app.data.matchup_seed import attach_champion, detach_champion
 from app.game.models import Champion as EngineChampion
 from app.models import Champion, DraftActionRow, PlayerPoolEntry, TeamLineup
 
@@ -128,7 +129,9 @@ def _renumber(db: Session, data: SeedData, existing: dict[int, Champion], report
                 f"({', '.join(refs)}). Keep id {row.id} in the CSV")
             continue
         old_id = row.id
+        matchups = detach_champion(db, old_id)      # win rate matrix cells follow the champion to its new id
         db.execute(update(Champion).where(Champion.id == old_id).values(id=champ.id))
+        attach_champion(db, matchups, old_id, champ.id)
         report.renumbered.append(f"{champ.name}: {old_id} -> {champ.id}")
         moved = True
     if moved:

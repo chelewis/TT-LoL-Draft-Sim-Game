@@ -13,7 +13,7 @@ function initials(name: string): string {
 }
 
 /** Square champion portrait; falls back to initials when Data Dragon has no image for the name. */
-export function ChampionIcon({ champion, size = 48, className = '' }: { champion: Champion | undefined; size?: number; className?: string }) {
+export function ChampionIcon({ champion, size = 48, className = '' }: { champion: Pick<Champion, 'name'> | undefined; size?: number; className?: string }) {
   const version = useDDragonVersion()
   const [failed, setFailed] = useState(false)
   const style = { width: size, height: size }

@@ -77,7 +77,28 @@ def test_smoothing_pulls_small_samples_towards_the_expected_rate():
     assert 0.75 < table.smoothed("Ahri", "Braum") < 1.0
 
 
+def test_aggregate_counts_opponents_from_the_first_named_champions_side():
+    records = [record(BLUE, RED, True)] * 3 + [record(RED, BLUE, True)]
+    table = synergy.aggregate(records, NAMES.get)
+    assert len(table.versus) == 25                               # every blue champion met every red one
+    assert table.versus[("Ahri", "Fizz")] == [4, 3]              # Ahri beat Fizz three times out of four
+    assert table.versus[("Braum", "Jax")] == [4, 3]
+    assert ("Fizz", "Ahri") not in table.versus and ("Ahri", "Braum") not in table.versus     # teammates never face
+    assert table.expected_versus("Ahri", "Fizz") == pytest.approx(0.75)
+    assert table.smoothed_versus("Ahri", "Fizz", prior_games=0) == 0.75
+    assert table.smoothed_versus("Fizz", "Ahri") == pytest.approx(1 - table.smoothed_versus("Ahri", "Fizz"))
+
+
 # ------------------------------------------------------------------ output
+def test_counter_csv_gives_the_first_champions_numbers(tmp_path):
+    table = synergy.aggregate([record(BLUE, RED, True)] * 3 + [record(BLUE, RED, False)], NAMES.get)
+    assert synergy.write_counter_csv(table, tmp_path / "counter.csv") == 25
+    rows = list(csv.DictReader((tmp_path / "counter.csv").open(encoding="utf-8")))
+    assert list(rows[0]) == synergy.PAIR_COLUMNS
+    row = next(r for r in rows if (r["champion_a"], r["champion_b"]) == ("Ahri", "Fizz"))
+    assert (row["games"], row["wins"], row["win_rate"], row["smoothed_win_rate"]) == ("4", "3", "75.0", "75.0")
+
+
 def test_pairs_csv_lists_every_seen_pair_with_its_numbers(tmp_path):
     records = [record(BLUE, RED, True)] * 3 + [record(BLUE, RED, False)]
     table = synergy.aggregate(records, NAMES.get)

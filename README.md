@@ -58,6 +58,21 @@ cd backend && .venv/Scripts/python -m scripts.sync_champions --dry-run   # show 
 cd backend && .venv/Scripts/python -m scripts.sync_champions             # apply
 ```
 
+## Admin tab
+
+Users listed in `LDM_ADMIN_USERNAMES` (a JSON list in `backend/.env`, e.g. `LDM_ADMIN_USERNAMES=["your_username"]`; restart the backend after changing it) get an **Admin** dropdown in the top bar for global config. Everyone else gets neither the menu nor the `/api/v1/admin/...` endpoints.
+
+The menu has **Champions > Winrates**, **Simulation Settings** and **Globals**. The last two are placeholders for now: they list what they will cover, and those values are still set in `backend/app/game/config.py`. To add a page, add an entry to `frontend/src/pages/admin/nav.ts` and a route in `AdminPage.tsx`.
+
+Winrates holds two champion x champion win rate matrices:
+
+- **Same team win rates**: how often two champions win when they are on the same team. One value per pair.
+- **Against team win rates**: how often the row champion wins against the column champion. The opposite cell is always 100 minus it.
+
+Click a cell to edit it, or pick a champion to edit its pairs as a list, then **Save changes**. The game does not use these numbers yet; the page only stores them.
+
+The matrices are loaded once from `backend/app/data/seed/champion_synergy.csv` (same team) and `champion_counter.csv` (against team), when the database has none. After that **the database is the source of truth**: restarts keep every edit. **Reset to seed data** throws the edits away and loads the file again. There is no `champion_counter.csv` yet, so the against-team matrix starts empty; `python -m scripts.champion_synergy` writes both files into `Data/` from sampled ranked games, to be copied into the seed folder.
+
 ## Test it
 
 ```bash
@@ -74,5 +89,5 @@ cd frontend && npm test && npm run build
 | `backend/app/game/` | The game engine: draft, lane phase, fights, objectives, structures, ranking. Pure Python, no web or database imports |
 | `backend/app/services/`, `api/`, `websocket/` | Lobby/game state machine, team management, REST and WebSocket layer |
 | `backend/app/data/seed/` | Default teams, players and champions (from `Data/`), loaded as read-only default content |
-| `frontend/src/` | React app: lobby, draft, lane assignment, results, team/player/coach management |
+| `frontend/src/` | React app: lobby, draft, lane assignment, results, team/player/coach management, admin tab |
 | `Data/` | Original CSV data set (copied into `backend/app/data/seed/`) |
