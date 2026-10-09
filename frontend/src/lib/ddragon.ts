@@ -44,6 +44,11 @@ export function loadingUrl(name: string): string {
   return `${CDN}/cdn/img/champion/loading/${ddragonId(name)}_0.jpg`
 }
 
+/** Summoner's Rift minimap (512x512), versioned. */
+export function minimapUrl(version: string): string {
+  return `${CDN}/cdn/${version}/img/map/map11.png`
+}
+
 export async function fetchLatestVersion(): Promise<string> {
   try {
     const res = await fetch(`${CDN}/api/versions.json`)

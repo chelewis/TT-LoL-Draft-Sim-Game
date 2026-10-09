@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ddragonId, splashUrl, squareUrl } from './ddragon'
+import { ddragonId, minimapUrl, splashUrl, squareUrl } from './ddragon'
 
 describe('ddragonId', () => {
   it('joins multi-word names', () => {
@@ -24,5 +24,6 @@ describe('ddragonId', () => {
   it('builds CDN urls', () => {
     expect(squareUrl('Miss Fortune', '15.1.1')).toBe('https://ddragon.leagueoflegends.com/cdn/15.1.1/img/champion/MissFortune.png')
     expect(splashUrl('Ahri')).toBe('https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ahri_0.jpg')
+    expect(minimapUrl('15.1.1')).toBe('https://ddragon.leagueoflegends.com/cdn/15.1.1/img/map/map11.png')
   })
 })

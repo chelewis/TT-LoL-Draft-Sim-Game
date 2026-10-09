@@ -1,4 +1,7 @@
+import { useState } from 'react'
 import type { Champion, MatchEvent, MatchResult, ResultPlayer, Side } from '../api/types'
+import { useDDragonVersion } from '../hooks/useData'
+import { minimapUrl } from '../lib/ddragon'
 import { LANE_LABEL, TIER_LABEL } from '../lib/format'
 import {
   BARON_PIT, DRAGON_PIT, MAP_LAYOUT, STRUCTURE_LANES, buildMapState,
@@ -66,21 +69,21 @@ function Structures({ side, state }: { side: Side; state: SideMapState }) {
   )
 }
 
+/** The Summoner's Rift minimap; the plain ground shows through if Data Dragon can't supply it. */
 function Terrain() {
+  const version = useDDragonVersion()
+  const [failed, setFailed] = useState(false)
   return (
     <g>
-      <rect className="map-ground" x={0} y={0} width={100} height={100} rx={3} />
-      <circle className="map-base map-base-blue" cx={11} cy={89} r={19} />
-      <circle className="map-base map-base-red" cx={89} cy={11} r={19} />
+      <rect className="map-ground" x={0} y={0} width={100} height={100} />
+      {version && !failed && (
+        <image className="map-image" href={minimapUrl(version)} x={0} y={0} width={100} height={100}
+          preserveAspectRatio="none" onError={() => setFailed(true)} />
+      )}
+      <rect className="map-shade" x={0} y={0} width={100} height={100} />
       {/* the losing base burns: shown through CSS when its nexus fell */}
-      <circle className="map-base-ruin map-base-ruin-blue" cx={11} cy={89} r={19} />
-      <circle className="map-base-ruin map-base-ruin-red" cx={89} cy={11} r={19} />
-      <line className="map-river" x1={20} y1={20} x2={80} y2={80} />
-      <polyline className="map-lane" points="9,89 9,9 89,9" />
-      <polyline className="map-lane" points="11,91 91,91 91,11" />
-      <line className="map-lane" x1={11} y1={89} x2={89} y2={11} />
-      <circle className="map-pit" cx={BARON_PIT.x} cy={BARON_PIT.y} r={5.5} />
-      <circle className="map-pit" cx={DRAGON_PIT.x} cy={DRAGON_PIT.y} r={5.5} />
+      <circle className="map-base-ruin map-base-ruin-blue" cx={MAP_LAYOUT.BLUE.nexus.x} cy={MAP_LAYOUT.BLUE.nexus.y} r={19} />
+      <circle className="map-base-ruin map-base-ruin-red" cx={MAP_LAYOUT.RED.nexus.x} cy={MAP_LAYOUT.RED.nexus.y} r={19} />
     </g>
   )
 }

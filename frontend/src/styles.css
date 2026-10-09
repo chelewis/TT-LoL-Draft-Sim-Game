@@ -124,12 +124,10 @@ table.compact th, table.compact td { padding: 4px 6px; font-size: 0.85rem; }
 /* ---------- final map on the result screen ---------- */
 .match-map-figure { margin: 0; display: flex; flex-direction: column; gap: 12px; }
 .match-map { position: relative; width: 100%; max-width: 512px; aspect-ratio: 1; margin: 0 auto; container-type: inline-size; }
-.match-map > svg { display: block; width: 100%; height: 100%; }
-.map-ground { fill: #16261f; stroke: var(--line); stroke-width: 0.4; }
-.map-base { opacity: 0.22; } .map-base-blue { fill: var(--blue); } .map-base-red { fill: var(--red); }
-.map-lane { fill: none; stroke: #4a4532; stroke-width: 4.5; stroke-linecap: round; stroke-linejoin: round; }
-.map-river { stroke: #2c5d86; stroke-width: 6; stroke-linecap: round; opacity: 0.7; }
-.map-pit { fill: #101a22; stroke: #2c5d86; stroke-width: 0.5; }
+.match-map > svg { display: block; width: 100%; height: 100%; border-radius: 3%; overflow: hidden; }
+.map-ground { fill: #16261f; }
+/* a light wash keeps the markers and score plates readable over the minimap */
+.map-shade { fill: rgba(11, 16, 27, 0.35); }
 .map-side-blue .map-structure { fill: var(--blue); stroke: #dbe7ff; }
 .map-side-red .map-structure { fill: var(--red); stroke: #ffe0e4; }
 .map-structure { stroke-width: 0.4; }
@@ -139,9 +137,8 @@ table.compact th, table.compact td { padding: 4px 6px; font-size: 0.85rem; }
 .map-nexus.down .map-cross line { stroke: var(--warn); stroke-width: 1.3; }
 .map-side-blue .map-nexus.down > circle:not(.map-nexus-blast), .map-side-red .map-nexus.down > circle:not(.map-nexus-blast) { fill: #2a1206; stroke: var(--warn); stroke-width: 0.8; stroke-dasharray: none; }
 .map-side-blue .map-nexus-blast, .map-side-red .map-nexus-blast { fill: rgba(245, 165, 36, 0.28); stroke: var(--warn); stroke-width: 0.5; stroke-dasharray: 1.4 1; }
-.map-base-ruin { display: none; fill: #f5a524; opacity: 0.16; }
+.map-base-ruin { display: none; fill: #f5a524; opacity: 0.22; }
 .nexus-fell-blue .map-base-ruin-blue, .nexus-fell-red .map-base-ruin-red { display: block; }
-.nexus-fell-blue .map-base-blue, .nexus-fell-red .map-base-red { opacity: 0.08; }
 /* hover target over the destroyed nexus; its label only shows on hover or keyboard focus */
 .map-nexus-spot { position: absolute; transform: translate(-50%, -50%); width: 15cqw; height: 15cqw; border-radius: 50%; }
 .map-nexus-spot:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }

@@ -90,46 +90,55 @@ export interface SideLayout {
   champions: Record<Lane, Point>
 }
 
-/** Blue's base is the bottom-left corner. Red's layout is this one turned half a circle around the centre. */
+/**
+ * Riot's in-game map units to a point on the minimap image. The playable area runs from about -120 to 14870
+ * across and -120 to 14980 up, with the origin in the bottom-left corner.
+ */
+const fromGame = (x: number, y: number): Point => ({
+  x: Math.round(((x + 120) / 14990) * 1000) / 10,
+  y: Math.round((100 - ((y + 120) / 15100) * 100) * 10) / 10,
+})
+
+/** Blue's base is the bottom-left corner. Structures sit where they stand on Summoner's Rift. */
 const BLUE_LAYOUT: SideLayout = {
-  nexus: { x: 11, y: 89 },
-  nexusTowers: [{ x: 14, y: 81 }, { x: 19, y: 86 }],
+  // the nexuses sit a little nearer their corner than in game, so the nexus towers stay visible beside them
+  nexus: { x: 9, y: 91 },
+  nexusTowers: [fromGame(1748, 2270), fromGame(2177, 1807)],
   towers: {
-    TOP: [{ x: 9, y: 30 }, { x: 9, y: 50 }, { x: 9, y: 67 }],
-    MID: [{ x: 38, y: 62 }, { x: 31, y: 69 }, { x: 25, y: 75 }],
-    BOT: [{ x: 70, y: 91 }, { x: 50, y: 91 }, { x: 33, y: 91 }],
+    TOP: [fromGame(981, 10441), fromGame(1512, 6699), fromGame(1169, 4287)],
+    MID: [fromGame(5846, 6396), fromGame(5048, 4812), fromGame(3651, 3696)],
+    BOT: [fromGame(10504, 1029), fromGame(6919, 1483), fromGame(4281, 1253)],
   },
-  inhibitors: { TOP: { x: 9, y: 74 }, MID: { x: 20.5, y: 79.5 }, BOT: { x: 26, y: 91 } },
+  inhibitors: { TOP: fromGame(1171, 3571), MID: fromGame(3203, 3208), BOT: fromGame(3452, 1236) },
+  // champions stand in their lane beside their opponent, clear of the towers; the bot laners meet at the
+  // lane's corner with each support behind their own, back towards their base
   champions: {
-    TOP: { x: 9, y: 19 },
-    JUNGLE: { x: 26, y: 46 },
-    MID: { x: 45, y: 56 },
-    BOT: { x: 81, y: 76 },
-    SUPPORT: { x: 81, y: 88 },
+    TOP: { x: 8.5, y: 17 },
+    JUNGLE: { x: 24, y: 48 },
+    MID: { x: 46, y: 54 },
+    BOT: { x: 84.5, y: 91.5 },
+    SUPPORT: { x: 76.3, y: 91.5 },
   },
 }
 
-const mirror = (p: Point): Point => ({ x: 100 - p.x, y: 100 - p.y })
-const mirrorLanes = <T,>(lanes: Record<StructureLane, T>, f: (v: T) => T): Record<StructureLane, T> => ({
-  // the lanes swap too: red's top lane is the mirror image of blue's bottom lane
-  TOP: f(lanes.BOT), MID: f(lanes.MID), BOT: f(lanes.TOP),
-})
-
 const RED_LAYOUT: SideLayout = {
-  nexus: mirror(BLUE_LAYOUT.nexus),
-  nexusTowers: BLUE_LAYOUT.nexusTowers.map(mirror),
-  towers: mirrorLanes(BLUE_LAYOUT.towers, (ps) => ps.map(mirror)),
-  inhibitors: mirrorLanes(BLUE_LAYOUT.inhibitors, mirror),
-  // champions stand beside their lane opponent, not at the mirrored spot
+  nexus: { x: 91.5, y: 9 },
+  nexusTowers: [fromGame(12611, 13084), fromGame(13052, 12612)],
+  towers: {
+    TOP: [fromGame(4318, 13875), fromGame(7943, 13411), fromGame(10481, 13650)],
+    MID: [fromGame(8955, 8510), fromGame(9767, 10113), fromGame(11134, 11207)],
+    BOT: [fromGame(13866, 4505), fromGame(13327, 8226), fromGame(13624, 10572)],
+  },
+  inhibitors: { TOP: fromGame(11261, 13676), MID: fromGame(11598, 11667), BOT: fromGame(13604, 11316) },
   champions: {
-    TOP: { x: 23, y: 8 },
-    JUNGLE: { x: 74, y: 52 },
-    MID: { x: 55, y: 42 },
-    BOT: { x: 92, y: 76 },
-    SUPPORT: { x: 92, y: 88 },
+    TOP: { x: 19.5, y: 8.5 },
+    JUNGLE: { x: 76, y: 52 },
+    MID: { x: 54, y: 46 },
+    BOT: { x: 92.5, y: 86 },
+    SUPPORT: { x: 92.5, y: 75 },
   },
 }
 
 export const MAP_LAYOUT: Record<Side, SideLayout> = { BLUE: BLUE_LAYOUT, RED: RED_LAYOUT }
-export const BARON_PIT: Point = { x: 35, y: 31 }
-export const DRAGON_PIT: Point = { x: 65, y: 69 }
+export const BARON_PIT: Point = fromGame(5007, 10471)
+export const DRAGON_PIT: Point = fromGame(9866, 4414)
