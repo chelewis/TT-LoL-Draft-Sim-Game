@@ -304,6 +304,10 @@ table.compact th, table.compact td { padding: 4px 6px; font-size: 0.85rem; }
 .cs-step.ban { width: 6px; height: 6px; margin: 1px; }
 .cs-step.blue { background: var(--cs-blue); } .cs-step.red { background: var(--cs-red); }
 .cs-step.done { opacity: 0.85; } .cs-step.now { opacity: 1; outline: 1px solid var(--hex-gold-light); outline-offset: 1px; }
+.cs-alerts { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 8px; }
+.cs-alert-toggle { min-height: 26px; padding: 2px 10px; border-radius: 2px; border: 1px solid var(--hex-line); background: transparent; color: #a09b8c; font-size: 0.75rem; letter-spacing: 0.04em; }
+.cs-alert-toggle:hover:not(:disabled) { border-color: var(--hex-gold); color: var(--hex-gold-light); }
+.cs-alert-toggle[aria-pressed="true"] { border-color: var(--hex-gold-dark); color: var(--hex-gold); }
 
 .cs-body { display: grid; grid-template-columns: 260px minmax(0, 1fr) 260px; gap: 0; min-height: 520px; }
 .cs-picks { display: flex; flex-direction: column; padding: 8px 0; }

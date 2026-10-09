@@ -7,9 +7,13 @@ import { ChampionIcon, LaneIcon, championArt } from '../../components/ChampionAr
 import { ErrorNotice, Pips } from '../../components/common'
 import ChatPanel from '../../components/ChatPanel'
 import TeamCard from '../../components/TeamCard'
+import { useCountdownTick } from '../../hooks/useCountdownTick'
 import { useChampions, useCountdown } from '../../hooks/useData'
+import { useTurnAlert } from '../../hooks/useTurnAlert'
+import { alertsState, disableAlerts, enableAlerts, turnAlertKey } from '../../lib/alerts'
 import { LANE_LABEL, TIER_LABEL, comfortTier, isHidden, isSolo } from '../../lib/format'
 import { lineupAssignments, swapLanes, type Lineup, type SwapKind } from '../../lib/lineup'
+import { isSoundOn, playSound, setSoundOn } from '../../lib/sound'
 
 interface PoolHint {
   player: string
@@ -72,9 +76,14 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
   }, [game.teams, me])
 
   const act = useMutation({
-    mutationFn: (championId: number) =>
-      api(`/games/${game.game_id}/draft/${action === 'PICK' ? 'pick' : 'ban'}`, { body: { champion_id: championId } }),
-    onSuccess: () => {
+    // resolves to the action that was taken: by the time it succeeds, `action` may already be the next one
+    mutationFn: async (championId: number) => {
+      const taken = action
+      await api(`/games/${game.game_id}/draft/${taken === 'PICK' ? 'pick' : 'ban'}`, { body: { champion_id: championId } })
+      return taken
+    },
+    onSuccess: (taken) => {
+      playSound(taken === 'BAN' ? 'ban' : 'lock')
       setSelected(null)
       onChange()
     },
@@ -92,14 +101,44 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
   const saveLineup = useMutation({
     mutationFn: ({ side, lineup }: { side: Side; lineup: Lineup }) =>
       api(`/games/${game.game_id}/lineup`, { method: 'PUT', body: { assignments: lineupAssignments(lineup), side: solo ? side : undefined } }),
-    onSuccess: onChange,
+    onSuccess: () => {
+      playSound('swap')
+      onChange()
+    },
     onError: onChange,
   })
   const lockLineup = useMutation({
     mutationFn: (side: Side) => api(`/games/${game.game_id}/lineup/ready${solo ? `?side=${side}` : ''}`, { method: 'POST' }),
-    onSuccess: onChange,
+    onSuccess: () => {
+      playSound('lock')
+      onChange()
+    },
     onError: onChange,
   })
+
+  // ----- sound and "your turn" alerts
+  const [soundOn, setSoundOnState] = useState(isSoundOn)
+  const [alerts, setAlerts] = useState(alertsState)
+  useTurnAlert(
+    turnAlertKey({ solo, myTurn: !finalizing && myTurn, canFinalize: canEdit(game.you.team) }),
+    finalizing ? 'Finalize your lineup' : `Your turn to ${action === 'PICK' ? 'pick' : 'ban'}`,
+  )
+
+  useCountdownTick(draft.expires_at, draft.timers_enabled && !finalizing && myTurn)
+
+  // buzzer when the timer ran out on me and the server acted for me
+  const seenHistory = useRef(draft.history.length)
+  useEffect(() => {
+    const fresh = draft.history.slice(seenHistory.current)
+    seenHistory.current = draft.history.length
+    if (fresh.some((h) => h.auto && (solo || h.team === game.you.team))) playSound('buzzer')
+  }, [draft.history, solo, game.you.team])
+
+  function toggleSound() {
+    setSoundOn(!soundOn)
+    setSoundOnState(!soundOn)
+    if (!soundOn) playSound('select')
+  }
 
   function swap(side: Side, a: Lane, b: Lane, kind: SwapKind) {
     const current = lineups[side]
@@ -167,6 +206,26 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
                 />
               ))}
             </div>
+            <div className="cs-alerts">
+              <button className="cs-alert-toggle" aria-pressed={soundOn} onClick={toggleSound}>
+                {soundOn ? '🔊 Sound on' : '🔇 Sound off'}
+              </button>
+              {!solo && alerts !== 'unsupported' && (
+                <button
+                  className="cs-alert-toggle"
+                  aria-pressed={alerts === 'on'}
+                  disabled={alerts === 'blocked'}
+                  onClick={() => (alerts === 'on' ? setAlerts(disableAlerts()) : enableAlerts().then(setAlerts))}
+                  title={
+                    alerts === 'blocked'
+                      ? 'Notifications are blocked for this site. Allow them in your browser’s site settings.'
+                      : 'Get a desktop notification when it is your turn and you are in another tab or window'
+                  }
+                >
+                  {alerts === 'on' ? '🔔 Turn alerts on' : alerts === 'blocked' ? '🔕 Turn alerts blocked' : '🔕 Turn alerts off'}
+                </button>
+              )}
+            </div>
           </div>
           <SideHeader side="RED" game={game} byId={byId} preview={preview} me={me} />
         </header>
@@ -220,7 +279,10 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
                       key={c.id}
                       className={`cs-champ ${selected === c.id ? 'selected' : ''} ${isUsed ? 'used' : ''}`}
                       disabled={isUsed}
-                      onClick={() => setSelected(c.id)}
+                      onClick={() => {
+                        if (selected !== c.id) playSound('select')
+                        setSelected(c.id)
+                      }}
                       onDoubleClick={() => myTurn && !isUsed && !act.isPending && act.mutate(c.id)}
                       title={`${c.name} · ${c.class}${best ? ` · ${best.player} (${LANE_LABEL[best.lane]}): ${TIER_LABEL[best.tier]}` : ''}`}
                     >
