@@ -330,7 +330,7 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
                 {editableSides.map((s) => (
                   <button
                     key={s}
-                    className="cs-lock-in"
+                    className={`cs-lock-in ${canEdit(s) ? 'mine' : ''}`}
                     disabled={!canEdit(s) || lockLineup.isPending || saveLineup.isPending}
                     onClick={() => lockLineup.mutate(s)}
                   >
@@ -342,7 +342,7 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
               </div>
             ) : (
               <button
-                className={`cs-lock-in ${action === 'BAN' ? 'ban' : ''}`}
+                className={`cs-lock-in ${action === 'BAN' ? 'ban' : ''} ${myTurn ? 'mine' : ''}`}
                 disabled={!myTurn || !selected || act.isPending}
                 onClick={() => selected && act.mutate(selected)}
               >
