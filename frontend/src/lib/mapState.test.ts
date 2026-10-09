@@ -65,11 +65,20 @@ describe('buildMapState', () => {
 })
 
 describe('MAP_LAYOUT', () => {
-  it("mirrors red's structures through the centre, swapping top and bottom lanes", () => {
+  it('puts blue in the bottom-left corner and red in the top-right', () => {
     const { BLUE, RED } = MAP_LAYOUT
-    expect(RED.nexus).toEqual({ x: 100 - BLUE.nexus.x, y: 100 - BLUE.nexus.y })
-    expect(RED.towers.TOP[0]).toEqual({ x: 100 - BLUE.towers.BOT[0].x, y: 100 - BLUE.towers.BOT[0].y })
-    expect(RED.inhibitors.MID).toEqual({ x: 100 - BLUE.inhibitors.MID.x, y: 100 - BLUE.inhibitors.MID.y })
+    expect(BLUE.nexus.x).toBeLessThan(25); expect(BLUE.nexus.y).toBeGreaterThan(75)
+    expect(RED.nexus.x).toBeGreaterThan(75); expect(RED.nexus.y).toBeLessThan(25)
+  })
+
+  it('orders each lane from the outer tower in towards the nexus', () => {
+    for (const side of [MAP_LAYOUT.BLUE, MAP_LAYOUT.RED]) {
+      const toNexus = (p: { x: number; y: number }) => Math.hypot(p.x - side.nexus.x, p.y - side.nexus.y)
+      for (const lane of Object.values(side.towers)) {
+        const distances = lane.map(toNexus)
+        expect(distances).toEqual([...distances].sort((a, b) => b - a))
+      }
+    }
   })
 
   it('keeps everything on the map', () => {

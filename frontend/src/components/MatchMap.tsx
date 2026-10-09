@@ -1,4 +1,7 @@
+import { useState } from 'react'
 import type { Champion, MatchEvent, MatchResult, ResultPlayer, Side } from '../api/types'
+import { useDDragonVersion } from '../hooks/useData'
+import { minimapUrl } from '../lib/ddragon'
 import { LANE_LABEL, TIER_LABEL } from '../lib/format'
 import {
   BARON_PIT, DRAGON_PIT, MAP_LAYOUT, STRUCTURE_LANES, buildMapState,
@@ -66,21 +69,21 @@ function Structures({ side, state }: { side: Side; state: SideMapState }) {
   )
 }
 
+/** The Summoner's Rift minimap; the plain ground shows through if Data Dragon can't supply it. */
 function Terrain() {
+  const version = useDDragonVersion()
+  const [failed, setFailed] = useState(false)
   return (
     <g>
-      <rect className="map-ground" x={0} y={0} width={100} height={100} rx={3} />
-      <circle className="map-base map-base-blue" cx={11} cy={89} r={19} />
-      <circle className="map-base map-base-red" cx={89} cy={11} r={19} />
+      <rect className="map-ground" x={0} y={0} width={100} height={100} />
+      {version && !failed && (
+        <image className="map-image" href={minimapUrl(version)} x={0} y={0} width={100} height={100}
+          preserveAspectRatio="none" onError={() => setFailed(true)} />
+      )}
+      <rect className="map-shade" x={0} y={0} width={100} height={100} />
       {/* the losing base burns: shown through CSS when its nexus fell */}
-      <circle className="map-base-ruin map-base-ruin-blue" cx={11} cy={89} r={19} />
-      <circle className="map-base-ruin map-base-ruin-red" cx={89} cy={11} r={19} />
-      <line className="map-river" x1={20} y1={20} x2={80} y2={80} />
-      <polyline className="map-lane" points="9,89 9,9 89,9" />
-      <polyline className="map-lane" points="11,91 91,91 91,11" />
-      <line className="map-lane" x1={11} y1={89} x2={89} y2={11} />
-      <circle className="map-pit" cx={BARON_PIT.x} cy={BARON_PIT.y} r={5.5} />
-      <circle className="map-pit" cx={DRAGON_PIT.x} cy={DRAGON_PIT.y} r={5.5} />
+      <circle className="map-base-ruin map-base-ruin-blue" cx={MAP_LAYOUT.BLUE.nexus.x} cy={MAP_LAYOUT.BLUE.nexus.y} r={19} />
+      <circle className="map-base-ruin map-base-ruin-red" cx={MAP_LAYOUT.RED.nexus.x} cy={MAP_LAYOUT.RED.nexus.y} r={19} />
     </g>
   )
 }
@@ -131,9 +134,13 @@ function Objective({ p, name, state, extra }: { p: Point; name: string; state: M
   )
 }
 
-/** The map as it stood when the game ended: champions by role with their scores, structures, objectives and nexuses. */
-export default function MatchMap({ result, events, champions, names }: {
-  result: MatchResult; events: MatchEvent[]; champions: Map<number, Champion>; names: Record<Side, string>
+/**
+ * The map as it stood when the game ended: champions by role with their scores, structures, objectives and nexuses.
+ * With `live` it is the map mid-game for the events so far: nothing that gives the outcome away (scores, MVP and
+ * ACE, the verdict) is shown.
+ */
+export default function MatchMap({ result, events, champions, names, live = false }: {
+  result: MatchResult; events: MatchEvent[]; champions: Map<number, Champion>; names: Record<Side, string>; live?: boolean
 }) {
   const state = buildMapState(events)
   const fallen = SIDES.find((side) => state[side].nexusDestroyed)
@@ -155,12 +162,17 @@ export default function MatchMap({ result, events, champions, names }: {
         )}
         <Objective p={BARON_PIT} name="Baron" state={state} />
         <Objective p={DRAGON_PIT} name="Dragon" state={state} extra={dragonExtra} />
-        {result.players.map((p) => (
+        {result.players.map((p) => live ? (
+          <div key={`${p.team}:${p.lane}`} className={`map-champ map-champ-${p.team.toLowerCase()}`} style={at(MAP_LAYOUT[p.team].champions[p.lane])}
+            role="img" aria-label={`${p.name}, ${p.champion}, ${LANE_LABEL[p.lane]}, ${names[p.team]}`}>
+            <ChampionIcon champion={champions.get(p.champion_id)} size={40} />
+          </div>
+        ) : (
           <PlayerMarker key={p.player_id} player={p} champion={champions.get(p.champion_id)} teamName={names[p.team]}
             mvp={p.player_id === result.mvp.player_id} ace={p.player_id === result.ace.player_id} />
         ))}
       </div>
-      <figcaption className="stack">
+      {!live && <figcaption className="stack">
         <p>
           {fallen
             ? <><strong>{names[other(fallen)]}</strong> destroyed <strong>{names[fallen]}</strong>'s nexus.</>
@@ -177,7 +189,7 @@ export default function MatchMap({ result, events, champions, names }: {
           <li>Number under a champion: performance score (hover for details)</li>
           <li>Dragon and Baron: taken by blue : red</li>
         </ul>
-      </figcaption>
+      </figcaption>}
     </figure>
   )
 }

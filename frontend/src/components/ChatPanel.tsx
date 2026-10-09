@@ -1,13 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
 import { useChat } from '../hooks/useChat'
+import { playSound } from '../lib/sound'
 
 const MAX_LENGTH = 200
 
 /** All-chat for champ select: both players, team-coloured names, Enter to send. */
 export default function ChatPanel({ gameId, myUserId }: { gameId: number; myUserId: number }) {
-  const { messages, send } = useChat(gameId)
+  const { messages, loaded, send } = useChat(gameId)
   const [text, setText] = useState('')
   const log = useRef<HTMLOListElement>(null)
+
+  // sound for lines from the opponent that arrive after the history has loaded
+  const lastHeard = useRef<number | null>(null)
+  useEffect(() => {
+    if (!loaded) return
+    const newest = messages.reduce((max, m) => Math.max(max, m.id), 0)
+    const heard = lastHeard.current
+    lastHeard.current = newest
+    if (heard !== null && messages.some((m) => m.id > heard && m.user_id !== myUserId)) playSound('chatReceive')
+  }, [messages, loaded, myUserId])
 
   // keep the newest line in view
   useEffect(() => {
@@ -19,7 +30,12 @@ export default function ChatPanel({ gameId, myUserId }: { gameId: number; myUser
     e.preventDefault()
     const body = text.trim()
     if (!body || send.isPending) return
-    send.mutate(body, { onSuccess: () => setText('') })
+    send.mutate(body, {
+      onSuccess: () => {
+        playSound('chatSend')
+        setText('')
+      },
+    })
   }
 
   return (

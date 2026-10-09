@@ -25,5 +25,5 @@ export function useChat(gameId: number, enabled = true) {
     mutationFn: (text: string) => api<ChatMessage>(`/games/${gameId}/chat`, { body: { text } }),
     onSuccess: (message) => addChatMessage(qc, gameId, message),
   })
-  return { messages: messages.data ?? [], send }
+  return { messages: messages.data ?? [], loaded: messages.isFetched, send }
 }

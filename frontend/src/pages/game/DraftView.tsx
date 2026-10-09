@@ -7,9 +7,13 @@ import { ChampionIcon, LaneIcon, championArt } from '../../components/ChampionAr
 import { ErrorNotice, Pips } from '../../components/common'
 import ChatPanel from '../../components/ChatPanel'
 import TeamCard from '../../components/TeamCard'
+import { useCountdownTick } from '../../hooks/useCountdownTick'
 import { useChampions, useCountdown } from '../../hooks/useData'
-import { LANE_LABEL, TIER_LABEL, comfortTier, isHidden, isSolo } from '../../lib/format'
+import { useTurnAlert } from '../../hooks/useTurnAlert'
+import { alertsState, disableAlerts, enableAlerts, turnAlertKey } from '../../lib/alerts'
+import { LANE_LABEL, TIER_LABEL, TIER_MODIFIER, comfortTier, isHidden, isSolo, rankLabel } from '../../lib/format'
 import { lineupAssignments, swapLanes, type Lineup, type SwapKind } from '../../lib/lineup'
+import { isSoundOn, playSound, setSoundOn } from '../../lib/sound'
 
 interface PoolHint {
   player: string
@@ -72,9 +76,14 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
   }, [game.teams, me])
 
   const act = useMutation({
-    mutationFn: (championId: number) =>
-      api(`/games/${game.game_id}/draft/${action === 'PICK' ? 'pick' : 'ban'}`, { body: { champion_id: championId } }),
-    onSuccess: () => {
+    // resolves to the action that was taken: by the time it succeeds, `action` may already be the next one
+    mutationFn: async (championId: number) => {
+      const taken = action
+      await api(`/games/${game.game_id}/draft/${taken === 'PICK' ? 'pick' : 'ban'}`, { body: { champion_id: championId } })
+      return taken
+    },
+    onSuccess: (taken) => {
+      playSound(taken === 'BAN' ? 'ban' : 'lock')
       setSelected(null)
       onChange()
     },
@@ -92,14 +101,44 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
   const saveLineup = useMutation({
     mutationFn: ({ side, lineup }: { side: Side; lineup: Lineup }) =>
       api(`/games/${game.game_id}/lineup`, { method: 'PUT', body: { assignments: lineupAssignments(lineup), side: solo ? side : undefined } }),
-    onSuccess: onChange,
+    onSuccess: () => {
+      playSound('swap')
+      onChange()
+    },
     onError: onChange,
   })
   const lockLineup = useMutation({
     mutationFn: (side: Side) => api(`/games/${game.game_id}/lineup/ready${solo ? `?side=${side}` : ''}`, { method: 'POST' }),
-    onSuccess: onChange,
+    onSuccess: () => {
+      playSound('lock')
+      onChange()
+    },
     onError: onChange,
   })
+
+  // ----- sound and "your turn" alerts
+  const [soundOn, setSoundOnState] = useState(isSoundOn)
+  const [alerts, setAlerts] = useState(alertsState)
+  useTurnAlert(
+    turnAlertKey({ solo, myTurn: !finalizing && myTurn, canFinalize: canEdit(game.you.team) }),
+    finalizing ? 'Finalize your lineup' : `Your turn to ${action === 'PICK' ? 'pick' : 'ban'}`,
+  )
+
+  useCountdownTick(draft.expires_at, draft.timers_enabled && !finalizing && myTurn)
+
+  // buzzer when the timer ran out on me and the server acted for me
+  const seenHistory = useRef(draft.history.length)
+  useEffect(() => {
+    const fresh = draft.history.slice(seenHistory.current)
+    seenHistory.current = draft.history.length
+    if (fresh.some((h) => h.auto && (solo || h.team === game.you.team))) playSound('buzzer')
+  }, [draft.history, solo, game.you.team])
+
+  function toggleSound() {
+    setSoundOn(!soundOn)
+    setSoundOnState(!soundOn)
+    if (!soundOn) playSound('select')
+  }
 
   function swap(side: Side, a: Lane, b: Lane, kind: SwapKind) {
     const current = lineups[side]
@@ -167,6 +206,26 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
                 />
               ))}
             </div>
+            <div className="cs-alerts">
+              <button className="cs-alert-toggle" aria-pressed={soundOn} onClick={toggleSound}>
+                {soundOn ? '🔊 Sound on' : '🔇 Sound off'}
+              </button>
+              {!solo && alerts !== 'unsupported' && (
+                <button
+                  className="cs-alert-toggle"
+                  aria-pressed={alerts === 'on'}
+                  disabled={alerts === 'blocked'}
+                  onClick={() => (alerts === 'on' ? setAlerts(disableAlerts()) : enableAlerts().then(setAlerts))}
+                  title={
+                    alerts === 'blocked'
+                      ? 'Notifications are blocked for this site. Allow them in your browser’s site settings.'
+                      : 'Get a desktop notification when it is your turn and you are in another tab or window'
+                  }
+                >
+                  {alerts === 'on' ? '🔔 Turn alerts on' : alerts === 'blocked' ? '🔕 Turn alerts blocked' : '🔕 Turn alerts off'}
+                </button>
+              )}
+            </div>
           </div>
           <SideHeader side="RED" game={game} byId={byId} preview={preview} me={me} />
         </header>
@@ -220,7 +279,10 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
                       key={c.id}
                       className={`cs-champ ${selected === c.id ? 'selected' : ''} ${isUsed ? 'used' : ''}`}
                       disabled={isUsed}
-                      onClick={() => setSelected(c.id)}
+                      onClick={() => {
+                        if (selected !== c.id) playSound('select')
+                        setSelected(c.id)
+                      }}
                       onDoubleClick={() => myTurn && !isUsed && !act.isPending && act.mutate(c.id)}
                       title={`${c.name} · ${c.class}${best ? ` · ${best.player} (${LANE_LABEL[best.lane]}): ${TIER_LABEL[best.tier]}` : ''}`}
                     >
@@ -268,7 +330,7 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
                 {editableSides.map((s) => (
                   <button
                     key={s}
-                    className="cs-lock-in"
+                    className={`cs-lock-in ${canEdit(s) ? 'mine' : ''}`}
                     disabled={!canEdit(s) || lockLineup.isPending || saveLineup.isPending}
                     onClick={() => lockLineup.mutate(s)}
                   >
@@ -280,7 +342,7 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
               </div>
             ) : (
               <button
-                className={`cs-lock-in ${action === 'BAN' ? 'ban' : ''}`}
+                className={`cs-lock-in ${action === 'BAN' ? 'ban' : ''} ${myTurn ? 'mine' : ''}`}
                 disabled={!myTurn || !selected || act.isPending}
                 onClick={() => selected && act.mutate(selected)}
               >
@@ -396,6 +458,15 @@ function SwapIcon({ size = 14 }: { size?: number }) {
   )
 }
 
+function InfoIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg className="cs-info-icon" width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+      <circle cx="8" cy="8" r="6.5" />
+      <path d="M8 7.2v4M8 4.6v.2" />
+    </svg>
+  )
+}
+
 interface ColumnProps extends SideProps {
   solo: boolean
   seconds: number | null
@@ -416,6 +487,7 @@ function PickColumn({ side, game, byId, preview, me, solo, seconds, lineup, edit
   const picks = side === 'BLUE' ? draft.blue_picks : draft.red_picks
   const now = activeSlot(game, side, 'PICK')
   const roster = game.teams[side]?.roster
+  const [cardLane, setCardLane] = useState<Lane | null>(null)
 
   const rows = LANES.map((lane, i) => {
     const player: RosterPlayer | null = (lineup ? playerById(game, side, lineup.players[lane]) : null) ?? roster?.[lane] ?? null
@@ -431,6 +503,7 @@ function PickColumn({ side, game, byId, preview, me, solo, seconds, lineup, edit
       {rows.map(({ lane, i, player, locked, hovering, champ, tier }) => {
         const active = i === now
         const open = menuLane === lane
+        const cardOpen = cardLane === lane && !!player
         return (
           <div key={lane} className="cs-row-wrap">
             <div
@@ -447,7 +520,10 @@ function PickColumn({ side, game, byId, preview, me, solo, seconds, lineup, edit
                 {editable && (
                   <button
                     className={`cs-swap-btn ${open ? 'open' : ''}`}
-                    onClick={() => onOpenMenu(open ? null : lane)}
+                    onClick={() => {
+                      setCardLane(null)
+                      onOpenMenu(open ? null : lane)
+                    }}
                     aria-label={`Swap ${LANE_LABEL[lane]}`}
                     aria-expanded={open}
                     title="Swap champion or position"
@@ -459,7 +535,22 @@ function PickColumn({ side, game, byId, preview, me, solo, seconds, lineup, edit
               <div className="cs-row-text">
                 {active && <span className="cs-row-status">{solo || side === me ? 'Picking…' : 'Opponent picking…'}</span>}
                 <span className="cs-row-lane">{ROW_LANE_LABEL[lane]}</span>
-                <span className="cs-row-player">{player?.name ?? 'Empty'}</span>
+                {player ? (
+                  <button
+                    className="cs-row-player cs-row-player-btn"
+                    onClick={() => {
+                      if (open) onOpenMenu(null)
+                      setCardLane(cardOpen ? null : lane)
+                    }}
+                    aria-expanded={cardOpen}
+                    title="Show player stats and champion pool"
+                  >
+                    <span className="cs-row-player-name">{player.name}</span>
+                    <InfoIcon />
+                  </button>
+                ) : (
+                  <span className="cs-row-player">Empty</span>
+                )}
                 {champ && (
                   <span className="cs-row-champ">
                     {champ.name}
@@ -478,6 +569,9 @@ function PickColumn({ side, game, byId, preview, me, solo, seconds, lineup, edit
                 onClose={() => onOpenMenu(null)}
               />
             )}
+            {cardOpen && player && (
+              <PlayerCard player={player} up={i >= 3} game={game} byId={byId} onClose={() => setCardLane(null)} />
+            )}
           </div>
         )
       })}
@@ -485,14 +579,8 @@ function PickColumn({ side, game, byId, preview, me, solo, seconds, lineup, edit
   )
 }
 
-interface SwapRow {
-  lane: Lane
-  player: RosterPlayer | null
-  locked: Champion | undefined
-}
-
-/** "Swap for…": trade positions with a teammate (each keeps their champion) or trade champions. */
-function SwapMenu({ lane, up, rows, onSwap, onClose }: { lane: Lane; up: boolean; rows: SwapRow[]; onSwap: (other: Lane, kind: SwapKind) => void; onClose: () => void }) {
+/** Closes a row popup on Escape or a press outside its row (the row's own buttons toggle it). */
+function usePopupDismiss(onClose: () => void) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -506,6 +594,77 @@ function SwapMenu({ lane, up, rows, onSwap, onClose }: { lane: Lane; up: boolean
       document.removeEventListener('keydown', onKey)
     }
   }, [onClose])
+  return ref
+}
+
+const PLAYER_STATS: { key: 'aggr' | 'aware' | 'pos' | 'dmg' | 'cs'; label: string }[] = [
+  { key: 'aggr', label: 'Aggression' },
+  { key: 'aware', label: 'Awareness' },
+  { key: 'pos', label: 'Positioning' },
+  { key: 'dmg', label: 'Damage' },
+  { key: 'cs', label: 'CS' },
+]
+
+/** A player's stats and champion pool, opened from their name. Hidden opponents only show that the data is secret. */
+function PlayerCard({ player, up, game, byId, onClose }: { player: RosterPlayer; up: boolean; game: GameState; byId: Map<number, Champion>; onClose: () => void }) {
+  const ref = usePopupDismiss(onClose)
+  const draft = game.draft!
+  const banned = new Set(draft.bans.map((b) => b.champion_id))
+  const picked = new Set([...draft.blue_picks, ...draft.red_picks])
+  return (
+    <div ref={ref} className={`cs-swap-menu cs-player-card ${up ? 'up' : ''}`} role="dialog" aria-label={`${player.name} stats and champion pool`}>
+      <div className="cs-swap-head">
+        <span>{player.name}</span>
+        <button className="cs-swap-close" onClick={onClose} aria-label="Close">✕</button>
+      </div>
+      {isHidden(player) ? (
+        <p className="cs-player-note">{LANE_LABEL[player.role]} · stats and champion pool stay hidden until the match ends.</p>
+      ) : (
+        <>
+          <p className="cs-player-note">
+            {[LANE_LABEL[player.role], player.region, `age ${player.age}`, player.riot?.rank && rankLabel(player.riot.rank)].filter(Boolean).join(' · ')}
+          </p>
+          <div className="cs-swap-group">Stats · {player.stat_total} / {player.stat_budget}</div>
+          <dl className="cs-player-stats">
+            {PLAYER_STATS.map((s) => (
+              <div key={s.key}>
+                <dt>{s.label}</dt>
+                <dd>
+                  <span className="cs-player-bar" aria-hidden="true"><i style={{ width: `${player[s.key] * 10}%` }} /></span>
+                  {player[s.key]}
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <div className="cs-swap-group">Champion pool</div>
+          <ol className="cs-player-pool">
+            {player.pool.map((id) => {
+              const tier = comfortTier(player.pool, id)
+              const gone = banned.has(id) ? 'Banned' : picked.has(id) ? 'Picked' : null
+              return (
+                <li key={id} className={gone ? 'gone' : ''}>
+                  <ChampionIcon champion={byId.get(id)} size={30} />
+                  <span className="cs-player-pool-name">{byId.get(id)?.name ?? '—'}</span>
+                  <span className={`cs-row-tier tier-${tier.toLowerCase()}`}>{gone ?? `${TIER_LABEL[tier]} +${TIER_MODIFIER[tier]}%`}</span>
+                </li>
+              )
+            })}
+          </ol>
+        </>
+      )}
+    </div>
+  )
+}
+
+interface SwapRow {
+  lane: Lane
+  player: RosterPlayer | null
+  locked: Champion | undefined
+}
+
+/** "Swap for…": trade positions with a teammate (each keeps their champion) or trade champions. */
+function SwapMenu({ lane, up, rows, onSwap, onClose }: { lane: Lane; up: boolean; rows: SwapRow[]; onSwap: (other: Lane, kind: SwapKind) => void; onClose: () => void }) {
+  const ref = usePopupDismiss(onClose)
   return (
     <div ref={ref} className={`cs-swap-menu ${up ? 'up' : ''}`} role="dialog" aria-label={`Swap ${LANE_LABEL[lane]}`}>
       <div className="cs-swap-head">

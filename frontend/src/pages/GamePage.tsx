@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import type { ChatMessage, GameState } from '../api/types'
@@ -9,6 +9,7 @@ import { addChatMessage } from '../hooks/useChat'
 import SideBanner from '../components/SideBanner'
 import DraftView from './game/DraftView'
 import LobbyView from './game/LobbyView'
+import ReplayView from './game/ReplayView'
 import ResultView from './game/ResultView'
 
 export default function GamePage() {
@@ -39,6 +40,12 @@ export default function GamePage() {
 
   const connected = useGameSocket(gameId, onEvent)
 
+  // the replay only plays for someone who was here when the match was simulated, not when reopening a finished game
+  const sawLive = useRef(false)
+  const [replayDone, setReplayDone] = useState(false)
+  const endReplay = useCallback(() => setReplayDone(true), [])
+  if (game && game.status !== 'COMPLETED' && game.status !== 'CANCELLED') sawLive.current = true
+
   if (isLoading) return <Loading label="Loading game…" />
   if (error || !game) {
     return (
@@ -62,7 +69,9 @@ export default function GamePage() {
       {(game.status === 'DRAFTING' || game.status === 'LANE_ASSIGNMENT' || game.status === 'READY_TO_SIMULATE' || game.status === 'SIMULATING') && (
         <DraftView game={game} onChange={refresh} />
       )}
-      {game.status === 'COMPLETED' && <ResultView game={game} />}
+      {game.status === 'COMPLETED' && (sawLive.current && !replayDone
+        ? <ReplayView game={game} onDone={endReplay} />
+        : <ResultView game={game} />)}
       {game.status === 'CANCELLED' && (
         <div className="card stack">
           <h2>Game cancelled</h2>
