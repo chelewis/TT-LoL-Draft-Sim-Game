@@ -38,6 +38,7 @@ class UserOut(BaseModel):
     id: int
     username: str
     email: str
+    is_admin: bool = False
 
 
 class TokenOut(BaseModel):

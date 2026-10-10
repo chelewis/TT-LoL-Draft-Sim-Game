@@ -1,7 +1,9 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, NavLink, Route, Routes } from 'react-router-dom'
 import { useAuth } from './auth/AuthContext'
-import { RequireAuth } from './components/common'
+import { AdminMenu } from './components/AdminMenu'
+import { RequireAdmin, RequireAuth } from './components/common'
+import AdminPage from './pages/admin/AdminPage'
 import GamePage from './pages/GamePage'
 import HomePage from './pages/HomePage'
 import LoginPage from './pages/LoginPage'
@@ -20,6 +22,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           <NavLink to="/teams">Teams</NavLink>
           <NavLink to="/players">Players</NavLink>
           <NavLink to="/coaches">Coaches</NavLink>
+          {user?.is_admin && <AdminMenu />}
         </nav>
         <div className="row">
           <span className="muted small">{user?.username}</span>
@@ -56,6 +59,7 @@ export default function App() {
                 <Route path="/players/new" element={<PlayerEditorPage />} />
                 <Route path="/players/:playerId" element={<PlayerEditorPage />} />
                 <Route path="/coaches" element={<CoachesPage />} />
+                <Route path="/admin/*" element={<RequireAdmin><AdminPage /></RequireAdmin>} />
                 <Route path="*" element={<p className="muted">Page not found.</p>} />
               </Routes>
             </Shell>

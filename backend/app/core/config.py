@@ -23,10 +23,15 @@ class Settings(BaseSettings):
     riot_api_key: str = ""
     riot_cache_seconds: int = 3600
     riot_user_cooldown_seconds: int = 10
+    # usernames allowed to open the Admin tab and edit global config (JSON list), e.g. LDM_ADMIN_USERNAMES=["lewis"]
+    admin_usernames: list[str] = []
 
     @property
     def riot_enabled(self) -> bool:
         return bool(self.riot_api_key)
+
+    def is_admin(self, username: str) -> bool:
+        return username.lower() in {name.lower() for name in self.admin_usernames}
 
 
 settings = Settings()

@@ -26,6 +26,13 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
+/** Admin-only pages. The server refuses the data anyway; this just explains why the page is empty. */
+export function RequireAdmin({ children }: { children: ReactNode }) {
+  const { user } = useAuth()
+  if (!user?.is_admin) return <div className="notice notice-error" role="alert">This page is for admins only.</div>
+  return <>{children}</>
+}
+
 export function ChampionTag({ champion }: { champion: Champion | undefined }) {
   if (!champion) return <span className="muted">?</span>
   return (

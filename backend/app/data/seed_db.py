@@ -11,13 +11,15 @@ from sqlalchemy.orm import Session
 
 from app.data.champion_sync import log_report, sync_champions
 from app.data.loader import SeedData, SeedDataError, load_seed_data
+from app.data.matchup_seed import seed_matchups
 from app.models import Champion, Coach, Player, PlayerPoolEntry, Team, TeamRosterSlot
 
 log = logging.getLogger(__name__)
 
 
 def seed_database(db: Session, data: SeedData | None = None) -> None:
-    """Run at every backend start: sync champions with the CSV, and create default teams once."""
+    """Run at every backend start: sync champions with the CSV, and create the win rate matrices and default
+    teams once."""
     if data is None:
         try:
             data = load_seed_data()
@@ -31,6 +33,7 @@ def seed_database(db: Session, data: SeedData | None = None) -> None:
         log.warning("seed data: %s", warning)
 
     log_report(sync_champions(db, data))
+    seed_matchups(db)
 
     if db.scalar(select(func.count()).select_from(Team).where(Team.owner_user_id.is_(None))):
         return

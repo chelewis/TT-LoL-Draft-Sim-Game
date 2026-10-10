@@ -7,6 +7,21 @@ export interface User {
   id: number
   username: string
   email: string
+  is_admin: boolean
+}
+
+/** Admin win rate matrices: champions on the same team ('ally') or on opposite teams ('enemy'). */
+export type MatchupKind = 'ally' | 'enemy'
+export interface MatchupChampion {
+  id: number
+  name: string
+}
+/** [champion a, champion b, win rate % or null, games, edited]; a < b, and for 'enemy' the rate is champion a's. */
+export type MatchupCell = [number, number, number | null, number, boolean]
+export interface MatchupMatrix {
+  kind: MatchupKind
+  champions: MatchupChampion[]
+  cells: MatchupCell[]
 }
 
 export interface Champion {

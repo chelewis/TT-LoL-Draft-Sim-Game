@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Response
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.core.errors import conflict, unauthorized
@@ -19,7 +20,7 @@ log = logging.getLogger(__name__)
 
 
 def _out(user: User) -> UserOut:
-    return UserOut(id=user.id, username=user.username, email=user.email)
+    return UserOut(id=user.id, username=user.username, email=user.email, is_admin=settings.is_admin(user.username))
 
 
 @router.post("/register", response_model=TokenOut, status_code=201, dependencies=[Depends(auth_rate_limit)])

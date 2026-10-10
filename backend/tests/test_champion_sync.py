@@ -12,7 +12,7 @@ from app.data.champion_sync import sync_champions
 from app.data.loader import SEED_DIR, load_seed_data
 from app.game.models import Champion as EngineChampion
 from app.main import app
-from app.models import Champion
+from app.models import Champion, ChampionMatchup
 from scripts import sync_champions as script
 
 
@@ -192,6 +192,19 @@ def test_changed_id_is_moved_when_nothing_uses_it(db):
     assert db.query(Champion).count() == TOTAL                  # moved, not duplicated
     again = sync_champions(db, renumbered(data, "Senna", NEW_ID + 40))
     assert not again.changed
+
+
+def test_win_rate_matrix_cells_follow_a_renumbered_champion(db):
+    data = load_seed_data()
+    senna = next(c for c in data.champions if c.name == "Senna")
+    other = next(c for c in data.champions if c.id > senna.id)
+    db.add(ChampionMatchup(kind="enemy", champion_a_id=senna.id, champion_b_id=other.id, win_rate=60.0, games=10, wins=6))
+    db.commit()
+    sync_champions(db, renumbered(data, "Senna", NEW_ID + 40))
+    cells = db.query(ChampionMatchup).filter_by(kind="enemy").all()
+    assert [(c.champion_a_id, c.champion_b_id, c.win_rate, c.wins) for c in cells] == [(other.id, NEW_ID + 40, 40.0, 4)]
+    assert db.query(ChampionMatchup).filter_by(champion_a_id=senna.id).count() == 0
+    assert db.query(ChampionMatchup).filter_by(kind="ally", champion_b_id=NEW_ID + 40).count() > 0
 
 
 def test_changed_id_is_refused_when_players_use_it(db, alice):
