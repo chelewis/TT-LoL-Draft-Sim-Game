@@ -34,7 +34,7 @@ To play alone, open the **Single Player** tab on the home page: you pick a team 
 
 For multiplayer, register two accounts (use a second browser profile or a private window), create a lobby on the **Multiplayer** tab with one, and join it with the code from the other.
 
-Copy `backend/.env.example` to `backend/.env` to set your own values (`.env` is git-ignored and must never be committed). Settings come from environment variables prefixed `LDM_` (see `backend/app/core/config.py`): `LDM_DATABASE_URL` (default `sqlite:///./league_draft_manager.db`), `LDM_SECRET_KEY` (**change it outside development**), `LDM_CORS_ORIGINS`. For PostgreSQL: `LDM_DATABASE_URL=postgresql+psycopg://user:pass@host/db`, then `alembic upgrade head`.
+Copy `backend/.env.example` to `backend/.env` to set your own values (`.env` is git-ignored and must never be committed). Settings come from environment variables prefixed `LDM_` (see `backend/app/core/config.py`): `LDM_DATABASE_URL` (default `sqlite:///./league_draft_manager.db`), `LDM_SECRET_KEY` (**change it outside development**), `LDM_CORS_ORIGINS`. For PostgreSQL: `LDM_DATABASE_URL=postgresql+psycopg://user:pass@host/db`, then `alembic upgrade head`. The Docker image (`backend/Dockerfile`) runs `alembic upgrade head` itself every time the container starts, so a rebuild after `git pull` applies new migrations automatically.
 
 ## Import players from Riot accounts (optional)
 
