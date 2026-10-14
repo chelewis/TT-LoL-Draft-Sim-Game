@@ -4,7 +4,7 @@ import { api } from '../../api/client'
 import type { GameState, Side } from '../../api/types'
 import { ErrorNotice, Loading } from '../../components/common'
 import TeamCard from '../../components/TeamCard'
-import { draftRules, isSolo } from '../../lib/format'
+import { draftRules, isSolo, seriesLabel } from '../../lib/format'
 import { useTeams } from '../../hooks/useData'
 
 /** Single player: pick a team for each side from your own teams and the defaults, then start the draft. */
@@ -30,6 +30,7 @@ function SoloLobby({ game, onChange }: { game: GameState; onChange: () => void }
         <p className="muted">
           You control both sides. Choose a team for Blue and for Red (the same team on both sides is fine), then make every
           pick and ban yourself. Draft: {draftRules(game.settings)}.
+          {seriesLabel(game.settings) && <> Format: {seriesLabel(game.settings)}.</>}
         </p>
       </div>
       <div className="grid two">
@@ -119,6 +120,7 @@ function MultiLobby({ game, onChange }: { game: GameState; onChange: () => void 
           <p className="small muted">
             Draft: {draftRules(game.settings)}
           </p>
+          {seriesLabel(game.settings) && <p className="small muted">Format: {seriesLabel(game.settings)}</p>}
         </div>
         <div className="code-box" aria-label="Lobby code">
           <span className="muted small">Lobby code</span>

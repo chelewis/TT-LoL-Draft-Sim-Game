@@ -37,6 +37,18 @@ export function draftRules(s: { bans_enabled: boolean; timers_enabled: boolean; 
   return parts.join(' · ')
 }
 
+/** "Best of 3 · Fearless", or "" for a single game. */
+export function seriesLabel(s: { series_format?: string; format?: string; fearless: boolean }): string {
+  const format = s.series_format ?? s.format
+  if (!format || format === 'BO1') return ''
+  return `Best of ${format.slice(2)}${s.fearless ? ' · Fearless' : ''}`
+}
+
+/** Short form for badges: "Bo3", "Bo5". */
+export function seriesShort(format: string): string {
+  return `Bo${format.slice(2)}`
+}
+
 const RIOT_SOURCE_LABEL: Record<string, string> = { SOLO: 'Ranked solo', FLEX: 'Ranked flex', NORMAL: 'Normal games' }
 const RIOT_SOURCE_SHORT: Record<string, string> = { FLEX: 'Flex', NORMAL: 'Normals' }
 

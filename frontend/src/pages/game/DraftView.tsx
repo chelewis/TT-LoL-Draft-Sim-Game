@@ -50,9 +50,11 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
 
   const myTurn = draft.current_team === me
   const action = draft.action_type
+  // fearless draft: champions picked earlier in the series are out for good
+  const fearless = useMemo(() => new Set<number>(draft.fearless_locked ?? []), [draft])
   const used = useMemo(
-    () => new Set<number>([...draft.bans.map((b) => b.champion_id), ...draft.blue_picks, ...draft.red_picks]),
-    [draft],
+    () => new Set<number>([...draft.bans.map((b) => b.champion_id), ...draft.blue_picks, ...draft.red_picks, ...fearless]),
+    [draft, fearless],
   )
   const byId = useMemo(() => new Map((champions.data ?? []).map((c) => [c.id, c])), [champions.data])
 
@@ -269,22 +271,28 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
                 aria-label="Search champions"
               />
             </div>
+            {fearless.size > 0 && (
+              <p className="small muted cs-fearless-note">
+                Fearless Draft: {fearless.size} champions played earlier in the series can't be picked or banned.
+              </p>
+            )}
             <div className="cs-grid-scroll">
               <div className="cs-grid">
                 {visible.map((c) => {
                   const isUsed = used.has(c.id)
+                  const isFearless = fearless.has(c.id)
                   const best = hints.get(c.id)?.[0]
                   return (
                     <button
                       key={c.id}
-                      className={`cs-champ ${selected === c.id ? 'selected' : ''} ${isUsed ? 'used' : ''}`}
+                      className={`cs-champ ${selected === c.id ? 'selected' : ''} ${isUsed ? 'used' : ''} ${isFearless ? 'fearless' : ''}`}
                       disabled={isUsed}
                       onClick={() => {
                         if (selected !== c.id) playSound('select')
                         setSelected(c.id)
                       }}
                       onDoubleClick={() => myTurn && !isUsed && !act.isPending && act.mutate(c.id)}
-                      title={`${c.name} · ${c.class}${best ? ` · ${best.player} (${LANE_LABEL[best.lane]}): ${TIER_LABEL[best.tier]}` : ''}`}
+                      title={`${c.name} · ${c.class}${isFearless ? ' · Played earlier in the series' : ''}${best ? ` · ${best.player} (${LANE_LABEL[best.lane]}): ${TIER_LABEL[best.tier]}` : ''}`}
                     >
                       <span className="cs-champ-frame">
                         <ChampionIcon champion={c} size={64} />

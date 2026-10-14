@@ -8,6 +8,7 @@ import GamePage from './pages/GamePage'
 import HomePage from './pages/HomePage'
 import LoginPage from './pages/LoginPage'
 import RiotImportPage from './pages/RiotImportPage'
+import SeriesPage from './pages/SeriesPage'
 import { CoachesPage, PlayerEditorPage, PlayersPage, TeamEditorPage, TeamsPage } from './pages/ManagementPages'
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -51,6 +52,7 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<HomePage />} />
                 <Route path="/game/:gameId" element={<GamePage />} />
+                <Route path="/series/:seriesId" element={<SeriesPage />} />
                 <Route path="/teams" element={<TeamsPage />} />
                 <Route path="/teams/new" element={<TeamEditorPage />} />
                 <Route path="/teams/:teamId" element={<TeamEditorPage />} />

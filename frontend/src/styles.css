@@ -103,6 +103,11 @@ table.compact th, table.compact td { padding: 4px 6px; font-size: 0.85rem; }
 
 .list-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--text); text-decoration: none; }
 .list-row:hover { border-color: var(--blue); }
+.history-row .list-row { flex: 1; min-width: 0; }
+.series-badge { color: var(--gold); border-color: var(--gold); }
+.side-choice button.side-blue.active { background: var(--blue); border-color: var(--blue); color: #fff; }
+.side-choice button.side-red.active { background: var(--red); border-color: var(--red); color: #fff; }
+.series-card .series-game { border-top: 1px solid var(--line); padding-top: 12px; }
 .code-box { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 18px; border: 1px dashed var(--gold); border-radius: 10px; }
 .code-box strong { font-size: 1.8rem; letter-spacing: 0.15em; color: var(--gold); }
 
@@ -367,6 +372,8 @@ table.compact th, table.compact td { padding: 4px 6px; font-size: 0.85rem; }
 .cs .cs-champ.used { opacity: 1; }
 .cs-champ.used .champ-icon { filter: grayscale(1) brightness(0.35); }
 .cs-champ.used .cs-champ-name { text-decoration: line-through; opacity: 0.5; }
+.cs-champ.fearless .cs-champ-frame { outline: 2px dashed var(--hex-gold-dark); outline-offset: -2px; }
+.cs-fearless-note { margin: 0 0 6px; }
 .cs-champ-name { font-size: 0.72rem; max-width: 76px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
 .cs-comfort { position: absolute; top: -1px; right: -1px; min-width: 18px; height: 18px; display: grid; place-items: center; font-size: 0.68rem; line-height: 1; background: var(--hex-bg); border: 1px solid currentColor; }
 /* ban phase: a red "no entry" mark over a champion on hover, focus or when selected */
