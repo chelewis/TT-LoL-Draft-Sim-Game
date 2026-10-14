@@ -7,7 +7,7 @@ import { LANES, STYLES } from '../api/types'
 import { ErrorNotice, Loading } from '../components/common'
 import { OverBudgetBadge } from '../components/TeamCard'
 import { useChampions, useCoaches, usePlayers, useTeams } from '../hooks/useData'
-import { LANE_LABEL, isHidden, rankLabel, riotSourceLabel, riotSourceTag, titleCase } from '../lib/format'
+import { LANE_LABEL, isHidden, rankLabel, riotSourceLabel, riotSourceTag, roleLabel, titleCase } from '../lib/format'
 import { useRiotStatus } from './RiotImportPage'
 
 interface GameConfig {
@@ -173,8 +173,8 @@ export function TeamEditorPage() {
           <label key={lane}>{LANE_LABEL[lane]}
             <select value={roster[lane] ?? ''} onChange={(e) => setRoster({ ...roster, [lane]: e.target.value ? Number(e.target.value) : undefined })}>
               <option value="">Empty</option>
-              {(players.data ?? []).filter((p) => p.role === lane).map((p) => (
-                <option key={p.id} value={p.id}>{p.name} ({p.stat_total}){p.over_budget_by > 0 ? ' ⚠' : ''}{p.is_default ? ' — default' : ''}</option>
+              {(players.data ?? []).filter((p) => p.role === lane || p.secondary_role === lane).map((p) => (
+                <option key={p.id} value={p.id}>{p.name} ({p.stat_total}){p.role !== lane ? ' · secondary' : ''}{p.over_budget_by > 0 ? ' ⚠' : ''}{p.is_default ? ' — default' : ''}</option>
               ))}
             </select>
           </label>
@@ -211,7 +211,7 @@ export function PlayersPage() {
       <td>{p.name} {p.riot && <span className="badge" title="Imported from a Riot account (unverified)">Riot {p.riot.game_name}#{p.riot.tag_line}</span>}
         {p.riot?.rank && <span className="badge" title={`${riotSourceLabel(p.riot.rank.queue)} rank when imported: ${rankLabel(p.riot.rank, true)}`}>{rankLabel(p.riot.rank)}</span>}
         {p.riot && riotSourceTag(p.riot.data_source) && <span className="badge badge-warn" title={`Stats come from ${riotSourceLabel(p.riot.data_source)} (${p.riot.games_used ?? '?'} games), not solo queue`}>⚠ {riotSourceTag(p.riot.data_source)}</span>} {p.over_budget_by > 0 && <span className="badge badge-warn" title="Above the soft stat ceiling">⚠ +{p.over_budget_by}</span>}</td>
-      <td>{LANE_LABEL[p.role]}</td>
+      <td>{roleLabel(p)}</td>
       <td>{p.aggr}/{p.aware}/{p.pos}/{p.dmg}/{p.cs}</td>
       <td>{p.stat_total}</td>
       <td className="small muted">{p.pool.map((id) => names.get(id)).join(', ')}</td>
@@ -251,6 +251,7 @@ export function PlayerEditorPage() {
 
   const [name, setName] = useState('')
   const [role, setRole] = useState<Lane>('TOP')
+  const [secondary, setSecondary] = useState<Lane | ''>('')
   const [age, setAge] = useState(21)
   const [region, setRegion] = useState('')
   const [stats, setStats] = useState({ aggr: 5, aware: 5, pos: 5, dmg: 5, cs: 5 })
@@ -266,6 +267,8 @@ export function PlayerEditorPage() {
   const applyDraft = (draft: RiotPreview) => {
     const d = draft.player
     setName(d.name); setRole(d.role); setAge(d.age); setRegion(d.region)
+    // a refresh keeps the secondary role the user already chose; an import takes the suggestion
+    setSecondary((cur) => (cur && cur !== d.role ? cur : (d.secondary_role ?? '')))
     setStats({ aggr: d.aggr, aware: d.aware, pos: d.pos, dmg: d.dmg, cs: d.cs })
     setPool([...d.pool.map(String), '', '', '', '', ''].slice(0, 5))
     setRiotRef(draft.riot_ref)
@@ -277,7 +280,7 @@ export function PlayerEditorPage() {
   useEffect(() => {
     const p = existing.data
     if (!p) return
-    setName(p.name); setRole(p.role); setAge(p.age); setRegion(p.region)
+    setName(p.name); setRole(p.role); setSecondary(p.secondary_role ?? ''); setAge(p.age); setRegion(p.region)
     setStats({ aggr: p.aggr, aware: p.aware, pos: p.pos, dmg: p.dmg, cs: p.cs })
     setPool(p.pool.map(String))
   }, [existing.data])
@@ -302,7 +305,7 @@ export function PlayerEditorPage() {
 
   const save = useMutation({
     mutationFn: () => {
-      const body = { name, role, age, region, ...stats, pool: pool.map(Number), riot_ref: riotRef }
+      const body = { name, role, secondary_role: secondary || null, age, region, ...stats, pool: pool.map(Number), riot_ref: riotRef }
       return isNew ? api<Player>('/players', { body }) : api<Player>(`/players/${playerId}`, { method: 'PUT', body })
     },
     onSuccess: () => { invalidate(); navigate('/players') },
@@ -340,8 +343,14 @@ export function PlayerEditorPage() {
       <div className="card stack">
         <div className="grid two">
           <label>Name<input value={name} onChange={(e) => setName(e.target.value)} maxLength={40} required /></label>
-          <label>Role
-            <select value={role} onChange={(e) => setRole(e.target.value as Lane)}>{LANES.map((l) => <option key={l} value={l}>{LANE_LABEL[l]}</option>)}</select>
+          <label>Primary role
+            <select value={role} onChange={(e) => { const l = e.target.value as Lane; setRole(l); if (l === secondary) setSecondary('') }}>{LANES.map((l) => <option key={l} value={l}>{LANE_LABEL[l]}</option>)}</select>
+          </label>
+          <label>Secondary role
+            <select value={secondary} onChange={(e) => setSecondary(e.target.value as Lane | '')}>
+              <option value="">None</option>
+              {LANES.map((l) => <option key={l} value={l} disabled={l === role}>{LANE_LABEL[l]}</option>)}
+            </select>
           </label>
           <label>Age<input type="number" min={16} max={99} value={age} onChange={(e) => setAge(Number(e.target.value))} /></label>
           <label>Region<input value={region} onChange={(e) => setRegion(e.target.value)} maxLength={16} /></label>

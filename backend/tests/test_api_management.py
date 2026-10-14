@@ -7,8 +7,9 @@ STATS = {"aggr": 6, "aware": 6, "pos": 6, "dmg": 6, "cs": 6}   # total 30, withi
 POOL = [1, 2, 3, 4, 5]
 
 
-def make_player(api, role="TOP", name="P", pool=None, **stats):
-    body = {"name": name, "role": role, "age": 21, "region": "NA", **{**STATS, **stats}, "pool": pool or POOL}
+def make_player(api, role="TOP", name="P", pool=None, secondary_role=None, **stats):
+    body = {"name": name, "role": role, "secondary_role": secondary_role, "age": 21, "region": "NA",
+            **{**STATS, **stats}, "pool": pool or POOL}
     return api.post("/players", body)
 
 
@@ -156,6 +157,37 @@ def test_update_player_pool_and_role_lock(alice):
     assert res.status_code == 200 and res.json()["pool"] == [40, 41, 42, 43, 44]
     body["role"] = "MID"
     assert alice.put(f"/players/{p['id']}", body).status_code == 409   # on a roster: cannot change role
+
+
+def test_secondary_role(alice):
+    assert make_player(alice, "TOP", secondary_role="ADC").status_code == 400    # unknown lane
+    assert make_player(alice, "TOP", secondary_role="TOP").status_code == 400    # same as primary
+    roster = make_roster(alice)
+    coach = make_coach(alice)
+    flex = make_player(alice, "TOP", "Flex", pool=[40, 41, 42, 43, 44], secondary_role="MID").json()
+    assert flex["secondary_role"] == "MID"
+    team = alice.post("/teams", team_body(dict(roster, MID=flex["id"]), coach))
+    assert team.status_code == 201, team.text                                  # secondary lane is allowed
+    assert team.json()["roster"]["MID"]["id"] == flex["id"]
+    assert alice.post("/teams", team_body(dict(roster, JUNGLE=flex["id"]), coach, name="T2")).status_code == 400
+
+    body = {k: flex[k] for k in ("name", "role", "secondary_role", "age", "region", "aggr", "aware", "pos", "dmg",
+                                 "cs", "pool")}
+    body["role"], body["secondary_role"] = "MID", "TOP"
+    assert alice.put(f"/players/{flex['id']}", body).status_code == 200       # still covers MID
+    body["secondary_role"] = None
+    assert alice.put(f"/players/{flex['id']}", body).status_code == 200
+    body["role"], body["secondary_role"] = "TOP", "JUNGLE"
+    assert alice.put(f"/players/{flex['id']}", body).status_code == 409       # would drop MID while rostered there
+
+
+def test_duplicate_preserves_secondary_role(alice):
+    roster = make_roster(alice)
+    coach = make_coach(alice)
+    flex = make_player(alice, "TOP", "Flex", pool=[40, 41, 42, 43, 44], secondary_role="MID").json()
+    team = alice.post("/teams", team_body(dict(roster, MID=flex["id"]), coach)).json()
+    copy = alice.post(f"/teams/{team['id']}/duplicate").json()
+    assert copy["roster"]["MID"]["secondary_role"] == "MID"
 
 
 def test_duplicate_default_team(alice):

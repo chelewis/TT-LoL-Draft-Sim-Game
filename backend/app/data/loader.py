@@ -129,8 +129,12 @@ def load_seed_data(seed_dir: Path = SEED_DIR) -> SeedData:
     for r in _rows("Players.csv", seed_dir):
         if r["Role"] not in ROLE_TO_LANE:
             raise SeedDataError(f"Player {r['Name']!r} has unknown role {r['Role']!r}")
+        secondary = (r.get("SecondaryRole") or "").strip() or None   # optional column
+        if secondary is not None and (secondary not in ROLE_TO_LANE or secondary == r["Role"]):
+            raise SeedDataError(f"Player {r['Name']!r} has invalid secondary role {secondary!r}")
         players.append({
-            "id": int(r["ID"]), "name": r["Name"], "role": ROLE_TO_LANE[r["Role"]], "age": int(r["Age"]),
+            "id": int(r["ID"]), "name": r["Name"], "role": ROLE_TO_LANE[r["Role"]],
+            "secondary_role": ROLE_TO_LANE[secondary] if secondary else None, "age": int(r["Age"]),
             "aggr": int(r["aggr"]), "aware": int(r["aware"]), "pos": int(r["pos"]),
             "dmg": int(r["dmg"]), "cs": int(r["cs"]), "region": r["Region"],
         })

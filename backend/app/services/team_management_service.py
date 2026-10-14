@@ -37,7 +37,7 @@ def over_budget_by(player: Player, cfg: dict = CFG) -> int:
 
 def player_view(p: Player) -> dict:
     return {
-        "id": p.id, "name": p.name, "role": p.role, "age": p.age, "region": p.region,
+        "id": p.id, "name": p.name, "role": p.role, "secondary_role": p.secondary_role, "age": p.age, "region": p.region,
         "aggr": p.aggr, "aware": p.aware, "pos": p.pos, "dmg": p.dmg, "cs": p.cs,
         "pool": p.pool, "stat_total": p.stat_total, "stat_budget": stat_budget(p.riot_rank_tier),
         "over_budget_by": over_budget_by(p),
@@ -118,6 +118,11 @@ def _validate_player(db: Session, body: PlayerIn) -> None:
     lo, hi = CFG["stat_range"]
     if body.role not in LANES:
         raise bad_request(f"Role must be one of {', '.join(LANES)}.")
+    if body.secondary_role is not None:
+        if body.secondary_role not in LANES:
+            raise bad_request(f"Secondary role must be one of {', '.join(LANES)}.")
+        if body.secondary_role == body.role:
+            raise bad_request("The secondary role must differ from the primary role.")
     for stat in ("aggr", "aware", "pos", "dmg", "cs"):
         value = getattr(body, stat)
         if not lo <= value <= hi:
@@ -152,7 +157,7 @@ def _apply_riot(player: Player, body: PlayerIn, user_id: int) -> None:
 
 
 def _apply_player(player: Player, body: PlayerIn) -> None:
-    for field in ("name", "role", "age", "region", "aggr", "aware", "pos", "dmg", "cs"):
+    for field in ("name", "role", "secondary_role", "age", "region", "aggr", "aware", "pos", "dmg", "cs"):
         setattr(player, field, getattr(body, field))
     player.pool_entries = [PlayerPoolEntry(position=i + 1, champion_id=cid) for i, cid in enumerate(body.pool)]
 
@@ -172,10 +177,11 @@ def create_player(db: Session, user_id: int, body: PlayerIn) -> Player:
 def update_player(db: Session, user_id: int, player_id: int, body: PlayerIn) -> Player:
     player = get_owned(db, Player, player_id, user_id)
     _validate_player(db, body)
-    if body.role != player.role:
-        slot = db.scalar(select(TeamRosterSlot).where(TeamRosterSlot.player_id == player.id))
-        if slot is not None and not CFG["allow_off_role_roster"]:
-            raise conflict("This player is on a team roster; remove them from it before changing their role.")
+    if not CFG["allow_off_role_roster"]:
+        for slot in db.scalars(select(TeamRosterSlot).where(TeamRosterSlot.player_id == player.id)):
+            if slot.lane not in (body.role, body.secondary_role):
+                raise conflict(f"This player is rostered at {slot.lane} on a team; remove them from it before "
+                               "dropping that role.")
     player.pool_entries.clear()
     db.flush()
     _apply_player(player, body)
@@ -252,8 +258,9 @@ def _validate_team(db: Session, user_id: int, body: TeamIn, team_id: int | None)
             raise bad_request("A player can only fill one roster slot.")
         seen.add(player_id)
         player = get_visible(db, Player, player_id, user_id)
-        if player.role != lane and not CFG["allow_off_role_roster"]:
-            raise bad_request(f"{player.name} is a {player.role} player and cannot play {lane}.")
+        if not player.plays(lane) and not CFG["allow_off_role_roster"]:
+            roles = "/".join(r for r in (player.role, player.secondary_role) if r)
+            raise bad_request(f"{player.name} is a {roles} player and cannot play {lane}.")
     duplicate = db.scalar(select(Team).where(Team.owner_user_id == user_id, Team.name == body.name))
     if duplicate is not None and duplicate.id != team_id:
         raise conflict("You already have a team with that name.")
@@ -305,7 +312,8 @@ def duplicate_team(db: Session, user_id: int, team_id: int) -> Team:
     copies: dict[str, Player] = {}
     for slot in source.slots:
         original = db.get(Player, slot.player_id)
-        copy = Player(owner_user_id=user_id, name=original.name, role=original.role, age=original.age,
+        copy = Player(owner_user_id=user_id, name=original.name, role=original.role,
+                      secondary_role=original.secondary_role, age=original.age,
                       region=original.region, aggr=original.aggr, aware=original.aware, pos=original.pos,
                       dmg=original.dmg, cs=original.cs)
         copy.pool_entries = [PlayerPoolEntry(position=e.position, champion_id=e.champion_id)

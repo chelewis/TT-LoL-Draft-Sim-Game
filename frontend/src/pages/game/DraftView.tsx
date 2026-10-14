@@ -11,7 +11,7 @@ import { useCountdownTick } from '../../hooks/useCountdownTick'
 import { useChampions, useCountdown } from '../../hooks/useData'
 import { useTurnAlert } from '../../hooks/useTurnAlert'
 import { alertsState, disableAlerts, enableAlerts, turnAlertKey } from '../../lib/alerts'
-import { LANE_LABEL, TIER_LABEL, TIER_MODIFIER, comfortTier, isHidden, isSolo, rankLabel } from '../../lib/format'
+import { LANE_LABEL, TIER_LABEL, TIER_MODIFIER, comfortTier, isHidden, isSolo, rankLabel, roleLabel } from '../../lib/format'
 import { lineupAssignments, swapLanes, type Lineup, type SwapKind } from '../../lib/lineup'
 import { isSoundOn, playSound, setSoundOn } from '../../lib/sound'
 
@@ -622,7 +622,7 @@ function PlayerCard({ player, up, game, byId, onClose }: { player: RosterPlayer;
       ) : (
         <>
           <p className="cs-player-note">
-            {[LANE_LABEL[player.role], player.region, `age ${player.age}`, player.riot?.rank && rankLabel(player.riot.rank)].filter(Boolean).join(' · ')}
+            {[roleLabel(player), player.region, `age ${player.age}`, player.riot?.rank && rankLabel(player.riot.rank)].filter(Boolean).join(' · ')}
           </p>
           <div className="cs-swap-group">Stats · {player.stat_total} / {player.stat_budget}</div>
           <dl className="cs-player-stats">

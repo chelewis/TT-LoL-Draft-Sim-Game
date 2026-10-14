@@ -154,8 +154,13 @@ def preview(db: Session, client: RiotClient, user_id: int, riot_id: str | None =
     if existing:
         notes.append(f"You already imported this account as \"{existing.name}\".")
 
+    # suggest the most-played other lane as the secondary role
+    others = sorted(((n, l) for l, n in analysis.lane_counts.items() if l != analysis.lane), reverse=True)
+    secondary_lane = others[0][1] if others else None
+
     result = {
-        "player": {"name": game_name[:40], "role": analysis.lane, "age": 20, "region": region,
+        "player": {"name": game_name[:40], "role": analysis.lane, "secondary_role": secondary_lane,
+                   "age": 20, "region": region,
                    **analysis.stats, "pool": pool},
         "riot": {"game_name": game_name, "tag_line": tag_line, "region": region},
         "analysis": {"games": analysis.games, "lane_counts": analysis.lane_counts, "raw_stats": analysis.raw_stats,

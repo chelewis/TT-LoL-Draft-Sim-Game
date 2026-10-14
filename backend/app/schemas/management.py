@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 class PlayerIn(BaseModel):
     name: str = Field(min_length=1, max_length=40)
     role: str
+    secondary_role: str | None = None
     age: int = Field(default=20, ge=16, le=99)
     region: str = Field(default="", max_length=16)
     aggr: int

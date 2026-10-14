@@ -45,6 +45,7 @@ export interface Player {
   id: number
   name: string
   role: Lane
+  secondary_role: Lane | null   // optional second lane the player can be rostered in
   age: number
   region: string
   aggr: number
@@ -94,7 +95,7 @@ export interface RiotMetric {
 }
 
 export interface RiotPreview {
-  player: { name: string; role: Lane; age: number; region: string; aggr: number; aware: number; pos: number; dmg: number; cs: number; pool: number[] }
+  player: { name: string; role: Lane; secondary_role: Lane | null; age: number; region: string; aggr: number; aware: number; pos: number; dmg: number; cs: number; pool: number[] }
   riot: { game_name: string; tag_line: string; region: string }
   riot_ref: string
   analysis: {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { comfortTier, draftRules, isSolo, formatDuration, formatMetric, isSoloSource, matchupText, overBudgetNotice, rankLabel, remainingSeconds, riotSourceLabel, riotSourceTag } from './format'
+import { comfortTier, draftRules, isSolo, formatDuration, formatMetric, isSoloSource, matchupText, overBudgetNotice, rankLabel, remainingSeconds, riotSourceLabel, riotSourceTag, roleLabel } from './format'
 
 describe('comfortTier', () => {
   const pool = [10, 20, 30, 40, 50]
@@ -103,5 +103,13 @@ describe('matchupText', () => {
     expect(matchupText(null)).toBe('Even matchup')
     expect(matchupText('BLUE_STRONG')).toBe('Favours Blue strongly')
     expect(matchupText('RED_SLIGHT')).toBe('Favours Red slightly')
+  })
+})
+
+describe('roleLabel', () => {
+  it('shows the secondary role when there is one', () => {
+    expect(roleLabel({ role: 'TOP', secondary_role: null })).toBe('Top')
+    expect(roleLabel({ role: 'TOP' })).toBe('Top')
+    expect(roleLabel({ role: 'TOP', secondary_role: 'MID' })).toBe('Top / Mid')
   })
 })

@@ -47,7 +47,7 @@ def seed_database(db: Session, data: SeedData | None = None) -> None:
 
     player_ids: dict[int, int] = {}
     for p in data.players:
-        row = Player(owner_user_id=None, name=p["name"], role=p["role"], age=p["age"], region=p["region"],
+        row = Player(owner_user_id=None, name=p["name"], role=p["role"], secondary_role=p.get("secondary_role"), age=p["age"], region=p["region"],
                      aggr=p["aggr"], aware=p["aware"], pos=p["pos"], dmg=p["dmg"], cs=p["cs"])
         row.pool_entries = [PlayerPoolEntry(position=i + 1, champion_id=cid)
                             for i, cid in enumerate(data.pools[p["id"]])]

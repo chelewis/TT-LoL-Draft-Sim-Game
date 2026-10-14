@@ -8,6 +8,11 @@ export const LANE_LABEL: Record<Lane, string> = {
   SUPPORT: 'Support',
 }
 
+/** "Top" or, with a secondary role, "Top / Mid". */
+export function roleLabel(p: { role: Lane; secondary_role?: Lane | null }): string {
+  return p.secondary_role ? `${LANE_LABEL[p.role]} / ${LANE_LABEL[p.secondary_role]}` : LANE_LABEL[p.role]
+}
+
 export const TIER_LABEL: Record<string, string> = {
   BEST: 'Best pick',
   COMFORT: 'Comfort',

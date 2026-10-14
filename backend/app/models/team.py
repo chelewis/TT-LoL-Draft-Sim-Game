@@ -38,6 +38,7 @@ class Player(Base):
     owner_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(40))
     role: Mapped[str] = mapped_column(String(10))
+    secondary_role: Mapped[str | None] = mapped_column(String(10))   # optional second lane they can be rostered in
     age: Mapped[int] = mapped_column(Integer, default=20)
     region: Mapped[str] = mapped_column(String(16), default="")
     aggr: Mapped[int] = mapped_column(Integer)
@@ -73,6 +74,10 @@ class Player(Base):
     @property
     def stat_total(self) -> int:
         return self.aggr + self.aware + self.pos + self.dmg + self.cs
+
+    def plays(self, lane: str) -> bool:
+        """Whether this lane is the player's primary or secondary role."""
+        return lane in (self.role, self.secondary_role)
 
 
 class TeamRosterSlot(Base):
