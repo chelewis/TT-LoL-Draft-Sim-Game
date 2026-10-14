@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../api/client'
@@ -20,6 +20,16 @@ export default function ResultView({ game }: { game: GameState }) {
   })
   const [showLog, setShowLog] = useState(false)
   const [showMap, setShowMap] = useState(true)
+  const qc = useQueryClient()
+  // same teams, draft and lineups with a new seed; the current result is replaced
+  const rerun = useMutation({
+    mutationFn: () => api(`/games/${game.game_id}/rerun`, { method: 'POST' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['game', game.game_id] })
+      qc.resetQueries({ queryKey: ['result', game.game_id] })
+      qc.resetQueries({ queryKey: ['result-events', game.game_id] })
+    },
+  })
 
   if (result.isLoading) return <Loading label="Loading results…" />
   if (result.error || !result.data) return <ErrorNotice error={result.error ?? new Error('No result.')} />
@@ -156,7 +166,18 @@ export default function ResultView({ game }: { game: GameState }) {
         <p className="small muted">Simulation v{r.simulation_version} · seed {r.seed}</p>
       </div>
 
-      <Link to="/">← Back home</Link>
+      {rerun.error && <ErrorNotice error={rerun.error} />}
+      <div className="row between wrap">
+        <Link to="/">← Back home</Link>
+        {game.you.is_owner && (
+          <button
+            disabled={rerun.isPending}
+            onClick={() => window.confirm('Re-run this match with the same teams and draft? The current result will be replaced.') && rerun.mutate()}
+          >
+            {rerun.isPending ? 'Re-running…' : 'Re-run'}
+          </button>
+        )}
+      </div>
     </div>
   )
 }

@@ -42,7 +42,7 @@ TRANSITIONS = {
     "LANE_ASSIGNMENT": {"READY_TO_SIMULATE", "CANCELLED"},
     "READY_TO_SIMULATE": {"SIMULATING", "CANCELLED"},
     "SIMULATING": {"COMPLETED", "CANCELLED"},
-    "COMPLETED": set(),
+    "COMPLETED": {"READY_TO_SIMULATE"},   # re-run: same teams, draft and lineups, new seed
     "CANCELLED": set(),
 }
 
@@ -545,6 +545,23 @@ def run_simulation(db: Session, game: Game) -> Events:
           win_condition=result.win_condition, simulation_version=cfg["version"])
     log.info("game_id=%s simulation_version=%s seed=%s winner=%s", game.id, cfg["version"], game.seed, result.winner)
     events.append(_event(game, "SIMULATION_COMPLETED", winner=result.winner))
+    return events
+
+
+def rerun_simulation(db: Session, game: Game, user: User) -> Events:
+    """Simulate a finished match again with the same snapshots, draft and lineups but a new seed.
+    The previous result and its events are replaced."""
+    if game.status != "COMPLETED":
+        raise conflict("Only a finished match can be re-run.")
+    if db.get(Lobby, game.lobby_id).created_by != user.id:
+        raise forbidden("Only the lobby owner can re-run the match.")
+    # bulk deletes run immediately, so the new result does not collide with the unique game_id
+    db.execute(delete(MatchEventRow).where(MatchEventRow.game_id == game.id))
+    db.execute(delete(MatchResultRow).where(MatchResultRow.game_id == game.id))
+    _transition(game, "READY_TO_SIMULATE")
+    events = run_simulation(db, game)
+    track("simulation_rerun", game_id=game.id, user_id=user.id)
+    db.commit()
     return events
 
 

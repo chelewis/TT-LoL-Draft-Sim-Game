@@ -105,6 +105,13 @@ async def result_events(game_id: int, after: int = 0, limit: int = 200, db: Sess
     return svc.result_events(db, game, after, max(1, min(limit, 500)))
 
 
+@router.post("/{game_id}/rerun")
+async def rerun(game_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    game = await _load(db, game_id, user)
+    await manager.publish(svc.rerun_simulation(db, game, user))
+    return svc.game_state(db, game, user)
+
+
 # ------------------------------------------------------------------- chat
 @router.get("/{game_id}/chat")
 async def get_chat(game_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):

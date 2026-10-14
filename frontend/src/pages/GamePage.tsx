@@ -34,6 +34,11 @@ export default function GamePage() {
     (event: SocketEvent) => {
       if (event.type === 'CHAT_MESSAGE') addChatMessage(qc, gameId, event.message as ChatMessage)
       else refresh()
+      // a re-run replaces the stored result: drop the cached one so nothing shows the old match
+      if (event.type === 'SIMULATION_COMPLETED') {
+        qc.resetQueries({ queryKey: ['result', gameId] })
+        qc.resetQueries({ queryKey: ['result-events', gameId] })
+      }
     },
     [qc, gameId, refresh],
   )
@@ -45,6 +50,15 @@ export default function GamePage() {
   const [replayDone, setReplayDone] = useState(false)
   const endReplay = useCallback(() => setReplayDone(true), [])
   if (game && game.status !== 'COMPLETED' && game.status !== 'CANCELLED') sawLive.current = true
+  // a new seed on a finished game means the match was re-run: play the replay again
+  const lastSeed = useRef<number | null>(null)
+  if (game?.status === 'COMPLETED' && game.seed != null && game.seed !== lastSeed.current) {
+    if (lastSeed.current !== null) {
+      sawLive.current = true
+      if (replayDone) setReplayDone(false)
+    }
+    lastSeed.current = game.seed
+  }
 
   if (isLoading) return <Loading label="Loading game…" />
   if (error || !game) {

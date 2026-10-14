@@ -222,6 +222,8 @@ export interface GameState {
     players?: Partial<Record<Side, Record<string, number>>>
   } | null
   result_available: boolean
+  /** the simulation seed once completed; it changes when the match is re-run */
+  seed: number | null
 }
 
 export interface LobbySummary {
