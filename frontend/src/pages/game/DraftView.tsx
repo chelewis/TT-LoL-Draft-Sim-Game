@@ -10,7 +10,7 @@ import TeamCard from '../../components/TeamCard'
 import { useCountdownTick } from '../../hooks/useCountdownTick'
 import { useChampions, useCountdown, usePlayers } from '../../hooks/useData'
 import { useTurnAlert } from '../../hooks/useTurnAlert'
-import { alertsState, disableAlerts, enableAlerts, turnAlertKey } from '../../lib/alerts'
+import { alertsState, disableAlerts, disablePullBack, enableAlerts, enablePullBack, pullBackState, turnAlertKey } from '../../lib/alerts'
 import { LANE_LABEL, TIER_LABEL, TIER_MODIFIER, comfortTier, isHidden, isSolo, rankLabel, roleLabel } from '../../lib/format'
 import { lineupAssignments, swapLanes, type Lineup, type SwapKind } from '../../lib/lineup'
 import { isSoundOn, playSound, setSoundOn } from '../../lib/sound'
@@ -121,6 +121,7 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
   // ----- sound and "your turn" alerts
   const [soundOn, setSoundOnState] = useState(isSoundOn)
   const [alerts, setAlerts] = useState(alertsState)
+  const [pullBack, setPullBack] = useState(pullBackState)
   useTurnAlert(
     turnAlertKey({ solo, myTurn: !finalizing && myTurn, canFinalize: canEdit(game.you.team) }),
     finalizing ? 'Finalize your lineup' : `Your turn to ${action === 'PICK' ? 'pick' : 'ban'}`,
@@ -180,7 +181,7 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
 
   return (
     <div className="stack">
-      <div className={`cs ${action === 'BAN' ? 'cs-ban-phase' : ''}`}>
+      <div className={`cs ${action === 'BAN' ? 'cs-ban-phase' : ''} ${myTurn && !finalizing ? 'cs-my-turn' : ''}`}>
         <header className="cs-header">
           <SideHeader side="BLUE" game={game} byId={byId} preview={preview} me={me} />
           <div className="cs-phase">
@@ -225,6 +226,21 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
                   }
                 >
                   {alerts === 'on' ? '🔔 Turn alerts on' : alerts === 'blocked' ? '🔕 Turn alerts blocked' : '🔕 Turn alerts off'}
+                </button>
+              )}
+              {!solo && pullBack !== 'unsupported' && (
+                <button
+                  className="cs-alert-toggle"
+                  aria-pressed={pullBack === 'on'}
+                  disabled={pullBack === 'blocked'}
+                  onClick={() => (pullBack === 'on' ? setPullBack(disablePullBack()) : enablePullBack().then(setPullBack))}
+                  title={
+                    pullBack === 'blocked'
+                      ? 'Notifications are blocked for this site. Allow them in your browser’s site settings.'
+                      : 'On your turn while you are in another tab: keeps a notification on screen, flashes the tab and repeats the chime until you come back. Click the notification to jump here (browsers don’t let pages switch tabs on their own).'
+                  }
+                >
+                  {pullBack === 'on' ? '📌 Pull me back on' : '📌 Pull me back off'}
                 </button>
               )}
             </div>

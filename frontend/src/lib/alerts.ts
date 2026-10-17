@@ -16,55 +16,70 @@ export function turnAlertKey({ solo, myTurn, canFinalize }: { solo: boolean; myT
 export type AlertsState = 'unsupported' | 'off' | 'on' | 'blocked'
 
 const ALERTS_KEY = 'ldm_alerts'
+// "pull me back": the notification stays up, the tab title flashes and the chime repeats until the player returns
+const PULL_BACK_KEY = 'ldm_pullback'
 
-function wanted(): boolean {
+function wanted(key: string): boolean {
   try {
-    return localStorage.getItem(ALERTS_KEY) === '1'
+    return localStorage.getItem(key) === '1'
   } catch {
     return false
   }
 }
 
-function setWanted(on: boolean): void {
+function setWanted(key: string, on: boolean): void {
   try {
-    localStorage.setItem(ALERTS_KEY, on ? '1' : '0')
+    localStorage.setItem(key, on ? '1' : '0')
   } catch {
     /* preference just isn't remembered */
   }
 }
 
-export function alertsState(): AlertsState {
+function stateOf(key: string): AlertsState {
   if (typeof Notification === 'undefined') return 'unsupported'
   if (Notification.permission === 'denied') return 'blocked'
-  return wanted() && Notification.permission === 'granted' ? 'on' : 'off'
+  return wanted(key) && Notification.permission === 'granted' ? 'on' : 'off'
 }
 
 /** Asks the browser for permission if needed; must be called from a click. */
-export async function enableAlerts(): Promise<AlertsState> {
+async function enable(key: string): Promise<AlertsState> {
   if (typeof Notification === 'undefined') return 'unsupported'
   try {
     const permission = Notification.permission === 'default' ? await Notification.requestPermission() : Notification.permission
-    if (permission === 'granted') setWanted(true)
+    if (permission === 'granted') setWanted(key, true)
   } catch {
     /* stays off */
   }
+  return stateOf(key)
+}
+
+export const alertsState = () => stateOf(ALERTS_KEY)
+export const enableAlerts = () => enable(ALERTS_KEY)
+export function disableAlerts(): AlertsState {
+  setWanted(ALERTS_KEY, false)
+  if (pullBackState() !== 'on') clearTurnNotification()
   return alertsState()
 }
 
-export function disableAlerts(): AlertsState {
-  setWanted(false)
-  clearTurnNotification()
-  return alertsState()
+export const pullBackState = () => stateOf(PULL_BACK_KEY)
+export const isPullBackOn = () => pullBackState() === 'on'
+export const enablePullBack = () => enable(PULL_BACK_KEY)
+export function disablePullBack(): AlertsState {
+  setWanted(PULL_BACK_KEY, false)
+  if (alertsState() !== 'on') clearTurnNotification()
+  return pullBackState()
 }
 
 let shown: Notification | null = null
 
 /** Desktop notification, only when the player isn't looking at the tab. */
 export function notifyTurn(title: string, body: string): void {
-  if (alertsState() !== 'on') return
+  const pullBack = isPullBackOn()
+  if (alertsState() !== 'on' && !pullBack) return
   if (!document.hidden && document.hasFocus()) return
   try {
-    const n = new Notification(title, { body, tag: 'ldm-turn' })
+    // pull me back: stays on screen until clicked, and the click brings the player to this tab
+    const n = new Notification(title, { body, tag: 'ldm-turn', requireInteraction: pullBack })
     n.onclick = () => {
       window.focus()
       n.close()
