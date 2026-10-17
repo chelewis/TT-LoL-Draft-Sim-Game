@@ -6,6 +6,7 @@ import type { ChatMessage, GameState } from '../api/types'
 import { ErrorNotice, Loading } from '../components/common'
 import { useGameSocket, type SocketEvent } from '../hooks/useGameSocket'
 import { addChatMessage } from '../hooks/useChat'
+import MusicPlayer from '../components/MusicPlayer'
 import SideBanner from '../components/SideBanner'
 import DraftView from './game/DraftView'
 import LobbyView from './game/LobbyView'
@@ -90,6 +91,7 @@ function GameScreen({ gameId }: { gameId: number }) {
         <div className="notice">Reconnecting to live updates…</div>
       )}
       {game.status !== 'CANCELLED' && <SideBanner game={game} hideResult={replaying} />}
+      {game.status !== 'CANCELLED' && <MusicPlayer seriesGameNumber={game.series?.game_number} />}
       {(game.status === 'WAITING_FOR_PLAYERS' || game.status === 'TEAM_SELECTION' || game.status === 'READY_CHECK') && (
         <LobbyView game={game} onChange={refresh} />
       )}
