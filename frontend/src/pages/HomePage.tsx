@@ -2,9 +2,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
-import type { LobbySummary } from '../api/types'
+import type { LobbySummary, SeriesFormat } from '../api/types'
 import { ErrorNotice, Loading } from '../components/common'
-import { titleCase } from '../lib/format'
+import { seriesShort, titleCase } from '../lib/format'
 
 type Mode = 'SOLO' | 'MULTI'
 const MODE_KEY = 'ldm_create_mode'
@@ -22,15 +22,34 @@ interface DraftOptions {
   timers: boolean
   pickSeconds: number
   banSeconds: number
+  format: SeriesFormat
+  fearless: boolean
 }
 
 const clamp = (n: number) => Math.max(5, Math.min(600, Math.round(n) || 30))
 
-/** Ban phases and pick/ban timers: the same options in both modes. */
+/** Series format, ban phases and pick/ban timers: the same options in both modes. */
 function DraftOptionsForm({ value, onChange }: { value: DraftOptions; onChange: (v: DraftOptions) => void }) {
   const set = (patch: Partial<DraftOptions>) => onChange({ ...value, ...patch })
   return (
     <>
+      <label>
+        Format
+        <select value={value.format} onChange={(e) => set({ format: e.target.value as SeriesFormat })}>
+          <option value="BO1">Best of 1</option>
+          <option value="BO3">Best of 3</option>
+          <option value="BO5">Best of 5</option>
+        </select>
+      </label>
+      <label className="check" title={value.format === 'BO1' ? 'Fearless Draft needs a Best of 3 or Best of 5' : undefined}>
+        <input
+          type="checkbox"
+          checked={value.fearless && value.format !== 'BO1'}
+          disabled={value.format === 'BO1'}
+          onChange={(e) => set({ fearless: e.target.checked })}
+        />
+        Fearless Draft (champions picked in a game can't be picked or banned again in the series)
+      </label>
       <label className="check">
         <input type="checkbox" checked={!value.bans} onChange={(e) => set({ bans: !e.target.checked })} />
         Disable ban phases (pick only)
@@ -64,8 +83,8 @@ export default function HomePage() {
   const [mode, setModeState] = useState<Mode>(savedMode)
   const [hide, setHide] = useState(false)
   // each tab keeps its own draft options: a single player sandbox defaults to no timers
-  const [multi, setMulti] = useState<DraftOptions>({ bans: true, timers: true, pickSeconds: 30, banSeconds: 30 })
-  const [solo, setSolo] = useState<DraftOptions>({ bans: true, timers: false, pickSeconds: 30, banSeconds: 30 })
+  const [multi, setMulti] = useState<DraftOptions>({ bans: true, timers: true, pickSeconds: 30, banSeconds: 30, format: 'BO1', fearless: false })
+  const [solo, setSolo] = useState<DraftOptions>({ bans: true, timers: false, pickSeconds: 30, banSeconds: 30, format: 'BO1', fearless: false })
 
   function setMode(next: Mode) {
     setModeState(next)
@@ -89,6 +108,8 @@ export default function HomePage() {
             timers_enabled: o.timers,
             pick_seconds: clamp(o.pickSeconds),
             ban_seconds: clamp(o.banSeconds),
+            series_format: o.format,
+            fearless: o.format !== 'BO1' && o.fearless,
           },
         },
       })
@@ -113,8 +134,16 @@ export default function HomePage() {
 
   const active = (games.data ?? []).filter((g) => !['COMPLETED', 'CANCELLED'].includes(g.status))
   const past = (games.data ?? []).filter((g) => ['COMPLETED', 'CANCELLED'].includes(g.status)).slice(0, 8)
-  const gameLabel = (g: LobbySummary) =>
-    g.settings.mode === 'SOLO' ? <strong>Single player</strong> : <>Lobby <strong>{g.code}</strong></>
+  const gameLabel = (g: LobbySummary) => (
+    <>
+      {g.settings.mode === 'SOLO' ? <strong>Single player</strong> : <>Lobby <strong>{g.code}</strong></>}
+      {g.series && (
+        <span className="badge series-badge">
+          {seriesShort(g.series.format)} · Game {g.series.game_number}{g.series.fearless ? ' · Fearless' : ''}
+        </span>
+      )}
+    </>
+  )
 
   return (
     <div className="stack">
@@ -186,10 +215,13 @@ export default function HomePage() {
         ))}
         {past.length > 0 && <h3>Recent</h3>}
         {past.map((g) => (
-          <Link key={g.game_id} className="list-row" to={`/game/${g.game_id}`}>
-            <span>{gameLabel(g)}</span>
-            <span className="badge">{titleCase(g.status)}</span>
-          </Link>
+          <div key={g.game_id} className="row history-row">
+            <Link className="list-row" to={`/game/${g.game_id}`}>
+              <span>{gameLabel(g)}</span>
+              <span className="badge">{titleCase(g.status)}</span>
+            </Link>
+            {g.series && <Link className="small" to={`/series/${g.series.id}`}>Series →</Link>}
+          </div>
         ))}
       </div>
 

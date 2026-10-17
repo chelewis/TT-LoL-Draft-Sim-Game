@@ -79,3 +79,13 @@ def test_rebuild_from_history():
         d.auto_action(rng)
     rebuilt = rebuild_draft(DRAFT_CONFIG["actions"], IDS, [(t, k, c, a) for _, t, k, c, a in d.history])
     assert rebuilt.bans == d.bans and rebuilt.cursor == d.cursor
+
+
+def test_fearless_locked_champions_cannot_be_picked_or_banned():
+    d = new_draft(DRAFT_CONFIG["actions"], IDS, locked={1, 2})
+    assert 1 not in d.available() and 2 not in d.available() and 3 in d.available()
+    with pytest.raises(DraftError, match="Fearless"):
+        d.apply("BLUE", "BAN", 1)
+    d.apply("BLUE", "BAN", 3)
+    rebuilt = rebuild_draft(DRAFT_CONFIG["actions"], IDS, [("BLUE", "BAN", 3, False)], locked={1, 2})
+    assert rebuilt.locked == frozenset({1, 2}) and 2 in rebuilt.used

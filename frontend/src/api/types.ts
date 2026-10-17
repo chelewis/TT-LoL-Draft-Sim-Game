@@ -178,6 +178,64 @@ export interface LobbySettings {
   timers_enabled: boolean
   pick_seconds: number
   ban_seconds: number
+  series_format: SeriesFormat
+  /** fearless draft: champions picked earlier in a series can't be picked or banned again */
+  fearless: boolean
+}
+
+export type SeriesFormat = 'BO1' | 'BO3' | 'BO5'
+
+/** The series as seen from one game: every side here is that game's Blue/Red. */
+export interface SeriesState {
+  id: number
+  format: SeriesFormat
+  wins_needed: number
+  fearless: boolean
+  game_number: number
+  score: Record<Side, number>
+  complete: boolean
+  abandoned: boolean
+  /** the side (in this game) of the team that won the series */
+  series_winner: Side | null
+  /** this game's losing side, once it is completed: they pick the side for the next game */
+  loser_side: Side | null
+  next_game_id: number | null
+  next_ready: { blue: boolean; red: boolean }
+  next_loser_side: Side | null
+}
+
+/** Shown in match history. */
+export interface SeriesSummary {
+  id: number
+  format: SeriesFormat
+  fearless: boolean
+  game_number: number
+}
+
+/** GET /series/{id}. Team keys name the side each team played in game 1. */
+export interface SeriesResult {
+  id: number
+  format: SeriesFormat
+  wins_needed: number
+  fearless: boolean
+  mode: 'SOLO' | 'MULTI'
+  teams: Record<Side, string | null>
+  score: Record<Side, number>
+  winner: Side | null
+  complete: boolean
+  abandoned: boolean
+  games: {
+    game_id: number
+    game_number: number
+    status: GameStatus
+    blue_team: Side
+    red_team: Side
+    winner: Side | null
+    win_condition: 'NEXUS' | 'TIMEOUT' | null
+    duration_seconds: number | null
+    mvp: { player_id: number; name: string; champion: string; team: Side } | null
+    draft: { bans: { team: Side; champion_id: number }[]; blue_picks: number[]; red_picks: number[] } | null
+  }[]
 }
 
 export interface DraftView {
@@ -195,6 +253,7 @@ export interface DraftView {
   red_picks: number[]
   history: { action_number: number; team: Side; action_type: string; champion_id: number; auto: boolean }[]
   complete: boolean
+  fearless_locked: number[]
 }
 
 export interface GameUser {
@@ -236,6 +295,9 @@ export interface GameState {
     players?: Partial<Record<Side, Record<string, number>>>
   } | null
   result_available: boolean
+  /** the simulation seed once completed; it changes when the match is re-run */
+  seed: number | null
+  series: SeriesState | null
 }
 
 export interface LobbySummary {
@@ -246,6 +308,7 @@ export interface LobbySummary {
   settings: LobbySettings
   expires_at: string
   you: Side | null
+  series: SeriesSummary | null
 }
 
 export interface ResultPlayer {

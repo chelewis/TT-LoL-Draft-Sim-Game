@@ -23,7 +23,7 @@ from app.game.draft_engine import DraftError, DraftState, new_draft, rebuild_dra
 from app.game.models import CoachSpec, PlayerSpec, TeamSetup
 from app.game.simulation_engine import simulate_match
 from app.models import (ChatMessage, Champion, DraftActionRow, Game, GameTeamSnapshot, Lobby, MatchEventRow, MatchResultRow,
-                        Team, TeamLineup, User)
+                        Series, Team, TeamLineup, User)
 from app.services import team_management_service as teams
 from app.services.analytics import track
 
@@ -42,7 +42,7 @@ TRANSITIONS = {
     "LANE_ASSIGNMENT": {"READY_TO_SIMULATE", "CANCELLED"},
     "READY_TO_SIMULATE": {"SIMULATING", "CANCELLED"},
     "SIMULATING": {"COMPLETED", "CANCELLED"},
-    "COMPLETED": set(),
+    "COMPLETED": {"READY_TO_SIMULATE"},   # re-run: same teams, draft and lineups, new seed
     "CANCELLED": set(),
 }
 
@@ -128,7 +128,9 @@ def _new_code(db: Session) -> str:
 
 
 DEFAULT_SETTINGS = {"hide_player_data": False, "bans_enabled": True, "timers_enabled": True,
-                    "pick_seconds": DRAFT_CONFIG["timer_seconds"], "ban_seconds": DRAFT_CONFIG["timer_seconds"]}
+                    "pick_seconds": DRAFT_CONFIG["timer_seconds"], "ban_seconds": DRAFT_CONFIG["timer_seconds"],
+                    "series_format": "BO1", "fearless": False}
+SERIES_WINS = {"BO3": 2, "BO5": 3}      # wins needed to take the series
 
 
 def create_lobby(db: Session, user: User, settings: dict | None = None, mode: str = "MULTI") -> tuple[Lobby, Game]:
@@ -140,6 +142,8 @@ def create_lobby(db: Session, user: User, settings: dict | None = None, mode: st
     solo = mode == "SOLO"
     if solo:
         opts["hide_player_data"] = False
+    if opts["series_format"] not in SERIES_WINS:
+        opts["series_format"], opts["fearless"] = "BO1", False     # fearless only means something across games
     now = utcnow()
     lobby = Lobby(code=_new_code(db), created_by=user.id, settings=opts,
                   created_at=now, expires_at=now + timedelta(minutes=GAME_CONFIG["lobby_expiration_minutes"]))
@@ -150,9 +154,16 @@ def create_lobby(db: Session, user: User, settings: dict | None = None, mode: st
                 hide_player_data=bool(opts["hide_player_data"]), bans_enabled=bool(opts["bans_enabled"]),
                 timers_enabled=bool(opts["timers_enabled"]), pick_seconds=int(opts["pick_seconds"]),
                 ban_seconds=int(opts["ban_seconds"]))
+    if opts["series_format"] in SERIES_WINS:
+        series = Series(format=opts["series_format"], wins_needed=SERIES_WINS[opts["series_format"]],
+                        fearless=bool(opts["fearless"]), created_by=user.id)
+        db.add(series)
+        db.flush()
+        game.series_id, game.game_number = series.id, 1
     db.add(game)
     db.commit()
-    track("lobby_created", lobby_id=lobby.id, game_id=game.id, user_id=user.id, mode=mode)
+    track("lobby_created", lobby_id=lobby.id, game_id=game.id, user_id=user.id, mode=mode,
+          series_format=opts["series_format"], fearless=bool(opts["fearless"]))
     return lobby, game
 
 
@@ -310,8 +321,13 @@ def _enabled_champion_ids(db: Session) -> list[int]:
     return list(db.scalars(select(Champion.id).where(Champion.enabled.is_(True))))
 
 
-def _start_draft(db: Session, game: Game) -> Events:
+def _start_draft(db: Session, game: Game, snapshots: dict[str, dict] | None = None) -> Events:
+    """Freeze both teams and open the draft. Later games of a series pass the previous game's
+    `snapshots` (side -> snapshot) so the rosters stay the same for the whole series."""
     for side, team_id in (("BLUE", game.blue_team_id), ("RED", game.red_team_id)):
+        if snapshots is not None:
+            db.add(GameTeamSnapshot(game_id=game.id, team=side, snapshot=snapshots[side]))
+            continue
         team = db.get(Team, team_id)
         if team is None or teams.team_issues(team):
             raise conflict(f"The {side.lower()} team is no longer valid.")
@@ -351,7 +367,8 @@ def load_draft(db: Session, game: Game) -> DraftState:
     rows = db.scalars(select(DraftActionRow).where(DraftActionRow.game_id == game.id)
                       .order_by(DraftActionRow.action_number)).all()
     return rebuild_draft(draft_actions(game), _enabled_champion_ids(db),
-                         [(r.team, r.action_type, r.champion_id, r.auto) for r in rows])
+                         [(r.team, r.action_type, r.champion_id, r.auto) for r in rows],
+                         locked=fearless_locked_ids(db, game))
 
 
 def _record_action(db: Session, game: Game, draft: DraftState, team: str, action_type: str,
@@ -548,6 +565,198 @@ def run_simulation(db: Session, game: Game) -> Events:
     return events
 
 
+def rerun_simulation(db: Session, game: Game, user: User) -> Events:
+    """Simulate a finished match again with the same snapshots, draft and lineups but a new seed.
+    The previous result and its events are replaced."""
+    if game.status != "COMPLETED":
+        raise conflict("Only a finished match can be re-run.")
+    if game.series_id is not None:
+        raise conflict("Matches in a series can't be re-run.")
+    if db.get(Lobby, game.lobby_id).created_by != user.id:
+        raise forbidden("Only the lobby owner can re-run the match.")
+    # bulk deletes run immediately, so the new result does not collide with the unique game_id
+    db.execute(delete(MatchEventRow).where(MatchEventRow.game_id == game.id))
+    db.execute(delete(MatchResultRow).where(MatchResultRow.game_id == game.id))
+    _transition(game, "READY_TO_SIMULATE")
+    events = run_simulation(db, game)
+    track("simulation_rerun", game_id=game.id, user_id=user.id)
+    db.commit()
+    return events
+
+
+# ----------------------------------------------------------------- series
+# A series is one Game per game played. Sides can change between games (the loser picks), so results are
+# tallied per "series team", named by the side that team played in game 1.
+def _other(side: str) -> str:
+    return "RED" if side == "BLUE" else "BLUE"
+
+
+def _series_team(game: Game, side: str) -> str:
+    """The series team playing `side` in this game. The mapping is its own inverse, so it also turns a
+    series team into the side it plays in this game."""
+    return _other(side) if game.sides_swapped else side
+
+
+def series_games(db: Session, series_id: int) -> list[Game]:
+    return list(db.scalars(select(Game).where(Game.series_id == series_id).order_by(Game.game_number)))
+
+
+def _game_winner(db: Session, game: Game) -> str | None:
+    return db.scalar(select(MatchResultRow.winner).where(MatchResultRow.game_id == game.id))
+
+
+def series_score(db: Session, series: Series, games: list[Game]) -> dict:
+    """Wins per series team, and whether the series is decided or abandoned (a game was cancelled)."""
+    ids = [g.id for g in games if g.status == "COMPLETED"]
+    winners = dict(db.execute(select(MatchResultRow.game_id, MatchResultRow.winner)
+                              .where(MatchResultRow.game_id.in_(ids))).all()) if ids else {}
+    score = {"BLUE": 0, "RED": 0}
+    for g in games:
+        if g.id in winners:
+            score[_series_team(g, winners[g.id])] += 1
+    winner = next((team for team, wins in score.items() if wins >= series.wins_needed), None)
+    return {"score": score, "winner": winner, "complete": winner is not None,
+            "abandoned": winner is None and any(g.status == "CANCELLED" for g in games)}
+
+
+def fearless_locked_ids(db: Session, game: Game) -> set[int]:
+    """Fearless draft: every champion picked in an earlier game of the series."""
+    if game.series_id is None or game.game_number <= 1 or not db.get(Series, game.series_id).fearless:
+        return set()
+    return set(db.scalars(select(DraftActionRow.champion_id).join(Game, Game.id == DraftActionRow.game_id)
+                          .where(Game.series_id == game.series_id, Game.game_number < game.game_number,
+                                 DraftActionRow.action_type == "PICK")))
+
+
+def _series_summary(db: Session, game: Game) -> dict | None:
+    if game.series_id is None:
+        return None
+    series = db.get(Series, game.series_id)
+    return {"id": series.id, "format": series.format, "fearless": series.fearless, "game_number": game.game_number}
+
+
+def series_state(db: Session, game: Game) -> dict | None:
+    """The series as seen from this game: every side below is this game's Blue/Red."""
+    if game.series_id is None:
+        return None
+    series = db.get(Series, game.series_id)
+    games = series_games(db, series.id)
+    tally = series_score(db, series, games)
+    following = next((g for g in games if g.game_number == game.game_number + 1), None)
+    winner = _game_winner(db, game) if game.status == "COMPLETED" else None
+    return {
+        "id": series.id, "format": series.format, "wins_needed": series.wins_needed, "fearless": series.fearless,
+        "game_number": game.game_number,
+        "score": {side: tally["score"][_series_team(game, side)] for side in ("BLUE", "RED")},
+        "complete": tally["complete"], "abandoned": tally["abandoned"],
+        "series_winner": _series_team(game, tally["winner"]) if tally["winner"] else None,
+        "loser_side": _other(winner) if winner else None,
+        "next_game_id": following.id if following else None,
+        "next_ready": {"blue": game.blue_next_ready, "red": game.red_next_ready},
+        "next_loser_side": game.next_loser_side,
+    }
+
+
+def ready_next_game(db: Session, game: Game, user: User, ready: bool = True, side: str | None = None) -> Events:
+    """Ready up for the next game of the series. The previous game's loser must say which side they want.
+    Once both sides are ready the next game starts straight in the draft."""
+    if game.series_id is None:
+        raise conflict("This game is not part of a series.")
+    if game.status != "COMPLETED":
+        raise conflict("Finish this game before readying up for the next one.")
+    series = db.get(Series, game.series_id)
+    games = series_games(db, series.id)
+    tally = series_score(db, series, games)
+    if tally["complete"] or tally["abandoned"]:
+        raise conflict("The series is over.")
+    if any(g.game_number > game.game_number for g in games):
+        raise conflict("The next game has already started.")
+    loser = _other(_game_winner(db, game))
+    me = side_of(game, user.id)
+    chooses = game.is_solo or me == loser          # single player: you choose for the losing team
+    if ready and chooses and side not in ("BLUE", "RED"):
+        raise bad_request("Choose Blue or Red for the next game.")
+    if game.is_solo:
+        game.blue_next_ready = game.red_next_ready = ready
+        sides = ["BLUE", "RED"]
+    else:
+        if me == "BLUE":
+            game.blue_next_ready = ready
+        else:
+            game.red_next_ready = ready
+        sides = [me]
+    if chooses:
+        game.next_loser_side = side if ready else None
+    events = [_event(game, "SERIES_READY", team=s, ready=ready) for s in sides]
+    if game.blue_next_ready and game.red_next_ready:
+        events += _start_next_game(db, game, loser)
+    db.commit()
+    return events
+
+
+def _start_next_game(db: Session, prev: Game, loser: str) -> Events:
+    """Create the series' next game with the same players, teams and frozen snapshots, swapping sides if the
+    loser asked for the other side, and open its draft. Each game has its own lobby row (one game per lobby)."""
+    swap = prev.next_loser_side != loser
+
+    def flip(blue, red):
+        return (red, blue) if swap else (blue, red)
+
+    prev_lobby = db.get(Lobby, prev.lobby_id)
+    now = utcnow()
+    lobby = Lobby(code=_new_code(db), created_by=prev_lobby.created_by, settings=prev_lobby.settings,
+                  created_at=now, expires_at=now + timedelta(minutes=GAME_CONFIG["lobby_expiration_minutes"]))
+    db.add(lobby)
+    db.flush()
+    blue_player, red_player = flip(prev.blue_player_id, prev.red_player_id)
+    blue_team, red_team = flip(prev.blue_team_id, prev.red_team_id)
+    blue_snap, red_snap = flip(snapshot_of(db, prev, "BLUE"), snapshot_of(db, prev, "RED"))
+    game = Game(lobby_id=lobby.id, status="READY_CHECK", blue_player_id=blue_player, red_player_id=red_player,
+                blue_team_id=blue_team, red_team_id=red_team, is_solo=prev.is_solo,
+                hide_player_data=prev.hide_player_data, bans_enabled=prev.bans_enabled,
+                timers_enabled=prev.timers_enabled, pick_seconds=prev.pick_seconds, ban_seconds=prev.ban_seconds,
+                series_id=prev.series_id, game_number=prev.game_number + 1,
+                sides_swapped=prev.sides_swapped != swap, blue_ready=True, red_ready=True)
+    db.add(game)
+    db.flush()
+    events = _start_draft(db, game, {"BLUE": blue_snap, "RED": red_snap})
+    track("series_game_started", series_id=prev.series_id, game_id=game.id, game_number=game.game_number)
+    return [_event(prev, "SERIES_NEXT_GAME", next_game_id=game.id, game_number=game.game_number), *events]
+
+
+def series_result(db: Session, series_id: int, user: User) -> dict:
+    """Every game of a series with its draft and result. Team keys (`teams`, `score`, `winner`, each game's
+    `blue_team`/`red_team`/`winner`) name the side that team played in game 1."""
+    series = db.get(Series, series_id)
+    games = series_games(db, series_id) if series else []
+    if not games or side_of(games[0], user.id) is None:
+        raise not_found("Series not found.")
+    results = {r.game_id: r for r in db.scalars(
+        select(MatchResultRow).where(MatchResultRow.game_id.in_([g.id for g in games])))}
+    out = []
+    for g in games:
+        r = results.get(g.id) if g.status == "COMPLETED" else None
+        draft = draft_view(db, g) if g.started_at else None
+        out.append({
+            "game_id": g.id, "game_number": g.game_number, "status": g.status,
+            "blue_team": _series_team(g, "BLUE"), "red_team": _series_team(g, "RED"),
+            "winner": _series_team(g, r.winner) if r else None,
+            "win_condition": r.win_condition if r else None,
+            "duration_seconds": r.duration_seconds if r else None,
+            "mvp": r.data.get("mvp") if r else None,
+            "draft": {"bans": draft["bans"], "blue_picks": draft["blue_picks"],
+                      "red_picks": draft["red_picks"]} if draft else None,
+        })
+    first = games[0]
+    return {
+        "id": series.id, "format": series.format, "wins_needed": series.wins_needed, "fearless": series.fearless,
+        "mode": "SOLO" if first.is_solo else "MULTI",
+        "teams": {side: (snapshot_of(db, first, side) or {}).get("name") for side in ("BLUE", "RED")},
+        **series_score(db, series, games),
+        "games": out,
+    }
+
+
 # ---------------------------------------------------------- state views
 HIDDEN_PLAYER_FIELDS = ("age", "aggr", "aware", "pos", "dmg", "cs", "pool", "stat_total", "region", "riot")
 
@@ -608,13 +817,16 @@ def draft_view(db: Session, game: Game) -> dict:
         "history": [{"action_number": i, "team": t, "action_type": k, "champion_id": c, "auto": a}
                     for i, t, k, c, a in draft.history],
         "complete": draft.complete,
+        "fearless_locked": sorted(draft.locked),
     }
 
 
-def _settings_view(game: Game) -> dict:
+def _settings_view(db: Session, game: Game) -> dict:
+    series = db.get(Series, game.series_id) if game.series_id else None
     return {"hide_player_data": game.hide_player_data, "bans_enabled": game.bans_enabled,
             "timers_enabled": game.timers_enabled, "pick_seconds": game.pick_seconds,
-            "ban_seconds": game.ban_seconds, "mode": "SOLO" if game.is_solo else "MULTI"}
+            "ban_seconds": game.ban_seconds, "mode": "SOLO" if game.is_solo else "MULTI",
+            "series_format": series.format if series else "BO1", "fearless": bool(series and series.fearless)}
 
 
 def game_state(db: Session, game: Game, viewer: User) -> dict:
@@ -632,7 +844,7 @@ def game_state(db: Session, game: Game, viewer: User) -> dict:
         "lobby_id": lobby.id,
         "lobby_code": lobby.code,
         "status": game.status,
-        "settings": _settings_view(game),
+        "settings": _settings_view(db, game),
         "expires_at": iso(lobby.expires_at) if game.status in PRE_DRAFT else None,
         "you": {"user_id": viewer.id, "team": side, "is_owner": lobby.created_by == viewer.id},
         "players": {
@@ -645,6 +857,7 @@ def game_state(db: Session, game: Game, viewer: User) -> dict:
         "result_available": game.status == "COMPLETED",
         "seed": game.seed if game.status == "COMPLETED" else None,
         "simulation_version": game.simulation_version if game.status == "COMPLETED" else None,
+        "series": series_state(db, game),
     }
     if game.status in ("DRAFTING", "LANE_ASSIGNMENT", "READY_TO_SIMULATE", "SIMULATING", "COMPLETED"):
         state["draft"] = draft_view(db, game)
@@ -694,8 +907,8 @@ def result_events(db: Session, game: Game, after: int = 0, limit: int = 200) -> 
 def lobby_view(db: Session, game: Game, viewer: User) -> dict:
     lobby = db.get(Lobby, game.lobby_id)
     return {"id": lobby.id, "code": lobby.code, "game_id": game.id, "status": game.status,
-            "settings": _settings_view(game), "expires_at": iso(lobby.expires_at),
-            "created_by": lobby.created_by, "you": side_of(game, viewer.id)}
+            "settings": _settings_view(db, game), "expires_at": iso(lobby.expires_at),
+            "created_by": lobby.created_by, "you": side_of(game, viewer.id), "series": _series_summary(db, game)}
 
 
 # ------------------------------------------------------------------- chat

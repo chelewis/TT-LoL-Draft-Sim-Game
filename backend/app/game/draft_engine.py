@@ -36,6 +36,8 @@ class DraftState:
     picks: dict[str, list[int]] = field(default_factory=lambda: {"BLUE": [], "RED": []})
     history: list[tuple[int, str, str, int, bool]] = field(default_factory=list)
     # history entries: (action_index, team, action_type, champion_id, auto)
+    # fearless draft: champions picked earlier in the series, unavailable to pick or ban
+    locked: frozenset[int] = frozenset()
 
     @property
     def cursor(self) -> int:
@@ -51,7 +53,7 @@ class DraftState:
 
     @property
     def used(self) -> set[int]:
-        used = {cid for _, cid in self.bans}
+        used = {cid for _, cid in self.bans} | self.locked
         for ids in self.picks.values():
             used.update(ids)
         return used
@@ -70,6 +72,8 @@ class DraftState:
             raise DraftError(f"The current action is a {action.action_type.lower()}, not a {action_type.lower()}.")
         if champion_id not in self.champion_ids:
             raise DraftError("Unknown or disabled champion.")
+        if champion_id in self.locked:
+            raise DraftError("That champion was already played earlier in this series (Fearless Draft).")
         if champion_id in self.used:
             raise DraftError("That champion has already been picked or banned.")
         return action
@@ -100,14 +104,14 @@ class DraftState:
         return [cid for _, cid in self.bans]
 
 
-def new_draft(actions: Iterable[str], champion_ids: Iterable[int]) -> DraftState:
-    return DraftState(sequence=parse_actions(actions), champion_ids=frozenset(champion_ids))
+def new_draft(actions: Iterable[str], champion_ids: Iterable[int], locked: Iterable[int] = ()) -> DraftState:
+    return DraftState(sequence=parse_actions(actions), champion_ids=frozenset(champion_ids), locked=frozenset(locked))
 
 
 def rebuild_draft(actions: Iterable[str], champion_ids: Iterable[int],
-                  history: Iterable[tuple[str, str, int, bool]]) -> DraftState:
+                  history: Iterable[tuple[str, str, int, bool]], locked: Iterable[int] = ()) -> DraftState:
     """Rebuild a draft from persisted (team, action_type, champion_id, auto) rows in order."""
-    state = new_draft(actions, champion_ids)
+    state = new_draft(actions, champion_ids, locked)
     for team, action_type, champion_id, auto in history:
         state.apply(team, action_type, champion_id, auto=auto)
     return state

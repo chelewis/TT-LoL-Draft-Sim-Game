@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models import Game, User
-from app.schemas.game import ChatIn, DraftActionIn, LineupIn, ReadyIn
+from app.schemas.game import ChatIn, DraftActionIn, LineupIn, ReadyIn, SeriesReadyIn
 from app.services import game_service as svc
 from app.websocket.manager import manager
 
@@ -103,6 +103,22 @@ async def result_events(game_id: int, after: int = 0, limit: int = 200, db: Sess
                         user: User = Depends(get_current_user)):
     game = await _load(db, game_id, user)
     return svc.result_events(db, game, after, max(1, min(limit, 500)))
+
+
+@router.post("/{game_id}/rerun")
+async def rerun(game_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    game = await _load(db, game_id, user)
+    await manager.publish(svc.rerun_simulation(db, game, user))
+    return svc.game_state(db, game, user)
+
+
+@router.post("/{game_id}/series/ready")
+async def series_ready(game_id: int, body: SeriesReadyIn | None = None, db: Session = Depends(get_db),
+                       user: User = Depends(get_current_user)):
+    game = await _load(db, game_id, user)
+    body = body or SeriesReadyIn()
+    await manager.publish(svc.ready_next_game(db, game, user, body.ready, body.side))
+    return svc.game_state(db, game, user)
 
 
 # ------------------------------------------------------------------- chat

@@ -87,6 +87,29 @@ def test_full_game(alice, bob, default_team_ids):
     from app.game.simulation_engine import simulate_match  # noqa: F401  (engine is independent of the API)
 
 
+def test_rerun_match(alice, bob, default_team_ids):
+    gid = start_draft(alice, bob, default_team_ids)
+    assert alice.post(f"/games/{gid}/rerun").status_code == 409          # not finished yet
+    play_draft(alice, bob, gid, range(1, 60))
+    alice.post(f"/games/{gid}/lineup/ready")
+    assert bob.post(f"/games/{gid}/lineup/ready").json()["status"] == "COMPLETED"
+    before = alice.get(f"/games/{gid}/result").json()
+
+    assert bob.post(f"/games/{gid}/rerun").status_code == 403            # only the lobby owner
+    res = alice.post(f"/games/{gid}/rerun")
+    assert res.status_code == 200 and res.json()["status"] == "COMPLETED"
+    after = alice.get(f"/games/{gid}/result").json()
+    if after["seed"] == before["seed"]:                                   # a 1 in 2^31 collision: try once more
+        alice.post(f"/games/{gid}/rerun")
+        after = alice.get(f"/games/{gid}/result").json()
+    assert after["seed"] != before["seed"]
+    assert after["draft"] == before["draft"] and after["lineups"] == before["lineups"]
+
+    events = alice.get(f"/games/{gid}/result/events?limit=500").json()["events"]
+    sequences = [e["sequence"] for e in events]
+    assert sequences and len(sequences) == len(set(sequences))           # the old events were replaced
+
+
 def test_lobby_rules(client, alice, bob, default_team_ids):
     lobby = alice.post("/lobbies").json()
     assert len(lobby["code"]) == 6 and lobby["status"] == "WAITING_FOR_PLAYERS"

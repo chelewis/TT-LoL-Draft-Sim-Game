@@ -16,6 +16,7 @@ STATUSES = ("WAITING_FOR_PLAYERS", "TEAM_SELECTION", "READY_CHECK", "DRAFTING", 
 
 class Game(Base):
     __tablename__ = "games"
+    __table_args__ = (UniqueConstraint("series_id", "game_number"),)   # never two "game 2"s in one series
 
     id: Mapped[int] = mapped_column(primary_key=True)
     lobby_id: Mapped[int] = mapped_column(ForeignKey("lobbies.id"), unique=True)
@@ -31,6 +32,13 @@ class Game(Base):
     timers_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa_true())
     pick_seconds: Mapped[int] = mapped_column(Integer, default=30, server_default="30")
     ban_seconds: Mapped[int] = mapped_column(Integer, default=30, server_default="30")
+    # best-of series: game_number counts from 1; sides_swapped says Blue/Red are flipped relative to game 1
+    series_id: Mapped[int | None] = mapped_column(ForeignKey("series.id"), index=True)
+    game_number: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    sides_swapped: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    blue_next_ready: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    red_next_ready: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    next_loser_side: Mapped[str | None] = mapped_column(String(4))   # side the loser chose for the next game
     blue_ready: Mapped[bool] = mapped_column(Boolean, default=False)
     red_ready: Mapped[bool] = mapped_column(Boolean, default=False)
     blue_lineup_ready: Mapped[bool] = mapped_column(Boolean, default=False)

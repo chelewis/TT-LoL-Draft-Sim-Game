@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../api/client'
@@ -8,7 +8,7 @@ import { ChampionTag, ErrorNotice, Loading } from '../../components/common'
 import MatchMap from '../../components/MatchMap'
 import { OverBudgetBadge } from '../../components/TeamCard'
 import { useChampionMap } from '../../hooks/useData'
-import { LANE_LABEL, TIER_LABEL, formatDuration, isSolo, matchupText, titleCase } from '../../lib/format'
+import { LANE_LABEL, TIER_LABEL, formatDuration, isSolo, matchupText, seriesLabel, titleCase } from '../../lib/format'
 import { describeEvent, summarize } from '../../lib/summary'
 
 export default function ResultView({ game }: { game: GameState }) {
@@ -20,6 +20,16 @@ export default function ResultView({ game }: { game: GameState }) {
   })
   const [showLog, setShowLog] = useState(false)
   const [showMap, setShowMap] = useState(true)
+  const qc = useQueryClient()
+  // same teams, draft and lineups with a new seed; the current result is replaced
+  const rerun = useMutation({
+    mutationFn: () => api(`/games/${game.game_id}/rerun`, { method: 'POST' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['game', game.game_id] })
+      qc.resetQueries({ queryKey: ['result', game.game_id] })
+      qc.resetQueries({ queryKey: ['result-events', game.game_id] })
+    },
+  })
 
   if (result.isLoading) return <Loading label="Loading results…" />
   if (result.error || !result.data) return <ErrorNotice error={result.error ?? new Error('No result.')} />
@@ -36,6 +46,11 @@ export default function ResultView({ game }: { game: GameState }) {
       <div className={`card result-banner side-${r.winner.toLowerCase()}`}>
         <p className="muted">{solo ? 'Match result' : youWon ? 'Victory' : 'Defeat'}</p>
         <h1>{names[r.winner]} wins</h1>
+        {game.series && (
+          <p className="muted">
+            Game {game.series.game_number} of {seriesLabel(game.series)} · Series {names.BLUE} {game.series.score.BLUE}–{game.series.score.RED} {names.RED}
+          </p>
+        )}
         <p className="muted">
           {r.win_condition === 'NEXUS' ? 'Nexus destroyed' : 'Decided on time'} · {formatDuration(r.duration_seconds)}
         </p>
@@ -156,7 +171,113 @@ export default function ResultView({ game }: { game: GameState }) {
         <p className="small muted">Simulation v{r.simulation_version} · seed {r.seed}</p>
       </div>
 
-      <Link to="/">← Back home</Link>
+      {game.series && <SeriesNext game={game} names={names} />}
+
+      {rerun.error && <ErrorNotice error={rerun.error} />}
+      <div className="row between wrap">
+        <Link to="/">← Back home</Link>
+        {game.you.is_owner && !game.series && (
+          <button
+            disabled={rerun.isPending}
+            onClick={() => window.confirm('Re-run this match with the same teams and draft? The current result will be replaced.') && rerun.mutate()}
+          >
+            {rerun.isPending ? 'Re-running…' : 'Re-run'}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Between games of a series: both sides ready up, and the loser of this game picks their side for the next. */
+function SeriesNext({ game, names }: { game: GameState; names: Record<Side, string> }) {
+  const qc = useQueryClient()
+  const s = game.series!
+  const solo = isSolo(game)
+  const me = game.you.team
+  const loser = s.loser_side
+  const choosing = !!loser && (solo || me === loser)
+  const [side, setSide] = useState<Side | null>(s.next_loser_side ?? null)
+  const ready = useMutation({
+    mutationFn: (value: boolean) =>
+      api(`/games/${game.game_id}/series/ready`, { body: { ready: value, side: value && choosing ? side : null } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['game', game.game_id] }),
+  })
+  const next = s.game_number + 1
+
+  if (s.abandoned) {
+    return <div className="card"><p className="muted">This series was abandoned: a game was cancelled.</p></div>
+  }
+  if (s.complete) {
+    return (
+      <div className="card row between wrap">
+        <strong>{names[s.series_winner!]} wins the series {Math.max(s.score.BLUE, s.score.RED)}–{Math.min(s.score.BLUE, s.score.RED)}</strong>
+        <Link to={`/series/${s.id}`}>View series result →</Link>
+      </div>
+    )
+  }
+  if (s.next_game_id) {
+    return (
+      <div className="card row between wrap">
+        <span>Game {next} has started.</span>
+        <Link to={`/game/${s.next_game_id}`}>Continue to Game {next} →</Link>
+      </div>
+    )
+  }
+  const mineReady = solo ? s.next_ready.blue && s.next_ready.red : me === 'BLUE' ? s.next_ready.blue : s.next_ready.red
+  const sideName = (x: Side) => (x === 'BLUE' ? 'Blue' : 'Red')
+  return (
+    <div className="card stack">
+      <h2>Next up: Game {next}</h2>
+      <p className="muted">
+        Series {names.BLUE} {s.score.BLUE}–{s.score.RED} {names.RED} · first to {s.wins_needed} wins
+        {s.fearless && ' · Fearless: every champion picked so far stays locked for the rest of the series'}
+      </p>
+      {!solo && (
+        <div className="row wrap">
+          {(['BLUE', 'RED'] as Side[]).map((x) => (
+            <span key={x}>
+              <strong>{names[x]}</strong>{' '}
+              {s.next_ready[x === 'BLUE' ? 'blue' : 'red'] ? <span className="badge ok">ready</span> : <span className="badge">not ready</span>}
+            </span>
+          ))}
+        </div>
+      )}
+      {choosing && loser && (
+        <div className="stack">
+          <p>
+            {solo ? `${names[loser]} lost this game` : 'You lost this game'}, so {solo ? 'they' : 'you'} choose the side for Game {next}:
+          </p>
+          <div className="row wrap side-choice" role="radiogroup" aria-label="Side for the next game">
+            {(['BLUE', 'RED'] as Side[]).map((x) => (
+              <button
+                key={x}
+                role="radio"
+                aria-checked={side === x}
+                className={`ghost side-${x.toLowerCase()} ${side === x ? 'active' : ''}`}
+                disabled={mineReady}
+                onClick={() => setSide(x)}
+              >
+                {sideName(x)} side{x === loser ? ' (stay)' : ' (swap)'}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {!choosing && loser && !solo && (
+        <p className="muted small">{names[loser]} lost this game, so they choose the sides for Game {next}.</p>
+      )}
+      <ErrorNotice error={ready.error} />
+      <div className="row wrap">
+        <button
+          className="primary"
+          disabled={ready.isPending || (!mineReady && choosing && !side)}
+          onClick={() => ready.mutate(!mineReady)}
+        >
+          {mineReady ? 'Not ready' : solo ? `Start Game ${next}` : `Ready for Game ${next}`}
+        </button>
+        {mineReady && !solo && <span className="muted">Waiting for the other player…</span>}
+      </div>
     </div>
   )
 }
