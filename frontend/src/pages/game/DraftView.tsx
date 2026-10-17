@@ -230,6 +230,7 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
             </div>
           </div>
           <SideHeader side="RED" game={game} byId={byId} preview={preview} me={me} />
+          {fearless.size > 0 && <SeriesLocks ids={fearless} byId={byId} />}
         </header>
 
         <div className={`cs-body ${solo ? '' : 'with-chat'}`}>
@@ -271,11 +272,6 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
                 aria-label="Search champions"
               />
             </div>
-            {fearless.size > 0 && (
-              <p className="small muted cs-fearless-note">
-                Fearless Draft: {fearless.size} champions played earlier in the series can't be picked or banned.
-              </p>
-            )}
             <div className="cs-grid-scroll">
               <div className="cs-grid">
                 {visible.map((c) => {
@@ -431,6 +427,24 @@ function SideHeader({ side, game, byId, preview, me }: SideProps) {
           })}
         </div>
       )}
+    </div>
+  )
+}
+
+/** Fearless draft: every champion played earlier in the series, out for the rest of it. */
+function SeriesLocks({ ids, byId }: { ids: Set<number>; byId: Map<number, Champion> }) {
+  const champs = [...ids]
+    .map((id) => byId.get(id))
+    .filter((c): c is Champion => !!c)
+    .sort((a, b) => a.name.localeCompare(b.name))
+  return (
+    <div className="cs-fearless" aria-label="Locked for the series (Fearless Draft)">
+      <span className="cs-fearless-label">Fearless · locked for the series ({ids.size})</span>
+      {champs.map((c) => (
+        <span key={c.id} className="cs-fearless-champ" title={`${c.name} · played earlier in the series`}>
+          <ChampionIcon champion={c} size={26} />
+        </span>
+      ))}
     </div>
   )
 }
@@ -630,6 +644,7 @@ function PlayerCard({ player, up, game, byId, onClose }: { player: RosterPlayer;
   const draft = game.draft!
   const banned = new Set(draft.bans.map((b) => b.champion_id))
   const picked = new Set([...draft.blue_picks, ...draft.red_picks])
+  const locked = new Set(draft.fearless_locked ?? [])
   return (
     <div ref={ref} className={`cs-swap-menu cs-player-card ${up ? 'up' : ''}`} role="dialog" aria-label={`${player.name} stats and champion pool`}>
       <div className="cs-swap-head">
@@ -673,7 +688,7 @@ function PlayerCard({ player, up, game, byId, onClose }: { player: RosterPlayer;
           <ol className="cs-player-pool">
             {player.pool.map((id) => {
               const tier = comfortTier(player.pool, id)
-              const gone = banned.has(id) ? 'Banned' : picked.has(id) ? 'Picked' : null
+              const gone = banned.has(id) ? 'Banned' : picked.has(id) ? 'Picked' : locked.has(id) ? 'Fearless' : null
               return (
                 <li key={id} className={gone ? 'gone' : ''}>
                   <ChampionIcon champion={byId.get(id)} size={30} />
