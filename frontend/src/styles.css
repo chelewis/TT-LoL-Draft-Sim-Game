@@ -518,6 +518,9 @@ table.compact th, table.compact td { padding: 4px 6px; font-size: 0.85rem; }
 .cs-player-pool li { display: flex; align-items: center; gap: 10px; padding: 3px 0; font-size: 0.8rem; }
 .cs-player-pool .champ-icon { flex: none; border: 1px solid var(--hex-gold-dark); }
 .cs-player-pool-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cs-player-card .cs-swap-head .cs-player-title { display: flex; align-items: center; gap: 6px; }
+.cs-player-edit { flex: none; display: inline-flex; color: var(--hex-gold); opacity: 0.85; }
+.cs-player-edit:hover, .cs-player-edit:focus-visible { color: var(--hex-teal); opacity: 1; }
 .cs-player-pool .cs-row-tier { flex: none; font-size: 0.72rem; }
 .cs-player-pool li.gone .champ-icon { filter: grayscale(1) brightness(0.45); }
 .cs-player-pool li.gone .cs-player-pool-name { text-decoration: line-through; opacity: 0.5; }
@@ -607,11 +610,20 @@ table.mx { width: max-content; border-collapse: separate; border-spacing: 0; tab
   .mx-focus { width: 100%; }
 }
 
-/* player editor: best champion fits */
-.fit-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.fit-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) minmax(60px, 30%) 3ch; align-items: center; gap: 10px; }
-.fit-name { min-width: 0; overflow-wrap: anywhere; }
-.fit-why { display: block; }
-.fit-bar { height: 8px; border-radius: 999px; background: var(--panel-2); overflow: hidden; }
+/* player editor: champion fits */
+.fit-search { width: min(240px, 100%); }
+.fit-table-scroll { max-height: 420px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; }
+.fit-table thead th { position: sticky; top: 0; z-index: 1; background: var(--panel-2); }
+.fit-table tbody tr:last-child td { border-bottom: 0; }
+.fit-rank { width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }
+.fit-name { gap: 6px; }
+.fit-bonus { color: var(--ok); }
+.fit-penalty { color: var(--red); }
+.fit-score { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fit-cell { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.fit-bar { display: inline-block; width: 60px; height: 6px; border-radius: 999px; background: var(--panel-2); overflow: hidden; }
 .fit-bar > span { display: block; height: 100%; background: var(--gold); border-radius: inherit; }
-.fit-score { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) {
+  .fit-optional { display: none; }
+  .fit-bar { width: 36px; }
+}

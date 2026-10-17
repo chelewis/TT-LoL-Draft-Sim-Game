@@ -30,12 +30,12 @@ export const useTeams = (selectable?: boolean) =>
 
 export const usePlayers = () => useQuery({ queryKey: ['players'], queryFn: () => api<Player[]>('/players') })
 
-/** Champions ranked by lane fit for (possibly unsaved) stats and pool; keeps the last list while stats change. */
+/** Every champion ranked by lane fit for (possibly unsaved) stats and pool; keeps the last list while stats change. */
 export const useChampionFit = (stats: { aggr: number; aware: number; pos: number; dmg: number }, pool: number[]) =>
   useQuery({
     queryKey: ['champion-fit', stats.aggr, stats.aware, stats.pos, stats.dmg, pool],
     queryFn: () => api<ChampionFit[]>('/champion-fit', {
-      body: { aggr: stats.aggr, aware: stats.aware, pos: stats.pos, dmg: stats.dmg, pool },
+      body: { aggr: stats.aggr, aware: stats.aware, pos: stats.pos, dmg: stats.dmg, pool, limit: null },
     }),
     placeholderData: keepPreviousData,
   })

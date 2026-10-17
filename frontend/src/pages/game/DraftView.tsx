@@ -8,7 +8,7 @@ import { ErrorNotice, Pips } from '../../components/common'
 import ChatPanel from '../../components/ChatPanel'
 import TeamCard from '../../components/TeamCard'
 import { useCountdownTick } from '../../hooks/useCountdownTick'
-import { useChampions, useCountdown } from '../../hooks/useData'
+import { useChampions, useCountdown, usePlayers } from '../../hooks/useData'
 import { useTurnAlert } from '../../hooks/useTurnAlert'
 import { alertsState, disableAlerts, enableAlerts, turnAlertKey } from '../../lib/alerts'
 import { LANE_LABEL, TIER_LABEL, TIER_MODIFIER, comfortTier, isHidden, isSolo, rankLabel, roleLabel } from '../../lib/format'
@@ -458,6 +458,15 @@ function SwapIcon({ size = 14 }: { size?: number }) {
   )
 }
 
+function EditIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M10.5 2.5l3 3L6 13H3v-3z" />
+      <path d="M9 4l3 3" />
+    </svg>
+  )
+}
+
 function InfoIcon({ size = 12 }: { size?: number }) {
   return (
     <svg className="cs-info-icon" width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
@@ -608,13 +617,29 @@ const PLAYER_STATS: { key: 'aggr' | 'aware' | 'pos' | 'dmg' | 'cs'; label: strin
 /** A player's stats and champion pool, opened from their name. Hidden opponents only show that the data is secret. */
 function PlayerCard({ player, up, game, byId, onClose }: { player: RosterPlayer; up: boolean; game: GameState; byId: Map<number, Champion>; onClose: () => void }) {
   const ref = usePopupDismiss(onClose)
+  // only the viewer's own players can be edited; default and opponents' players can't be opened
+  const editable = (usePlayers().data ?? []).some((p) => p.id === player.id && !p.is_default)
   const draft = game.draft!
   const banned = new Set(draft.bans.map((b) => b.champion_id))
   const picked = new Set([...draft.blue_picks, ...draft.red_picks])
   return (
     <div ref={ref} className={`cs-swap-menu cs-player-card ${up ? 'up' : ''}`} role="dialog" aria-label={`${player.name} stats and champion pool`}>
       <div className="cs-swap-head">
-        <span>{player.name}</span>
+        <span className="cs-player-title">
+          <span>{player.name}</span>
+          {editable && !isHidden(player) && (
+            <a
+              className="cs-player-edit"
+              href={`/players/${player.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Edit player (opens in a new tab)"
+              aria-label={`Edit ${player.name} in a new tab`}
+            >
+              <EditIcon />
+            </a>
+          )}
+        </span>
         <button className="cs-swap-close" onClick={onClose} aria-label="Close">✕</button>
       </div>
       {isHidden(player) ? (

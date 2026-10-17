@@ -416,10 +416,17 @@ Champion synergy weights (per champion; divisor 200):
 
 score = roll_aggr*AggrSyn + roll_aware*AwrSyn + roll_pos*PosSyn + roll_dmg*DmgSyn
 score = score * (1 + comfort_modifier)
+score = score * strength_fit
 score = score * matchup_multiplier
+
+Strength fit (lane.strength_fit; champion strength = Offence / Defence / Control, §9.4):
+    Offence -> avg(dmg, pos)    Defence -> aggr    Control -> aware
+    strength_fit = 1 + 0.25 * (stat - 5.5) / 4.5     (x0.75 at 1, x1.0 at 5.5, x1.25 at 10)
 ```
 
 This is where **player skill and champion identity interact**: an aggressive player on a high-damage/high-mobility champion scores much higher than the same player on a utility champion.
+
+Every synergy weight is a positive mix of all five attributes, so on its own the sum favours champions with the highest attribute totals for every player. The strength fit is the counterweight: a player who is weak in the stats behind a champion's strength loses up to 25% on it, so the stat spread decides which champions suit a player.
 
 ### 9.2 Comfort
 

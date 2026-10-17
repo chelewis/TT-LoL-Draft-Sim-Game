@@ -56,7 +56,7 @@ MANAGEMENT_CONFIG: dict[str, Any] = {
 }
 
 SIMULATION_CONFIG: dict[str, Any] = {
-    "version": "2.0.0",
+    "version": "2.1.0",
     # Comfort modifiers (fractions, NOT whole-number multipliers).
     "comfort": {"best": 0.40, "comfort": 0.25, "familiar": 0.10, "vulnerable": -0.10},
     # Tier by position in the player's ordered 5-champion pool.
@@ -71,6 +71,14 @@ SIMULATION_CONFIG: dict[str, Any] = {
             "pos": {"damage": 30, "sturdiness": 20, "cc": 10, "mobility": 30, "utility": 10},
             "dmg": {"damage": 40, "sturdiness": 10, "cc": 10, "mobility": 40, "utility": 20},
             "divisor": 200,
+        },
+        # Lane multiplier from the player's stats behind the champion's strength (Offence/Defence/Control):
+        # 1 + scale * (stat - mid) / half over the 1-10 stat range, so x0.75 at 1, x1.0 at 5.5, x1.25 at 10.
+        "strength_fit": {
+            "enabled": True,
+            "scale": 0.25,
+            "stat_range": [1, 10],
+            "stats": {"Offence": ["dmg", "pos"], "Defence": ["aggr"], "Control": ["aware"]},
         },
         "matchup_multiplier": {"slight": 1.25, "strong": 1.5, "strong_threshold": 2},
         "assist": {"jungle": 0.45, "support_to_bot": 0.5, "other": 0.10},

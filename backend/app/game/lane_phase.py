@@ -18,6 +18,19 @@ def champion_synergy(champion: Champion, config: dict) -> dict[str, float]:
             for stat in ("aggr", "aware", "pos", "dmg")}
 
 
+def strength_fit(player: PlayerSpec, champion: Champion, config: dict) -> float:
+    """Lane multiplier from the player's stats behind the champion's strength (Offence/Defence/Control):
+    above-average stats there raise the score, below-average ones cut it."""
+    cfg = config["lane"]["strength_fit"]
+    if not cfg["enabled"]:
+        return 1.0
+    stats = cfg["stats"][champion.strength]
+    value = sum(getattr(player, s) for s in stats) / len(stats)
+    lo, hi = cfg["stat_range"]
+    mid, half = (lo + hi) / 2, (hi - lo) / 2
+    return max(1.0 + cfg["scale"] * (value - mid) / half, 0.0)
+
+
 def raw_lane_score(player: PlayerSpec, champion: Champion, rng, config: dict) -> float:
     """sum(roll * player stat * champion synergy) over aggr/aware/pos/dmg (spec 9.1)."""
     syn = champion_synergy(champion, config)
@@ -72,6 +85,7 @@ def run_lane_phase(match: Match) -> None:
             raw = raw_lane_score(p.spec, p.champion, match.rng, cfg)
             score = raw * lane_cfg["scale"]
             score *= 1.0 + p.comfort
+            score *= strength_fit(p.spec, p.champion, cfg)
             score *= p.matchup_multiplier
             score *= team_lane_multiplier(team, lane, cfg)
             p.base_score = max(score, lane_cfg["min_score"])

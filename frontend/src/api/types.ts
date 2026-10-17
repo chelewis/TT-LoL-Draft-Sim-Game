@@ -45,10 +45,14 @@ export interface Champion {
 export interface ChampionFit {
   champion_id: number
   name: string
+  class: string
   score: number
   base: number
   comfort_tier: string
   top_stat: 'aggr' | 'aware' | 'pos' | 'dmg'
+  strength: 'Offence' | 'Defence' | 'Control'
+  /** Lane multiplier from the stats behind the champion's strength (0.75 to 1.25). */
+  strength_fit: number
 }
 
 export interface Player {

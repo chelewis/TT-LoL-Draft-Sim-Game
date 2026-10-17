@@ -25,7 +25,7 @@ class ChampionFitIn(BaseModel):
     pos: int = Field(ge=1, le=10)
     dmg: int = Field(ge=1, le=10)
     pool: list[int] = Field(default_factory=list, max_length=5)
-    limit: int = Field(default=10, ge=1, le=50)
+    limit: int | None = Field(default=10, ge=1)   # None: every enabled champion
 
 
 class CoachIn(BaseModel):
