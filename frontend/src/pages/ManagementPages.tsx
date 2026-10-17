@@ -5,9 +5,10 @@ import { api } from '../api/client'
 import type { Coach, Lane, Player, RiotPreview, Team } from '../api/types'
 import { LANES, STYLES } from '../api/types'
 import { ErrorNotice, Loading } from '../components/common'
+import { ChampionIcon } from '../components/ChampionArt'
 import { OverBudgetBadge } from '../components/TeamCard'
-import { useChampions, useCoaches, usePlayers, useTeams } from '../hooks/useData'
-import { LANE_LABEL, isHidden, rankLabel, riotSourceLabel, riotSourceTag, roleLabel, titleCase } from '../lib/format'
+import { useChampionFit, useChampions, useCoaches, usePlayers, useTeams } from '../hooks/useData'
+import { LANE_LABEL, TIER_LABEL, isHidden, rankLabel, riotSourceLabel, riotSourceTag, roleLabel, titleCase } from '../lib/format'
 import { useRiotStatus } from './RiotImportPage'
 
 interface GameConfig {
@@ -386,12 +387,113 @@ export function PlayerEditorPage() {
           </label>
         ))}
       </div>
+      <ChampionFitCard stats={stats} pool={pool} />
       <ErrorNotice error={save.error} />
       <div className="row wrap">
         <button className="primary" disabled={save.isPending || !poolValid}>Save player</button>
         <Link className="button ghost" to="/players">Cancel</Link>
       </div>
     </form>
+  )
+}
+
+const FIT_STAT_LABEL = { aggr: 'Aggression', aware: 'Awareness', pos: 'Positioning', dmg: 'Damage' } as const
+const STRENGTH_STATS = { Offence: 'Damage and Positioning', Defence: 'Aggression', Control: 'Awareness' } as const
+
+type FitSort = 'rank' | 'name' | 'class' | 'strength' | 'top_stat'
+const FIT_SORT_TEXT: FitSort[] = ['name', 'class', 'top_stat']   // these start ascending, the rest best first
+
+/** Every champion's lane fit for these stats, recomputed as the sliders and pool change; searchable and sortable. */
+function ChampionFitCard({ stats, pool }: { stats: { aggr: number; aware: number; pos: number; dmg: number }; pool: string[] }) {
+  const fit = useChampionFit(stats, pool.filter(Boolean).map(Number))
+  const [query, setQuery] = useState('')
+  const [sort, setSort] = useState<{ by: FitSort; desc: boolean }>({ by: 'rank', desc: true })
+  const all = useMemo(() => (fit.data ?? []).map((r, i) => ({ ...r, rank: i + 1 })), [fit.data])
+  const top = all[0]?.score || 1
+  const q = query.trim().toLowerCase()
+  const rows = all.filter((r) => !q || r.name.toLowerCase().includes(q) || r.class.toLowerCase().includes(q))
+  rows.sort((x, y) => {
+    const order = sort.by === 'name' ? x.name.localeCompare(y.name)
+      : sort.by === 'class' ? x.class.localeCompare(y.class)
+      : sort.by === 'top_stat' ? FIT_STAT_LABEL[x.top_stat].localeCompare(FIT_STAT_LABEL[y.top_stat])
+      : sort.by === 'strength' ? x.strength_fit - y.strength_fit
+      : y.rank - x.rank
+    return (sort.desc ? -order : order) || x.rank - y.rank
+  })
+  const header = (by: FitSort, label: string, className = '') => (
+    <th className={className} aria-sort={sort.by === by ? (sort.desc ? 'descending' : 'ascending') : undefined}>
+      <button type="button" className="mx-sort" onClick={() => setSort({ by, desc: sort.by === by ? !sort.desc : !FIT_SORT_TEXT.includes(by) })}>
+        {label}{sort.by === by ? (sort.desc ? ' ▼' : ' ▲') : ''}
+      </button>
+    </th>
+  )
+  return (
+    <div className="card stack">
+      <div className="row between wrap">
+        <h2>Champion fits</h2>
+        <input
+          type="search"
+          className="fit-search"
+          placeholder="Search name or class"
+          aria-label="Search champion fits"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault() }}
+        />
+      </div>
+      <p className="small muted">Based on the lane formula: these stats × each champion's attributes, boosted by pool comfort, then raised or lowered by the stats behind the champion's strength (Offence: Damage + Positioning, Defence: Aggression, Control: Awareness).</p>
+      <ErrorNotice error={fit.error} />
+      {fit.isLoading ? <Loading label="Ranking champions…" /> : (
+        <>
+          <p className="small muted">{q ? `${rows.length} of ${all.length}` : all.length} champions</p>
+          <div className="table-scroll fit-table-scroll">
+            <table className="compact fit-table">
+              <thead>
+                <tr>
+                  <th className="fit-rank">#</th>
+                  {header('name', 'Champion')}
+                  {header('class', 'Class', 'fit-optional')}
+                  {header('strength', 'Strength')}
+                  {header('top_stat', 'Best stat', 'fit-optional')}
+                  {header('rank', 'Fit', 'fit-score')}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.champion_id}>
+                    <td className="fit-rank muted">{r.rank}</td>
+                    <td>
+                      <span className="row fit-name">
+                        <ChampionIcon champion={r} size={22} />
+                        <span>
+                          {r.name}
+                          {r.comfort_tier !== 'VULNERABLE' && <span className={`badge tier-${r.comfort_tier.toLowerCase()}`}>{TIER_LABEL[r.comfort_tier]}</span>}
+                        </span>
+                      </span>
+                    </td>
+                    <td className="fit-optional muted">{r.class}</td>
+                    <td
+                      className={r.strength_fit < 0.97 ? 'fit-penalty' : r.strength_fit > 1.03 ? 'fit-bonus' : 'muted'}
+                      title={`${r.strength} champion: ${STRENGTH_STATS[r.strength]} stats ${r.strength_fit < 1 ? 'cut' : 'raise'} the lane score`}
+                    >
+                      {r.strength} ×{r.strength_fit.toFixed(2)}
+                    </td>
+                    <td className="fit-optional muted">{FIT_STAT_LABEL[r.top_stat]}</td>
+                    <td className="fit-score">
+                      <span className="fit-cell" title={`Fit ${r.score}`}>
+                        <span className="fit-bar"><span style={{ width: `${(r.score / top) * 100}%` }} /></span>
+                        {Math.round(r.score)}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {rows.length === 0 && <tr><td colSpan={6} className="muted">No champion matches “{query}”.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 

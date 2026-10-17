@@ -18,6 +18,16 @@ class PlayerIn(BaseModel):
     riot_ref: str | None = None   # opaque token from /riot/preview linking this player to a Riot account
 
 
+class ChampionFitIn(BaseModel):
+    """Unsaved player stats and pool from the editor; only the stats the lane formula uses."""
+    aggr: int = Field(ge=1, le=10)
+    aware: int = Field(ge=1, le=10)
+    pos: int = Field(ge=1, le=10)
+    dmg: int = Field(ge=1, le=10)
+    pool: list[int] = Field(default_factory=list, max_length=5)
+    limit: int | None = Field(default=10, ge=1)   # None: every enabled champion
+
+
 class CoachIn(BaseModel):
     name: str = Field(min_length=1, max_length=40)
     draft: int

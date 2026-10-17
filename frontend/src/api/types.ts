@@ -41,6 +41,20 @@ export interface Champion {
   weakness: string
 }
 
+/** One row of POST /champion-fit: lane fit of a champion for given stats and pool, best first. */
+export interface ChampionFit {
+  champion_id: number
+  name: string
+  class: string
+  score: number
+  base: number
+  comfort_tier: string
+  top_stat: 'aggr' | 'aware' | 'pos' | 'dmg'
+  strength: 'Offence' | 'Defence' | 'Control'
+  /** Lane multiplier from the stats behind the champion's strength (0.75 to 1.25). */
+  strength_fit: number
+}
+
 export interface Player {
   id: number
   name: string
