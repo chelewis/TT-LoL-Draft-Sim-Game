@@ -634,3 +634,14 @@ table.mx { width: max-content; border-collapse: separate; border-spacing: 0; tab
   .fit-optional { display: none; }
   .fit-bar { width: 36px; }
 }
+
+/* lobby music (YouTube); the video stays loaded but collapsed unless shown */
+.music-player { padding: 8px 12px; }
+.music-video { height: 0; overflow: hidden; }
+.music-video iframe { width: 100%; height: 100%; border: 0; }
+.music-player-open .music-video { height: auto; aspect-ratio: 16 / 9; max-width: 480px; margin-bottom: 8px; }
+.music-controls { gap: 8px; align-items: center; }
+.music-title { font-weight: 600; margin-right: auto; }
+.music-volume input { width: 110px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
