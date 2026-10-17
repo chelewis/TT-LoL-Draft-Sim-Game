@@ -5,9 +5,10 @@ import { api } from '../api/client'
 import type { Coach, Lane, Player, RiotPreview, Team } from '../api/types'
 import { LANES, STYLES } from '../api/types'
 import { ErrorNotice, Loading } from '../components/common'
+import { ChampionIcon } from '../components/ChampionArt'
 import { OverBudgetBadge } from '../components/TeamCard'
-import { useChampions, useCoaches, usePlayers, useTeams } from '../hooks/useData'
-import { LANE_LABEL, isHidden, rankLabel, riotSourceLabel, riotSourceTag, roleLabel, titleCase } from '../lib/format'
+import { useChampionFit, useChampions, useCoaches, usePlayers, useTeams } from '../hooks/useData'
+import { LANE_LABEL, TIER_LABEL, isHidden, rankLabel, riotSourceLabel, riotSourceTag, roleLabel, titleCase } from '../lib/format'
 import { useRiotStatus } from './RiotImportPage'
 
 interface GameConfig {
@@ -386,12 +387,45 @@ export function PlayerEditorPage() {
           </label>
         ))}
       </div>
+      <ChampionFitCard stats={stats} pool={pool} />
       <ErrorNotice error={save.error} />
       <div className="row wrap">
         <button className="primary" disabled={save.isPending || !poolValid}>Save player</button>
         <Link className="button ghost" to="/players">Cancel</Link>
       </div>
     </form>
+  )
+}
+
+const FIT_STAT_LABEL = { aggr: 'Aggression', aware: 'Awareness', pos: 'Positioning', dmg: 'Damage' } as const
+
+/** The champions these stats score best with in lane, recomputed as the sliders and pool change. */
+function ChampionFitCard({ stats, pool }: { stats: { aggr: number; aware: number; pos: number; dmg: number }; pool: string[] }) {
+  const fit = useChampionFit(stats, pool.filter(Boolean).map(Number))
+  const rows = fit.data ?? []
+  const top = rows[0]?.score || 1
+  return (
+    <div className="card stack">
+      <h2>Best champion fits</h2>
+      <p className="small muted">Based on the lane formula: these stats × each champion's attributes, boosted by pool comfort.</p>
+      <ErrorNotice error={fit.error} />
+      {fit.isLoading ? <Loading label="Ranking champions…" /> : (
+        <ol className="fit-list">
+          {rows.map((r) => (
+            <li key={r.champion_id} className="fit-row">
+              <ChampionIcon champion={r} size={32} />
+              <span className="fit-name">
+                {r.name}
+                {r.comfort_tier !== 'VULNERABLE' && <span className={`badge tier-${r.comfort_tier.toLowerCase()}`}>{TIER_LABEL[r.comfort_tier]}</span>}
+                <span className="small muted fit-why">strongest: {FIT_STAT_LABEL[r.top_stat]}</span>
+              </span>
+              <span className="fit-bar" title={`Fit ${r.score}`}><span style={{ width: `${(r.score / top) * 100}%` }} /></span>
+              <span className="fit-score">{Math.round(r.score)}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
   )
 }
 
