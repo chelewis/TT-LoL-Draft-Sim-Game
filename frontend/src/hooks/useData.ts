@@ -1,6 +1,6 @@
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
-import type { Champion, Coach, Player, Team } from '../api/types'
+import type { Champion, ChampionFit, Coach, Player, Team } from '../api/types'
 import { fetchLatestVersion } from '../lib/ddragon'
 
 export function useChampions() {
@@ -29,6 +29,16 @@ export const useTeams = (selectable?: boolean) =>
   })
 
 export const usePlayers = () => useQuery({ queryKey: ['players'], queryFn: () => api<Player[]>('/players') })
+
+/** Champions ranked by lane fit for (possibly unsaved) stats and pool; keeps the last list while stats change. */
+export const useChampionFit = (stats: { aggr: number; aware: number; pos: number; dmg: number }, pool: number[]) =>
+  useQuery({
+    queryKey: ['champion-fit', stats.aggr, stats.aware, stats.pos, stats.dmg, pool],
+    queryFn: () => api<ChampionFit[]>('/champion-fit', {
+      body: { aggr: stats.aggr, aware: stats.aware, pos: stats.pos, dmg: stats.dmg, pool },
+    }),
+    placeholderData: keepPreviousData,
+  })
 
 export const useCoaches = () => useQuery({ queryKey: ['coaches'], queryFn: () => api<Coach[]>('/coaches') })
 
