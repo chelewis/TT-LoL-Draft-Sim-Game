@@ -25,10 +25,13 @@ interface PoolHint {
 const TIER_ORDER = ['BEST', 'COMFORT', 'FAMILIAR']
 const TIER_MARK: Record<string, string> = { BEST: '★', COMFORT: '◆', FAMILIAR: '●' }
 
-/** Class filter tabs: label shown -> text matched in the champion's class (the data spells Assassin "Assasin"). */
+/** Older data spells Assassin "Assasin"; normalize so either spelling displays and filters correctly. */
+const normalizeClass = (cls: string) => cls.replace(/Assasin/g, 'Assassin')
+
+/** Class filter tabs: label shown -> text matched in the champion's (normalized) class. */
 const CLASS_FILTERS: { label: string; match: string }[] = [
   { label: 'All', match: '' },
-  { label: 'Assassin', match: 'Assasin' },
+  { label: 'Assassin', match: 'Assassin' },
   { label: 'Fighter', match: 'Warrior' },
   { label: 'Mage', match: 'Mage' },
   { label: 'Marksman', match: 'Marksman' },
@@ -157,7 +160,7 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
     return (champions.data ?? [])
-      .filter((c) => (!q || c.name.toLowerCase().includes(q)) && (!classFilter || c.class.includes(classFilter)))
+      .filter((c) => (!q || c.name.toLowerCase().includes(q)) && (!classFilter || normalizeClass(c.class).includes(classFilter)))
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [champions.data, query, classFilter])
 
@@ -785,7 +788,7 @@ function ChampionDetail({ champion: c, hints }: { champion: Champion | undefined
         <div className="cs-detail-head">
           <strong>{c.name}</strong>
           <span className="muted small">
-            {c.class.replace(/Assasin/g, 'Assassin')} · difficulty {c.difficulty} ·{' '}
+            {normalizeClass(c.class)} · difficulty {c.difficulty} ·{' '}
             {c.damage_type === 'P' ? 'physical' : c.damage_type === 'M' ? 'magic' : 'mixed'} damage · WR {c.win_rate}% · PR {c.pick_rate}%
           </span>
         </div>
