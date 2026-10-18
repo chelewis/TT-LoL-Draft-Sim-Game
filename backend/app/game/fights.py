@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .objectives import siege
 from .state import PHASE_SCALING_WEIGHT, Match, PlayerState, TeamState
+from .win_rates import ally_delta, counter_delta, multiplier
 
 
 def skill_check(player: PlayerState, rng, config: dict) -> float:
@@ -18,7 +19,7 @@ def skill_check(player: PlayerState, rng, config: dict) -> float:
 
 
 def fight_multiplier(match: Match, team: TeamState, size: int) -> float:
-    """Team-style, elder and damage-profile multipliers for a fight of `size` players."""
+    """Team-style and elder multipliers for a fight of `size` players."""
     cfg = match.config
     mult = 1.0
     if cfg["team_style"]["enabled"]:
@@ -29,12 +30,26 @@ def fight_multiplier(match: Match, team: TeamState, size: int) -> float:
         mult += team.style_bonus("skirmish", cfg) if size <= 3 else 0.0
     if team.elder_fights > 0:
         mult += cfg["objectives"]["elder_bonus"]
-    pen = cfg["damage_profile_penalty"]
-    if pen["enabled"]:
-        prof = match.other(team).damage_profile()
-        total = prof["physical"] + prof["magic"]
-        if total > 0 and max(prof.values()) / total > pen["threshold"]:
-            mult += pen["bonus"]
+    return mult
+
+
+def damage_effectiveness(match: Match, team: TeamState) -> float:
+    """Share of this team's damage that still lands once the enemy has itemized against its damage profile.
+    The penalty comes from the whole comp, scaled by how far into the game we are."""
+    cfg = match.config["damage_balance"]
+    weight = cfg["phase_weights"].get(match.phase, 0.0)
+    return max(1.0 - team.damage_balance_penalty(match.config) * weight, 0.0)
+
+
+def win_rate_fight_multiplier(match: Match, members: list[PlayerState], enemies: list[PlayerState]) -> float:
+    """Same-team synergy among these fighters and their win rate against the enemy fighters."""
+    cfg = match.config
+    wr = cfg["win_rates"]
+    mine = [p.champion.id for p in members]
+    theirs = [p.champion.id for p in enemies]
+    mult = multiplier(counter_delta(mine, theirs, match.matchups, cfg), wr["fight_counter_scale"], cfg)
+    if len(mine) >= 2:
+        mult *= multiplier(ally_delta(mine, match.matchups, cfg), wr["fight_synergy_scale"], cfg)
     return mult
 
 
@@ -43,14 +58,17 @@ def _performance(match: Match, p: PlayerState) -> float:
     return max(1.0, base * (1.0 + skill_check(p, match.rng, match.config) / 100.0))
 
 
-def _side_power(match: Match, team: TeamState, members: list[PlayerState], perf: dict[str, float]) -> float:
+def _side_power(match: Match, team: TeamState, members: list[PlayerState], perf: dict[str, float],
+                enemies: list[PlayerState]) -> float:
     f = match.config["fight"]
-    weighted = sum(perf[p.lane] * (f["damage_weight"] * p.champion.damage
+    damage_weight = f["damage_weight"] * damage_effectiveness(match, team)
+    weighted = sum(perf[p.lane] * (damage_weight * p.champion.damage
                                    + f["sturdiness_weight"] * p.champion.sturdiness) for p in members)
     n = len(members)
     control = sum(p.champion.cc + p.champion.mobility + p.champion.utility for p in members) / n
     control_mod = 1.0 + f["control_scale"] * (control - f["control_average"]) / f["control_average"]
-    return weighted * max(control_mod, 0.1) * fight_multiplier(match, team, n)
+    return (weighted * max(control_mod, 0.1) * fight_multiplier(match, team, n)
+            * win_rate_fight_multiplier(match, members, enemies))
 
 
 def _choose_weighted_distinct(rng, candidates: list[PlayerState], weights: dict[str, float], k: int) -> list[PlayerState]:
@@ -72,8 +90,8 @@ def run_fight(match: Match, attacker: TeamState, defender: TeamState, n_att: int
     perf_a = {p.lane: _performance(match, p) for p in att}
     perf_d = {p.lane: _performance(match, p) for p in dfn}
 
-    power_a = _side_power(match, attacker, att, perf_a)
-    power_d = _side_power(match, defender, dfn, perf_d)
+    power_a = _side_power(match, attacker, att, perf_a, dfn)
+    power_d = _side_power(match, defender, dfn, perf_d, att)
     dominance = abs(power_a - power_d) / (power_a + power_d)
 
     kills_a = kills_d = 0

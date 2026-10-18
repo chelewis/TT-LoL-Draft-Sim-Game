@@ -56,7 +56,7 @@ MANAGEMENT_CONFIG: dict[str, Any] = {
 }
 
 SIMULATION_CONFIG: dict[str, Any] = {
-    "version": "2.1.0",
+    "version": "2.2.0",
     # Comfort modifiers (fractions, NOT whole-number multipliers).
     "comfort": {"best": 0.40, "comfort": 0.25, "familiar": 0.10, "vulnerable": -0.10},
     # Tier by position in the player's ordered 5-champion pool.
@@ -146,8 +146,110 @@ SIMULATION_CONFIG: dict[str, Any] = {
         "focus_lane_bonus": 0.08,
     },
     "coach": {"draft_matchup_scale": 0.05, "synergy_scale": 0.02},
-    "damage_profile_penalty": {"enabled": False, "threshold": 0.8, "bonus": 0.05},
+    # Champion x champion win rate matrices (admin "Winrates" page). A delta is a win rate minus the baseline,
+    # in points; each effect is x(1 + scale * delta), so 55% at scale 0.02 is x1.10.
+    "win_rates": {
+        "enabled": True,
+        "baseline": 50.0,
+        "max_points": 10.0,           # cap on any averaged delta
+        "lane_counter_scale": 0.03,   # lane score, from the win rate against the lane opponent(s)
+        "lane_duo_scale": 0.02,       # bot + support lane scores, from their same-team win rate
+        "fight_synergy_scale": 0.02,  # fight power, from the fighters' average same-team win rate
+        "fight_counter_scale": 0.02,  # fight power, from the fighters' average win rate against the enemy fighters
+    },
+    # A comp leaning on one damage type is easier to itemize against: its damage in fights is cut by up to
+    # max_penalty, rising linearly from 0 at `threshold` share of the main type to max_penalty at 100%.
+    "damage_balance": {
+        "enabled": True,
+        "threshold": 0.65,
+        "max_penalty": 0.25,
+        "phase_weights": {"early": 0.5, "mid": 1.0, "late": 1.0, "overtime": 1.0},
+    },
 }
+
+# Settings admins may change on the Simulation Settings page, stored as overrides of SIMULATION_CONFIG.
+# kind "bool" or "number"; numbers are checked against min/max.
+EDITABLE_SETTINGS: list[dict[str, Any]] = [
+    {"path": "win_rates.enabled", "group": "Champion win rates", "kind": "bool", "label": "Use win rate matrices",
+     "help": "Same-team and against-team win rates affect lanes and fights."},
+    {"path": "win_rates.baseline", "group": "Champion win rates", "kind": "number", "min": 40, "max": 60, "step": 0.5,
+     "label": "Baseline win rate (%)", "help": "A win rate equal to this has no effect."},
+    {"path": "win_rates.max_points", "group": "Champion win rates", "kind": "number", "min": 0, "max": 50, "step": 0.5,
+     "label": "Cap (points)", "help": "Largest averaged win rate difference from the baseline that counts."},
+    {"path": "win_rates.lane_counter_scale", "group": "Champion win rates", "kind": "number", "min": 0, "max": 0.2,
+     "step": 0.005, "label": "Lane counter strength",
+     "help": "Lane score change per point of win rate against the lane opponent (bot and support face both enemy "
+             "bot laners)."},
+    {"path": "win_rates.lane_duo_scale", "group": "Champion win rates", "kind": "number", "min": 0, "max": 0.2,
+     "step": 0.005, "label": "Bot lane duo strength",
+     "help": "Bot and support lane score change per point of their same-team win rate."},
+    {"path": "win_rates.fight_synergy_scale", "group": "Champion win rates", "kind": "number", "min": 0, "max": 0.2,
+     "step": 0.005, "label": "Fight synergy strength",
+     "help": "Fight power change per point of the fighters' average same-team win rate."},
+    {"path": "win_rates.fight_counter_scale", "group": "Champion win rates", "kind": "number", "min": 0, "max": 0.2,
+     "step": 0.005, "label": "Fight counter strength",
+     "help": "Fight power change per point of the fighters' average win rate against the enemy fighters."},
+    {"path": "damage_balance.enabled", "group": "Damage balance", "kind": "bool", "label": "Penalize one-sided damage",
+     "help": "A comp with mostly physical or mostly magic damage deals less damage in fights."},
+    {"path": "damage_balance.threshold", "group": "Damage balance", "kind": "number", "min": 0.5, "max": 0.99,
+     "step": 0.01, "label": "Free share of one type",
+     "help": "Share of the team's damage one type can have before the penalty starts (0.65 = 65%)."},
+    {"path": "damage_balance.max_penalty", "group": "Damage balance", "kind": "number", "min": 0, "max": 0.9,
+     "step": 0.01, "label": "Penalty at 100% one type", "help": "Fraction of fight damage lost by a single-type comp."},
+    {"path": "damage_balance.phase_weights.early", "group": "Damage balance", "kind": "number", "min": 0, "max": 2,
+     "step": 0.05, "label": "Early game weight", "help": "How much of the penalty applies in early game fights."},
+    {"path": "damage_balance.phase_weights.mid", "group": "Damage balance", "kind": "number", "min": 0, "max": 2,
+     "step": 0.05, "label": "Mid game weight", "help": "How much of the penalty applies in mid game fights."},
+    {"path": "damage_balance.phase_weights.late", "group": "Damage balance", "kind": "number", "min": 0, "max": 2,
+     "step": 0.05, "label": "Late game weight", "help": "How much of the penalty applies in late game fights."},
+    {"path": "damage_balance.phase_weights.overtime", "group": "Damage balance", "kind": "number", "min": 0, "max": 2,
+     "step": 0.05, "label": "Overtime weight", "help": "How much of the penalty applies in overtime fights."},
+]
+EDITABLE_BY_PATH = {s["path"]: s for s in EDITABLE_SETTINGS}
+
+
+def config_value(config: dict, path: str) -> Any:
+    value: Any = config
+    for key in path.split("."):
+        value = value[key]
+    return value
+
+
+def validate_overrides(values: dict[str, Any]) -> dict:
+    """Check {dotted path: value} against EDITABLE_SETTINGS and return it as nested overrides for
+    `simulation_config`. Raises ValueError naming the first bad entry."""
+    nested: dict = {}
+    for path, value in values.items():
+        spec = EDITABLE_BY_PATH.get(path)
+        if spec is None:
+            raise ValueError(f"{path} is not an editable setting.")
+        if spec["kind"] == "bool":
+            if not isinstance(value, bool):
+                raise ValueError(f"{spec['label']} must be true or false.")
+        else:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"{spec['label']} must be a number.")
+            if not spec["min"] <= value <= spec["max"]:
+                raise ValueError(f"{spec['label']} must be between {spec['min']} and {spec['max']}.")
+            value = float(value)
+        *parents, leaf = path.split(".")
+        node = nested
+        for key in parents:
+            node = node.setdefault(key, {})
+        node[leaf] = value
+    return nested
+
+
+def flatten_overrides(overrides: dict, prefix: str = "") -> dict[str, Any]:
+    """Nested overrides -> {dotted path: value}; the inverse of `validate_overrides`."""
+    out: dict[str, Any] = {}
+    for key, value in overrides.items():
+        path = f"{prefix}{key}"
+        if isinstance(value, dict):
+            out.update(flatten_overrides(value, f"{path}."))
+        else:
+            out[path] = value
+    return out
 
 
 def _deep_merge(base: dict, override: dict) -> dict:

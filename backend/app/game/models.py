@@ -106,6 +106,27 @@ class TeamSetup:
     lineup: dict[str, int]
 
 
+@dataclass(frozen=True)
+class MatchupTable:
+    """The champion x champion win rate matrices, one percent per pair keyed (a, b) with a < b.
+
+    ally: the pair's win rate on the same team. enemy: champion a's win rate against champion b.
+    A pair that is not in the dict has no data.
+    """
+    ally: dict[tuple[int, int], float] = field(default_factory=dict)
+    enemy: dict[tuple[int, int], float] = field(default_factory=dict)
+
+    def ally_rate(self, a: int, b: int) -> float | None:
+        return self.ally.get((a, b) if a < b else (b, a))
+
+    def enemy_rate(self, a: int, b: int) -> float | None:
+        """Champion a's win rate against champion b."""
+        if a < b:
+            return self.enemy.get((a, b))
+        rate = self.enemy.get((b, a))
+        return None if rate is None else 100.0 - rate
+
+
 @dataclass
 class MatchEvent:
     sequence: int

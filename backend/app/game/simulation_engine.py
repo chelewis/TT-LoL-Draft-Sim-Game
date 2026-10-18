@@ -1,6 +1,6 @@
 """Match simulation orchestrator (spec 8-10).
 
-    result = simulate_match(blue_team, red_team, champions, seed)
+    result = simulate_match(blue_team, red_team, champions, seed, config, matchups)
 
 Pure function of its inputs: same teams + seed + config -> identical result and event log.
 """
@@ -11,10 +11,11 @@ from typing import Mapping
 from .config import LANES, simulation_config
 from .fights import run_fight
 from .lane_phase import run_lane_phase
-from .models import Champion, MatchResult, TeamSetup
+from .models import Champion, MatchResult, MatchupTable, TeamSetup
 from .objectives import roll_baron, roll_dragon, roll_tower
 from .ranking import assign_ranks, pick_mvp_and_ace
 from .state import Match, PlayerState, TeamState
+from .win_rates import ally_delta
 
 
 def _weighted_count(rng, maximum: int) -> int:
@@ -112,7 +113,10 @@ def _team_dict(match: Match, team: TeamState) -> dict:
         "structures_lost": {"towers": team.structures.total_towers_down,
                             "inhibitors": team.structures.inhibitors_down,
                             "nexus": team.structures.nexus_destroyed},
-        "comp": {"win_rate": round(sum(wr) / len(wr), 2), "damage_profile": team.damage_profile()},
+        "comp": {"win_rate": round(sum(wr) / len(wr), 2), "damage_profile": team.damage_profile(),
+                 "damage_penalty": round(team.damage_balance_penalty(match.config), 3),
+                 "ally_synergy": round(ally_delta([p.champion.id for p in team.ordered_players()],
+                                                  match.matchups, match.config), 1)},
     }
 
 
@@ -126,14 +130,15 @@ def _lane_dicts(match: Match) -> dict[str, dict]:
                 "blue_champion": p["blue_champion"], "red_champion": p["red_champion"],
                 "blue_score": p["blue_score"], "red_score": p["red_score"],
                 "gold_diff": p["gold_diff"], "winner": p["winner"], "matchup": p["matchup"],
+                "counter_rate": p["counter_rate"],
             }
     return lanes
 
 
 def simulate_match(blue: TeamSetup, red: TeamSetup, champions: Mapping[int, Champion],
-                   seed: int, config: dict | None = None) -> MatchResult:
+                   seed: int, config: dict | None = None, matchups: MatchupTable | None = None) -> MatchResult:
     cfg = config or simulation_config()
-    match = Match(blue, red, champions, seed, cfg)
+    match = Match(blue, red, champions, seed, cfg, matchups)
 
     run_lane_phase(match)
     for phase in cfg["phases"]:

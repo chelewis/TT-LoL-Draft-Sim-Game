@@ -11,3 +11,7 @@ class MatchupChange(BaseModel):
 
 class MatchupChangesIn(BaseModel):
     changes: list[MatchupChange] = Field(min_length=1, max_length=20000)
+
+
+class SimulationSettingsIn(BaseModel):
+    values: dict[str, bool | float] = Field(min_length=1, max_length=200)  # dotted config path -> new value

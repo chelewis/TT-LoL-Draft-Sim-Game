@@ -489,7 +489,17 @@ comp_win_rate  = mean of champion WinRate
 
 Used for:
 - Draft UI summary (both teams)
-- **Damage-profile penalty (new, optional):** a team whose damage profile is >80% one type is easier to itemize against; apply a small configurable defensive bonus to the opponent in fights. Off by default; toggle in config.
+- **Damage balance:** a team whose damage leans on one type is easier to itemize against. Its fight damage is cut by `max_penalty * (share - threshold) / (1 - threshold)` once the main type's share passes `threshold` (defaults 0.65 and 0.25, so a single-type comp loses 25%), scaled by a per-phase weight (early 0.5, then 1.0). Sturdiness is unaffected.
+
+### 9.5a Champion win rate matrices
+
+The admin-edited same-team (`ally`) and against-team (`enemy`) matrices feed the simulation. A delta is the average win rate of a set of pairs minus `baseline` (50), capped at ±`max_points`. Pairs with no data are skipped. Each effect multiplies by `1 + scale * delta`:
+- **Lane counter** (`lane_counter_scale`): each lane score, from the champion's win rate against its lane opponent. Bot and support each face both enemy bot laners.
+- **Bot lane duo** (`lane_duo_scale`): bot and support lane scores, from their same-team win rate.
+- **Fight synergy** (`fight_synergy_scale`): fight power, from the average same-team win rate among that side's fighters.
+- **Fight counter** (`fight_counter_scale`): fight power, from the fighters' average win rate against the enemy fighters.
+
+The `win_rates` and `damage_balance` constants can be edited on the admin Simulation Settings page. They are stored as overrides of `SIMULATION_CONFIG`, and each result records the overrides it was simulated with.
 
 ### 9.6 Team style and focus (enabled in V1)
 
@@ -658,7 +668,10 @@ SIMULATION_CONFIG = {
                    "enforce_budget": False, "system_players_exempt": True, "champion_pool_size": 5, "coach_stat_budget": 12, "stat_range": [1, 10],
                    "allow_off_role_roster": False,
                    "max_teams_per_user": 20, "max_players_per_user": 100, "max_coaches_per_user": 10},
-    "damage_profile_penalty": {"enabled": False}
+    "win_rates": {"enabled": True, "baseline": 50.0, "max_points": 10.0, "lane_counter_scale": 0.03, "lane_duo_scale": 0.02,
+                  "fight_synergy_scale": 0.02, "fight_counter_scale": 0.02},
+    "damage_balance": {"enabled": True, "threshold": 0.65, "max_penalty": 0.25,
+                       "phase_weights": {"early": 0.5, "mid": 1.0, "late": 1.0, "overtime": 1.0}}
 }
 ```
 

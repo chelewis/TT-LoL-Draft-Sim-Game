@@ -9,8 +9,9 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.dependencies import require_admin
 from app.models import User
-from app.schemas.admin import MatchupChangesIn
+from app.schemas.admin import MatchupChangesIn, SimulationSettingsIn
 from app.services import matchup_service as svc
+from app.services import simulation_settings_service as sim_settings
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 log = logging.getLogger(__name__)
@@ -35,3 +36,24 @@ def reset_matchups(kind: str, db: Session = Depends(get_db), user: User = Depend
     cells = svc.reset(db, svc.check_kind(kind))
     log.info("admin_matchups_reset user_id=%s kind=%s cells=%s", user.id, kind, cells)
     return {"cells": cells}
+
+
+# ------------------------------------------------- simulation settings
+@router.get("/simulation")
+def get_simulation_settings(db: Session = Depends(get_db)):
+    return sim_settings.describe(db)
+
+
+@router.put("/simulation")
+def update_simulation_settings(body: SimulationSettingsIn, db: Session = Depends(get_db),
+                               user: User = Depends(require_admin)):
+    out = sim_settings.save(db, body.values, user.id)
+    log.info("admin_simulation_settings_updated user_id=%s settings=%s", user.id, sorted(body.values))
+    return out
+
+
+@router.post("/simulation/reset")
+def reset_simulation_settings(db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    out = sim_settings.reset(db, user.id)
+    log.info("admin_simulation_settings_reset user_id=%s", user.id)
+    return out

@@ -38,24 +38,18 @@ def _number(text: str | None, cast, default):
         return default
 
 
-def import_matchups(db: Session, kind: str, seed_dir: Path = SEED_DIR, overwrite: bool = False) -> int:
-    """Load one matrix from its CSV. Does nothing when the matrix already has rows, unless `overwrite`.
-    Returns the number of cells written."""
-    if overwrite:
-        db.execute(delete(ChampionMatchup).where(ChampionMatchup.kind == kind))
-    elif db.scalar(select(func.count()).select_from(ChampionMatchup).where(ChampionMatchup.kind == kind)):
-        return 0
+def read_matchup_csv(kind: str, ids_by_name: dict[str, int], seed_dir: Path = SEED_DIR) -> dict[tuple[int, int], dict]:
+    """One matrix's seed CSV as {(a, b): row values} with a < b. `ids_by_name` maps normalised champion names
+    to ids; rows naming other champions are skipped with a warning. Empty when there is no file."""
     path = seed_dir / SEED_FILES[kind]
     if not path.exists():
-        return 0
-
-    ids = {_norm(name): cid for cid, name in db.execute(select(Champion.id, Champion.name))}
+        return {}
     unknown: set[str] = set()
     cells: dict[tuple[int, int], dict] = {}
     with open(path, newline="", encoding="utf-8-sig") as fh:
         for row in csv.DictReader(fh):
             name_a, name_b = (row.get("champion_a") or "").strip(), (row.get("champion_b") or "").strip()
-            a, b = ids.get(_norm(name_a)), ids.get(_norm(name_b))
+            a, b = ids_by_name.get(_norm(name_a)), ids_by_name.get(_norm(name_b))
             if a is None or b is None:
                 unknown.update(n for n, i in ((name_a, a), (name_b, b)) if i is None)
                 continue
@@ -69,6 +63,18 @@ def import_matchups(db: Session, kind: str, seed_dir: Path = SEED_DIR, overwrite
     if unknown:
         log.warning("seed data: %s names champions that are not in the game, skipped: %s",
                     SEED_FILES[kind], ", ".join(sorted(unknown)))
+    return cells
+
+
+def import_matchups(db: Session, kind: str, seed_dir: Path = SEED_DIR, overwrite: bool = False) -> int:
+    """Load one matrix from its CSV. Does nothing when the matrix already has rows, unless `overwrite`.
+    Returns the number of cells written."""
+    if overwrite:
+        db.execute(delete(ChampionMatchup).where(ChampionMatchup.kind == kind))
+    elif db.scalar(select(func.count()).select_from(ChampionMatchup).where(ChampionMatchup.kind == kind)):
+        return 0
+    ids = {_norm(name): cid for cid, name in db.execute(select(Champion.id, Champion.name))}
+    cells = read_matchup_csv(kind, ids, seed_dir)
     if cells:
         db.execute(insert(ChampionMatchup), list(cells.values()))
     return len(cells)

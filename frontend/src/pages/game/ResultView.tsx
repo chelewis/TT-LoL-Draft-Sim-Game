@@ -11,6 +11,16 @@ import { useChampionMap } from '../../hooks/useData'
 import { LANE_LABEL, TIER_LABEL, formatDuration, isSolo, matchupText, seriesLabel, titleCase } from '../../lib/format'
 import { describeEvent, summarize } from '../../lib/summary'
 
+/** Draft effects on the match: one-sided damage being itemized against, and same-team win rates. Absent on old results. */
+function CompModifiers({ penalty, synergy }: { penalty?: number; synergy?: number }) {
+  return (
+    <>
+      {penalty !== undefined && <tr><td>Itemized against</td><td>{penalty ? `−${Math.round(penalty * 100)}% damage` : 'No'}</td></tr>}
+      {synergy !== undefined && <tr><td>Synergy</td><td>{synergy > 0 ? '+' : ''}{synergy} pts</td></tr>}
+    </>
+  )
+}
+
 export default function ResultView({ game }: { game: GameState }) {
   const champions = useChampionMap()
   const result = useQuery({ queryKey: ['result', game.game_id], queryFn: () => api<MatchResult>(`/games/${game.game_id}/result`) })
@@ -97,6 +107,7 @@ export default function ResultView({ game }: { game: GameState }) {
                 <tr><td>Dragons</td><td>{r.teams[side].dragons}{r.teams[side].soul ? ' (soul)' : ''}</td></tr>
                 <tr><td>Barons</td><td>{r.teams[side].barons}</td></tr>
                 <tr><td>Damage mix</td><td>{r.teams[side].comp.damage_profile.physical} physical / {r.teams[side].comp.damage_profile.magic} magic</td></tr>
+                <CompModifiers penalty={r.teams[side].comp.damage_penalty} synergy={r.teams[side].comp.ally_synergy} />
               </tbody>
             </table>
           </div>
