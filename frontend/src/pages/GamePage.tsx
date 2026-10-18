@@ -42,6 +42,8 @@ function GameScreen({ gameId }: { gameId: number }) {
     (event: SocketEvent) => {
       if (event.type === 'CHAT_MESSAGE') addChatMessage(qc, gameId, event.message as ChatMessage)
       else refresh()
+      // either side swapped: the matchup panel shows both lineups, and the opponent's isn't in the game state
+      if (event.type === 'LINEUP_UPDATED') qc.invalidateQueries({ queryKey: ['matchups', gameId] })
       // a re-run replaces the stored result: drop the cached one so nothing shows the old match
       if (event.type === 'SIMULATION_COMPLETED') {
         qc.resetQueries({ queryKey: ['result', gameId] })

@@ -8,8 +8,10 @@ import random
 import statistics
 import sys
 
-from app.data.loader import load_seed_data, seed_team_setup
+from app.data.loader import _norm, load_seed_data, seed_team_setup
+from app.data.matchup_seed import KINDS, read_matchup_csv
 from app.game.config import LANES, simulation_config
+from app.game.models import MatchupTable
 from app.game.simulation_engine import simulate_match
 
 
@@ -17,10 +19,19 @@ def _pct(n, d):
     return f"{100.0 * n / d:5.1f}%" if d else "  n/a"
 
 
+def seed_matchups(champions) -> MatchupTable:
+    """The win rate matrices as seeded (no admin edits), straight from the seed CSVs."""
+    ids = {_norm(c.name): c.id for c in champions}
+    rates = {kind: {pair: cell["win_rate"] for pair, cell in read_matchup_csv(kind, ids).items()
+                    if cell["win_rate"] is not None} for kind in KINDS}
+    return MatchupTable(ally=rates["ally"], enemy=rates["enemy"])
+
+
 def run(n: int = 1000, overrides: dict | None = None, quiet: bool = False) -> dict:
     seed = load_seed_data()
     champs = {c.id: c for c in seed.champions}
     cfg = simulation_config(overrides)
+    table = seed_matchups(seed.champions)
     rng = random.Random(2024)
     ids = list(champs)
 
@@ -34,7 +45,7 @@ def run(n: int = 1000, overrides: dict | None = None, quiet: bool = False) -> di
         bl = lineup(); rl = lineup(bl.values())
         swap = i % 2 == 1
         a, b = (2, 1) if swap else (1, 2)
-        res = simulate_match(seed_team_setup(seed, a, bl), seed_team_setup(seed, b, rl), champs, 1000 + i, cfg)
+        res = simulate_match(seed_team_setup(seed, a, bl), seed_team_setup(seed, b, rl), champs, 1000 + i, cfg, table)
         durations.append(res.duration_seconds / 60)
         nexus += res.win_condition == "NEXUS"
         blue_wins += res.winner == "BLUE"
@@ -60,8 +71,8 @@ def run(n: int = 1000, overrides: dict | None = None, quiet: bool = False) -> di
             continue
         rl = lineup(good.values())
         off = dict(zip(LANES, rng.sample([c for c in ids if c not in set(rl.values()) and all(c not in p for p in pools.values())], 5)))
-        r1 = simulate_match(seed_team_setup(seed, 1, good), seed_team_setup(seed, 2, rl), champs, 5000 + i, cfg)
-        r2 = simulate_match(seed_team_setup(seed, 1, off), seed_team_setup(seed, 2, rl), champs, 5000 + i, cfg)
+        r1 = simulate_match(seed_team_setup(seed, 1, good), seed_team_setup(seed, 2, rl), champs, 5000 + i, cfg, table)
+        r2 = simulate_match(seed_team_setup(seed, 1, off), seed_team_setup(seed, 2, rl), champs, 5000 + i, cfg, table)
         comfort_wins += (r1.winner == "BLUE") - (r2.winner == "BLUE")
     out["comfort_edge"] = comfort_wins / m
 

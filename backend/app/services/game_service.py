@@ -22,8 +22,11 @@ from app.game.config import DRAFT_CONFIG, GAME_CONFIG, LANES, SIMULATION_CONFIG,
 from app.game.draft_engine import DraftError, DraftState, new_draft, rebuild_draft
 from app.game.models import CoachSpec, PlayerSpec, TeamSetup
 from app.game.simulation_engine import simulate_match
+from app.game.state import damage_balance_penalty, damage_profile
+from app.game.win_rates import ally_delta
 from app.models import (ChatMessage, Champion, DraftActionRow, Game, GameTeamSnapshot, Lobby, MatchEventRow, MatchResultRow,
                         Series, Team, TeamLineup, User)
+from app.services import matchup_service, simulation_settings_service
 from app.services import team_management_service as teams
 from app.services.analytics import track
 
@@ -530,12 +533,69 @@ def comfort_preview(db: Session, game: Game, user: User, requested_side: str | N
     return out
 
 
+ATTRIBUTES = ("damage", "sturdiness", "cc", "mobility", "utility")
+
+
+def matchup_preview(db: Session, game: Game, user: User) -> dict:
+    """What the drafted comps mean for the simulation, for the "Show Matchup Data" panel once the draft is done:
+    each team's damage mix and itemization penalty, attribute totals and same-team synergy, and lane vs lane win
+    rates. Both lineups are shown, including the opponent's current lanes, so swaps can be planned around them."""
+    if game.status not in ("LANE_ASSIGNMENT", "READY_TO_SIMULATE", "SIMULATING", "COMPLETED"):
+        raise conflict("Matchup data is available once the draft is complete.")
+    draft = draft_view(db, game)
+    picks = {"BLUE": draft["blue_picks"], "RED": draft["red_picks"]}
+    lineups = {s: _own_lineup(db, game, s) for s in ("BLUE", "RED")}
+
+    cfg = simulation_settings_service.current_config(db)
+    ids = picks["BLUE"] + picks["RED"]
+    champs = {c.id: c.to_engine() for c in db.scalars(select(Champion).where(Champion.id.in_(ids)))}
+    table = matchup_service.engine_table(db, ids)
+
+    def rate(delta: float | None) -> float | None:
+        return None if delta is None else round(delta, 1)
+
+    teams = {}
+    for s, team_ids in picks.items():
+        members = [champs[c] for c in team_ids if c in champs]
+        profile = damage_profile(members)
+        lineup = lineups[s]
+        duo = None
+        if "BOT" in lineup and "SUPPORT" in lineup:
+            duo = table.ally_rate(lineup["BOT"], lineup["SUPPORT"])
+        teams[s] = {
+            "champions": team_ids,
+            "damage_profile": profile,
+            "damage_penalty": round(damage_balance_penalty(profile, cfg), 3),
+            "totals": {a: sum(getattr(c, a) for c in members) for a in ATTRIBUTES},
+            "ally_synergy": rate(ally_delta(team_ids, table, cfg)),
+            "duo_win_rate": duo,
+        }
+
+    lanes = {}
+    for lane in LANES:
+        blue, red = lineups["BLUE"].get(lane), lineups["RED"].get(lane)
+        lanes[lane] = {"blue": blue, "red": red,
+                       "blue_win_rate": table.enemy_rate(blue, red) if blue and red else None}
+    wr, db_cfg = cfg["win_rates"], cfg["damage_balance"]
+    return {
+        "teams": teams,
+        "lineups": lineups,
+        "lanes": lanes,
+        # false when the against-team matrix has no win rates at all, so the panel can say why lanes are blank
+        "counter_data": matchup_service.has_rates(db, "enemy"),
+        "settings": {"win_rates_enabled": wr["enabled"], "baseline": wr["baseline"],
+                     "damage_balance_enabled": db_cfg["enabled"], "damage_threshold": db_cfg["threshold"],
+                     "max_damage_penalty": db_cfg["max_penalty"]},
+    }
+
+
 # ------------------------------------------------------------- simulation
 def run_simulation(db: Session, game: Game) -> Events:
     events = []
     _transition(game, "SIMULATING")
     game.seed = secrets.randbits(31)
-    cfg = simulation_config()
+    overrides = simulation_settings_service.overrides(db)
+    cfg = simulation_config(overrides)
     game.simulation_version = cfg["version"]
     track("simulation_started", game_id=game.id, seed=game.seed, simulation_version=cfg["version"])
     events.append(_event(game, "SIMULATION_STARTED"))
@@ -545,9 +605,11 @@ def run_simulation(db: Session, game: Game) -> Events:
     for side in ("BLUE", "RED"):
         setups[side] = _snapshot_to_setup(snapshot_of(db, game, side), _own_lineup(db, game, side),
                                           _own_players(db, game, side))
-    result = simulate_match(setups["BLUE"], setups["RED"], champions, game.seed, cfg)
+    table = matchup_service.engine_table(db, [c for setup in setups.values() for c in setup.lineup.values()])
+    result = simulate_match(setups["BLUE"], setups["RED"], champions, game.seed, cfg, table)
 
     data = result.to_dict(include_events=False)
+    data["config_overrides"] = overrides
     db.add(MatchResultRow(game_id=game.id, winner=result.winner, win_condition=result.win_condition,
                           duration_seconds=result.duration_seconds, mvp_player_id=result.mvp["player_id"],
                           ace_player_id=result.ace["player_id"], blue_gold=result.teams["BLUE"]["gold"],

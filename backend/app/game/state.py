@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from .comfort import comfort_modifier, comfort_tier
 from .config import LANES
-from .models import Champion, CoachSpec, MatchEvent, PlayerSpec, TeamSetup
+from .models import Champion, CoachSpec, MatchEvent, MatchupTable, PlayerSpec, TeamSetup
 from .structures import TeamStructures
 
 PHASE_SCALING_WEIGHT = {"lane": 0.0, "early": 0.0, "mid": 0.5, "late": 1.0, "overtime": 1.0}
@@ -72,23 +72,47 @@ class TeamState:
         return base * self.synergy_factor
 
     def damage_profile(self) -> dict[str, float]:
-        phys = magic = 0.0
-        for p in self.players.values():
-            d = p.champion.damage
-            if p.champion.damage_type == "P":
-                phys += d
-            elif p.champion.damage_type == "M":
-                magic += d
-            else:
-                phys += d / 2
-                magic += d / 2
-        return {"physical": round(phys, 1), "magic": round(magic, 1)}
+        return damage_profile(p.champion for p in self.players.values())
+
+    def damage_balance_penalty(self, config: dict) -> float:
+        return damage_balance_penalty(self.damage_profile(), config)
+
+
+def damage_profile(champions: Iterable[Champion]) -> dict[str, float]:
+    """Physical and magic damage points of a comp (PM champions count half to each)."""
+    phys = magic = 0.0
+    for c in champions:
+        if c.damage_type == "P":
+            phys += c.damage
+        elif c.damage_type == "M":
+            magic += c.damage
+        else:
+            phys += c.damage / 2
+            magic += c.damage / 2
+    return {"physical": round(phys, 1), "magic": round(magic, 1)}
+
+
+def damage_balance_penalty(profile: dict[str, float], config: dict) -> float:
+    """Fraction of fight damage lost to the enemy itemizing against a one-sided damage profile: 0 up to
+    `threshold` share of the main type, rising linearly to `max_penalty` at 100%."""
+    cfg = config["damage_balance"]
+    if not cfg["enabled"]:
+        return 0.0
+    total = profile["physical"] + profile["magic"]
+    if total <= 0:
+        return 0.0
+    share = max(profile.values()) / total
+    threshold = cfg["threshold"]
+    if share <= threshold or threshold >= 1.0:
+        return 0.0
+    return cfg["max_penalty"] * (share - threshold) / (1.0 - threshold)
 
 
 class Match:
     def __init__(self, blue: TeamSetup, red: TeamSetup, champions: Mapping[int, Champion],
-                 seed: int, config: dict):
+                 seed: int, config: dict, matchups: MatchupTable | None = None):
         self.config = config
+        self.matchups = matchups or MatchupTable()
         self.seed = seed
         self.rng = random.Random(seed)
         self.events: list[MatchEvent] = []

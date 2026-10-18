@@ -7,6 +7,7 @@ import { ChampionIcon, LaneIcon, championArt } from '../../components/ChampionAr
 import { ErrorNotice, Pips } from '../../components/common'
 import ChatPanel from '../../components/ChatPanel'
 import TeamCard from '../../components/TeamCard'
+import MatchupPanel from './MatchupPanel'
 import { useCountdownTick } from '../../hooks/useCountdownTick'
 import { useChampions, useCountdown, usePlayers } from '../../hooks/useData'
 import { useTurnAlert } from '../../hooks/useTurnAlert'
@@ -96,6 +97,9 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
   const finalizing = draft.complete
   const editing = game.status === 'LANE_ASSIGNMENT'
   const [swapMenu, setSwapMenu] = useState<{ side: Side; lane: Lane } | null>(null)
+  // finalization can swap the champion grid for the matchup data of the drafted comps
+  const [showMatchups, setShowMatchups] = useState(false)
+  const matchupsOpen = finalizing && showMatchups
   const lineups = useMemo(() => ({ BLUE: lineupOf(game, 'BLUE'), RED: lineupOf(game, 'RED') }), [game])
   const isReady = (side: Side) => !!(side === 'BLUE' ? game.players.blue : game.players.red)?.lineup_ready
   const canEdit = (side: Side) => finalizing && editing && (solo || side === game.you.team) && !!lineups[side] && !isReady(side)
@@ -265,62 +269,75 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
             onSwap={(a, b, kind) => swap('BLUE', a, b, kind)}
           />
 
-          <section className="cs-center" aria-label="Champions">
-            <div className="cs-filters">
-              <div className="cs-tabs" role="tablist" aria-label="Filter by class">
-                {CLASS_FILTERS.map((f) => (
-                  <button
-                    key={f.label}
-                    role="tab"
-                    aria-selected={classFilter === f.match}
-                    className={`cs-tab ${classFilter === f.match ? 'active' : ''}`}
-                    onClick={() => setClassFilter(f.match)}
-                  >
-                    {f.label}
-                  </button>
-                ))}
+          <section className="cs-center" aria-label={matchupsOpen ? 'Matchup data' : 'Champions'}>
+            {finalizing && (
+              <button className="cs-matchup-toggle" aria-pressed={matchupsOpen} onClick={() => setShowMatchups(!showMatchups)}>
+                {matchupsOpen ? '◂ Show champions' : 'Show Matchup Data'}
+              </button>
+            )}
+            {matchupsOpen ? (
+              <div className="cs-grid-scroll">
+                <MatchupPanel game={game} byId={byId} />
               </div>
-              <input
-                className="cs-search"
-                placeholder="Search"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                aria-label="Search champions"
-              />
-            </div>
-            <div className="cs-grid-scroll">
-              <div className="cs-grid">
-                {visible.map((c) => {
-                  const isUsed = used.has(c.id)
-                  const isFearless = fearless.has(c.id)
-                  const best = hints.get(c.id)?.[0]
-                  return (
-                    <button
-                      key={c.id}
-                      className={`cs-champ ${selected === c.id ? 'selected' : ''} ${isUsed ? 'used' : ''} ${isFearless ? 'fearless' : ''}`}
-                      disabled={isUsed}
-                      onClick={() => {
-                        if (selected !== c.id) playSound('select')
-                        setSelected(c.id)
-                      }}
-                      onDoubleClick={() => myTurn && !isUsed && !act.isPending && act.mutate(c.id)}
-                      title={`${c.name} · ${c.class}${isFearless ? ' · Played earlier in the series' : ''}${best ? ` · ${best.player} (${LANE_LABEL[best.lane]}): ${TIER_LABEL[best.tier]}` : ''}`}
-                    >
-                      <span className="cs-champ-frame">
-                        <ChampionIcon champion={c} size={64} />
-                        {best && (
-                          <span className={`cs-comfort tier-${best.tier.toLowerCase()}`} aria-label={TIER_LABEL[best.tier]}>
-                            {TIER_MARK[best.tier]}
+            ) : (
+              <>
+                <div className="cs-filters">
+                  <div className="cs-tabs" role="tablist" aria-label="Filter by class">
+                    {CLASS_FILTERS.map((f) => (
+                      <button
+                        key={f.label}
+                        role="tab"
+                        aria-selected={classFilter === f.match}
+                        className={`cs-tab ${classFilter === f.match ? 'active' : ''}`}
+                        onClick={() => setClassFilter(f.match)}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    className="cs-search"
+                    placeholder="Search"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    aria-label="Search champions"
+                  />
+                </div>
+                <div className="cs-grid-scroll">
+                  <div className="cs-grid">
+                    {visible.map((c) => {
+                      const isUsed = used.has(c.id)
+                      const isFearless = fearless.has(c.id)
+                      const best = hints.get(c.id)?.[0]
+                      return (
+                        <button
+                          key={c.id}
+                          className={`cs-champ ${selected === c.id ? 'selected' : ''} ${isUsed ? 'used' : ''} ${isFearless ? 'fearless' : ''}`}
+                          disabled={isUsed}
+                          onClick={() => {
+                            if (selected !== c.id) playSound('select')
+                            setSelected(c.id)
+                          }}
+                          onDoubleClick={() => myTurn && !isUsed && !act.isPending && act.mutate(c.id)}
+                          title={`${c.name} · ${c.class}${isFearless ? ' · Played earlier in the series' : ''}${best ? ` · ${best.player} (${LANE_LABEL[best.lane]}): ${TIER_LABEL[best.tier]}` : ''}`}
+                        >
+                          <span className="cs-champ-frame">
+                            <ChampionIcon champion={c} size={64} />
+                            {best && (
+                              <span className={`cs-comfort tier-${best.tier.toLowerCase()}`} aria-label={TIER_LABEL[best.tier]}>
+                                {TIER_MARK[best.tier]}
+                              </span>
+                            )}
                           </span>
-                        )}
-                      </span>
-                      <span className="cs-champ-name">{c.name}</span>
-                    </button>
-                  )
-                })}
-                {visible.length === 0 && <p className="muted">No champions match.</p>}
-              </div>
-            </div>
+                          <span className="cs-champ-name">{c.name}</span>
+                        </button>
+                      )
+                    })}
+                    {visible.length === 0 && <p className="muted">No champions match.</p>}
+                  </div>
+                </div>
+              </>
+            )}
           </section>
 
           {!solo && <ChatPanel gameId={game.game_id} myUserId={game.you.user_id} />}

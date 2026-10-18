@@ -24,6 +24,20 @@ export interface MatchupMatrix {
   cells: MatchupCell[]
 }
 
+/** One admin-editable simulation constant (backend EDITABLE_SETTINGS). `path` is its dotted config key. */
+export type SimulationSettingField = {
+  path: string
+  group: string
+  label: string
+  help: string
+  default: number | boolean
+  value: number | boolean
+} & ({ kind: 'bool' } | { kind: 'number'; min: number; max: number; step: number })
+export interface SimulationSettings {
+  fields: SimulationSettingField[]
+  updated_at: string | null
+}
+
 export interface Champion {
   id: number
   name: string
@@ -339,7 +353,14 @@ export interface ResultTeam {
   dragons: number
   barons: number
   soul: boolean
-  comp: { win_rate: number; damage_profile: { physical: number; magic: number } }
+  comp: {
+    win_rate: number
+    damage_profile: { physical: number; magic: number }
+    /** fraction of fight damage lost to one-sided damage; missing on results from before simulation 2.2.0 */
+    damage_penalty?: number
+    /** the comp's average same-team win rate minus the baseline, in points */
+    ally_synergy?: number
+  }
 }
 
 export interface ResultLane {
@@ -352,6 +373,8 @@ export interface ResultLane {
   gold_diff: number
   winner: Side | null
   matchup: string | null
+  /** blue champion's win rate against the red one, from the against-team matrix */
+  counter_rate?: number | null
 }
 
 export interface MatchResult {
@@ -380,6 +403,29 @@ export interface MatchEvent {
   minute: number
   type: string
   payload: Record<string, unknown>
+}
+
+export interface MatchupTeam {
+  champions: number[]
+  damage_profile: { physical: number; magic: number }
+  /** fraction of fight damage lost to the enemy itemizing against a one-sided damage mix */
+  damage_penalty: number
+  totals: { damage: number; sturdiness: number; cc: number; mobility: number; utility: number }
+  /** average same-team win rate of the comp minus the baseline, in points */
+  ally_synergy: number | null
+  /** bot + support same-team win rate; null when there is no data */
+  duo_win_rate: number | null
+}
+/** GET /games/{id}/matchups: what the drafted comps mean for the simulation. */
+export interface MatchupPreview {
+  teams: Record<Side, MatchupTeam>
+  /** lane -> champion id per side, the opponent's included */
+  lineups: Record<Side, Partial<Record<Lane, number>>>
+  /** lane vs lane; blue_win_rate is blue's win rate against red */
+  lanes: Record<Lane, { blue: number | null; red: number | null; blue_win_rate: number | null }>
+  /** false when the against-team matrix has no win rates at all */
+  counter_data: boolean
+  settings: { win_rates_enabled: boolean; baseline: number; damage_balance_enabled: boolean; damage_threshold: number; max_damage_penalty: number }
 }
 
 export interface ComfortPreview {

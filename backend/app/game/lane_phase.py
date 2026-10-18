@@ -6,6 +6,7 @@ from .config import FOCUS_TO_LANE, LANES
 from .matchup import apply_coach_draft, lane_matchup
 from .models import Champion, PlayerSpec
 from .state import Match, PlayerState, TeamState
+from .win_rates import ally_delta, counter_delta, multiplier
 
 
 def champion_synergy(champion: Champion, config: dict) -> dict[str, float]:
@@ -60,6 +61,25 @@ def team_lane_multiplier(team: TeamState, lane: str, config: dict) -> float:
     return mult
 
 
+BOT_LANE = ("BOT", "SUPPORT")
+
+
+def win_rate_lane_multiplier(match: Match, team: TeamState, lane: str) -> float:
+    """Lane score multiplier from the win rate matrices: the champion against its lane opponent(s) (bot and
+    support each face both enemy bot laners) and, in the bot lane, the duo's same-team win rate."""
+    cfg = match.config
+    wr = cfg["win_rates"]
+    enemy = match.other(team)
+    mine = team.players[lane].champion.id
+    opponents = BOT_LANE if lane in BOT_LANE else (lane,)
+    delta = counter_delta([mine], [enemy.players[l].champion.id for l in opponents], match.matchups, cfg)
+    mult = multiplier(delta, wr["lane_counter_scale"], cfg)
+    if lane in BOT_LANE:
+        duo = ally_delta([team.players[l].champion.id for l in BOT_LANE], match.matchups, cfg)
+        mult *= multiplier(duo, wr["lane_duo_scale"], cfg)
+    return mult
+
+
 def run_lane_phase(match: Match) -> None:
     """Compute lane scores, apply assists, hand out 15-minute gold and emit LANE_RESULT events."""
     cfg = match.config
@@ -88,6 +108,7 @@ def run_lane_phase(match: Match) -> None:
             score *= strength_fit(p.spec, p.champion, cfg)
             score *= p.matchup_multiplier
             score *= team_lane_multiplier(team, lane, cfg)
+            score *= win_rate_lane_multiplier(match, team, lane)
             p.base_score = max(score, lane_cfg["min_score"])
 
     # 3) 15-minute CS gold differences use the base scores (reference order), before assists
@@ -143,4 +164,5 @@ def run_lane_phase(match: Match) -> None:
                    blue_player=pb.spec.id, red_player=pr.spec.id,
                    blue_champion=pb.champion.id, red_champion=pr.champion.id,
                    blue_score=round(pb.lane_score), red_score=round(pr.lane_score),
-                   gold_diff=round(gold_diffs[lane]), matchup=pb.matchup_label)
+                   gold_diff=round(gold_diffs[lane]), matchup=pb.matchup_label,
+                   counter_rate=match.matchups.enemy_rate(pb.champion.id, pr.champion.id))

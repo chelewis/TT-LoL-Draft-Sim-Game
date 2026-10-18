@@ -198,11 +198,14 @@ def test_win_rate_matrix_cells_follow_a_renumbered_champion(db):
     data = load_seed_data()
     senna = next(c for c in data.champions if c.name == "Senna")
     other = next(c for c in data.champions if c.id > senna.id)
-    db.add(ChampionMatchup(kind="enemy", champion_a_id=senna.id, champion_b_id=other.id, win_rate=60.0, games=10, wins=6))
+    cell = db.query(ChampionMatchup).filter_by(kind="enemy", champion_a_id=senna.id, champion_b_id=other.id).one()
+    cell.win_rate, cell.games, cell.wins = 60.0, 10, 6
     db.commit()
+    total = db.query(ChampionMatchup).filter_by(kind="enemy").count()
     sync_champions(db, renumbered(data, "Senna", NEW_ID + 40))
-    cells = db.query(ChampionMatchup).filter_by(kind="enemy").all()
-    assert [(c.champion_a_id, c.champion_b_id, c.win_rate, c.wins) for c in cells] == [(other.id, NEW_ID + 40, 40.0, 4)]
+    moved = db.query(ChampionMatchup).filter_by(kind="enemy", champion_a_id=other.id, champion_b_id=NEW_ID + 40).one()
+    assert (moved.win_rate, moved.wins) == (40.0, 4)                 # now from the other champion's side
+    assert db.query(ChampionMatchup).filter_by(kind="enemy").count() == total
     assert db.query(ChampionMatchup).filter_by(champion_a_id=senna.id).count() == 0
     assert db.query(ChampionMatchup).filter_by(kind="ally", champion_b_id=NEW_ID + 40).count() > 0
 

@@ -1,0 +1,102 @@
+"""The "Show Matchup Data" panel: comp damage, totals and win rates once the draft is complete."""
+import pytest
+from sqlalchemy import delete
+
+from app.core.database import SessionLocal
+from app.data.matchup_seed import canonical
+from app.game.config import LANES
+from app.models import ChampionMatchup
+from tests.conftest import play_draft, start_draft
+from tests.test_solo_mode import choose, draft_all, solo
+
+
+@pytest.fixture
+def no_counters(client):
+    """An empty against-team matrix (it is seeded with estimates), so only the rates a test sets exist."""
+    with SessionLocal() as db:
+        db.execute(delete(ChampionMatchup).where(ChampionMatchup.kind == "enemy"))
+        db.commit()
+
+
+def set_enemy_rate(a, b, rate):
+    """Champion a's win rate against champion b in the against-team matrix."""
+    a, b, rate, _ = canonical("enemy", a, b, rate)
+    with SessionLocal() as db:
+        db.add(ChampionMatchup(kind="enemy", champion_a_id=a, champion_b_id=b, win_rate=rate, games=0, wins=0))
+        db.commit()
+
+
+def solo_after_draft(alice, team_ids):
+    lobby = solo(alice)
+    gid = lobby["game_id"]
+    choose(alice, lobby, team_ids[0], team_ids[1])
+    alice.post(f"/games/{gid}/ready")
+    return gid, draft_all(alice, gid)
+
+
+def test_not_available_during_the_draft(alice, default_team_ids):
+    lobby = solo(alice)
+    gid = lobby["game_id"]
+    choose(alice, lobby, default_team_ids[0], default_team_ids[1])
+    alice.post(f"/games/{gid}/ready")
+    assert alice.get(f"/games/{gid}/matchups").status_code == 409
+
+
+def test_solo_shows_lane_vs_lane_and_follows_swaps(no_counters, alice, default_team_ids):
+    gid, draft = solo_after_draft(alice, default_team_ids)
+    state = alice.get(f"/games/{gid}/state").json()
+    blue, red = state["lineup"]["blue"], state["lineup"]["red"]
+    assert alice.get(f"/games/{gid}/matchups").json()["counter_data"] is False     # nothing seeded
+    set_enemy_rate(blue["MID"], red["MID"], 57.5)
+
+    data = alice.get(f"/games/{gid}/matchups").json()
+    assert data["counter_data"] is True
+    assert data["lanes"]["MID"] == {"blue": blue["MID"], "red": red["MID"], "blue_win_rate": 57.5}
+    assert data["lanes"]["TOP"]["blue_win_rate"] is None
+    for side, picks in (("BLUE", draft["blue_picks"]), ("RED", draft["red_picks"])):
+        team = data["teams"][side]
+        assert sorted(team["champions"]) == sorted(picks)
+        assert set(team["totals"]) == {"damage", "sturdiness", "cc", "mobility", "utility"}
+        assert team["damage_profile"]["physical"] + team["damage_profile"]["magic"] == team["totals"]["damage"]
+        assert 0 <= team["damage_penalty"] <= data["settings"]["max_damage_penalty"]
+
+    # swapping blue's top and mid champions moves the matchup to top
+    swapped = {**blue, "TOP": blue["MID"], "MID": blue["TOP"]}
+    res = alice.put(f"/games/{gid}/lineup", {"side": "BLUE", "assignments": [
+        {"lane": lane, "champion_id": swapped[lane]} for lane in LANES]})
+    assert res.status_code == 200, res.text
+    data = alice.get(f"/games/{gid}/matchups").json()
+    assert data["lanes"]["TOP"]["blue"] == blue["MID"] and data["lanes"]["TOP"]["blue_win_rate"] is None
+    assert data["lanes"]["MID"]["blue"] == blue["TOP"]
+
+
+def test_multiplayer_shows_the_opponents_lanes_during_swaps(no_counters, alice, bob, default_team_ids):
+    gid = start_draft(alice, bob, default_team_ids)
+    play_draft(alice, bob, gid, range(1, 80))
+    red = bob.get(f"/games/{gid}/state").json()["lineup"]["yours"]
+    set_enemy_rate(alice.get(f"/games/{gid}/state").json()["lineup"]["yours"]["TOP"], red["TOP"], 61.0)
+    for api in (alice, bob):
+        data = api.get(f"/games/{gid}/matchups").json()
+        assert set(data["lineups"]["BLUE"]) == set(LANES) and data["lineups"]["RED"] == red
+        assert data["lanes"]["TOP"]["red"] == red["TOP"] and data["lanes"]["TOP"]["blue_win_rate"] == 61.0
+
+    # the opponent sees a swap straight away
+    swapped = {**red, "TOP": red["MID"], "MID": red["TOP"]}
+    assert bob.put(f"/games/{gid}/lineup", {"assignments": [
+        {"lane": lane, "champion_id": swapped[lane]} for lane in LANES]}).status_code == 200
+    assert alice.get(f"/games/{gid}/matchups").json()["lanes"]["TOP"]["red"] == red["MID"]
+    # the game state itself still keeps the opponent's lineup to the end
+    assert alice.get(f"/games/{gid}/state").json()["lineup"].get("opponent") is None
+
+
+def test_outsiders_cannot_read_it(client, alice, default_team_ids):
+    from tests.conftest import Api
+    gid, _ = solo_after_draft(alice, default_team_ids)
+    assert Api(client, "mallory").get(f"/games/{gid}/matchups").status_code in (403, 404)
+
+
+def test_seeded_estimates_fill_every_lane(alice, default_team_ids):
+    gid, _ = solo_after_draft(alice, default_team_ids)
+    data = alice.get(f"/games/{gid}/matchups").json()
+    assert data["counter_data"] is True
+    assert all(lane["blue_win_rate"] is not None for lane in data["lanes"].values())

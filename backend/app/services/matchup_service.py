@@ -1,11 +1,14 @@
 """Champion x champion win rate matrices, edited by admins (same team = "ally", against team = "enemy")."""
 from __future__ import annotations
 
+from typing import Iterable
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import bad_request, not_found
 from app.data.matchup_seed import KINDS, canonical, import_matchups
+from app.game.models import MatchupTable
 from app.models import Champion, ChampionMatchup
 from app.schemas.admin import MatchupChange
 
@@ -24,6 +27,27 @@ def matrix(db: Session, kind: str) -> dict:
                               ChampionMatchup.games, ChampionMatchup.edited).where(ChampionMatchup.kind == kind))
     return {"kind": kind, "champions": [{"id": cid, "name": name} for cid, name in champions],
             "cells": [list(row) for row in cells]}
+
+
+def engine_table(db: Session, champion_ids: Iterable[int] | None = None) -> MatchupTable:
+    """Both matrices in the form the simulation reads: only cells that have a win rate. With `champion_ids`,
+    only the pairs among those champions (the ones a match can use)."""
+    rates: dict[str, dict[tuple[int, int], float]] = {kind: {} for kind in KINDS}
+    query = select(ChampionMatchup.kind, ChampionMatchup.champion_a_id, ChampionMatchup.champion_b_id,
+                   ChampionMatchup.win_rate).where(ChampionMatchup.win_rate.is_not(None))
+    if champion_ids is not None:
+        ids = set(champion_ids)
+        query = query.where(ChampionMatchup.champion_a_id.in_(ids), ChampionMatchup.champion_b_id.in_(ids))
+    for kind, a, b, rate in db.execute(query):
+        if kind in rates:
+            rates[kind][(a, b)] = rate
+    return MatchupTable(ally=rates["ally"], enemy=rates["enemy"])
+
+
+def has_rates(db: Session, kind: str) -> bool:
+    """Whether any cell of the matrix has a win rate."""
+    return db.scalar(select(ChampionMatchup.id).where(ChampionMatchup.kind == kind,
+                                                      ChampionMatchup.win_rate.is_not(None)).limit(1)) is not None
 
 
 def apply_changes(db: Session, kind: str, changes: list[MatchupChange], user_id: int) -> int:

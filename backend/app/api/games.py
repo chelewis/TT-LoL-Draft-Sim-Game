@@ -84,6 +84,12 @@ async def lineup_preview(game_id: int, side: str | None = None, db: Session = De
     return svc.comfort_preview(db, game, user, side)
 
 
+@router.get("/{game_id}/matchups")
+async def matchups(game_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    game = await _load(db, game_id, user)
+    return svc.matchup_preview(db, game, user)
+
+
 @router.post("/{game_id}/lineup/ready")
 async def lineup_ready(game_id: int, side: str | None = None, db: Session = Depends(get_db),
                        user: User = Depends(get_current_user)):

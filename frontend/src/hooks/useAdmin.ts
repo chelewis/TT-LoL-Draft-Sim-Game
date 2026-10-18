@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
-import type { MatchupKind, MatchupMatrix } from '../api/types'
+import type { MatchupKind, MatchupMatrix, SimulationSettings } from '../api/types'
 import { toChanges, type Pending } from '../lib/matchups'
 
 const matchupsKey = (kind: MatchupKind) => ['admin', 'matchups', kind]
@@ -30,5 +30,32 @@ export function useResetMatchups(kind: MatchupKind) {
       await api(`/admin/matchups/${kind}/reset`, { method: 'POST' })
       await qc.invalidateQueries({ queryKey: matchupsKey(kind) })
     },
+  })
+}
+
+const simulationKey = ['admin', 'simulation']
+
+export const useSimulationSettings = () =>
+  useQuery({
+    queryKey: simulationKey,
+    queryFn: () => api<SimulationSettings>('/admin/simulation'),
+    staleTime: Infinity,
+  })
+
+/** Both resolve with the settings as saved, which replace the cached ones. */
+export function useSaveSimulationSettings() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (values: Record<string, number | boolean>) =>
+      api<SimulationSettings>('/admin/simulation', { method: 'PUT', body: { values } }),
+    onSuccess: (data) => qc.setQueryData(simulationKey, data),
+  })
+}
+
+export function useResetSimulationSettings() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api<SimulationSettings>('/admin/simulation/reset', { method: 'POST' }),
+    onSuccess: (data) => qc.setQueryData(simulationKey, data),
   })
 }
