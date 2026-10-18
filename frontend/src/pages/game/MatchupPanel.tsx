@@ -49,7 +49,9 @@ export default function MatchupPanel({ game, byId }: { game: GameState; byId: Ma
 
       <section className="mp-section">
         <h3 className="mp-heading">Damage composition</h3>
-        {SIDES.map((s) => <DamageMix key={s} side={s} team={data.teams[s]} />)}
+        <div className="mp-damage-pair">
+          {SIDES.map((s) => <DamageMix key={s} side={s} team={data.teams[s]} />)}
+        </div>
         <p className="mp-note">
           {data.settings.damage_balance_enabled
             ? `Over ${Math.round(data.settings.damage_threshold * 100)}% of one damage type lets the enemy itemize against it: up to −${Math.round(data.settings.max_damage_penalty * 100)}% fight damage for a single-type comp.`
@@ -115,7 +117,7 @@ function LaneRow({ lane, blue, red, rate, baseline }: { lane: Lane; blue?: Champ
 function DamageMix({ side, team }: { side: Side; team: MatchupTeam }) {
   const phys = physicalShare(team.damage_profile)
   return (
-    <div className="mp-damage">
+    <div className={`mp-damage ${side.toLowerCase()}`}>
       <div className="mp-damage-head">
         <span className={side.toLowerCase()}>{sideName(side)}</span>
         <span className={team.damage_penalty > 0 ? 'tone-bad' : 'tone-good'}>

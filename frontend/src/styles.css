@@ -411,8 +411,10 @@ table.compact th, table.compact td { padding: 4px 6px; font-size: 0.85rem; }
 .mp-rate-bar::after { content: ''; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--hex-bg); }
 .mp-rate-nums { display: flex; justify-content: space-between; font-size: 0.78rem; font-variant-numeric: tabular-nums; }
 .mp-num { font-variant-numeric: tabular-nums; }
-.mp-damage { display: flex; flex-direction: column; gap: 4px; }
-.mp-damage-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 0.85rem; }
+.mp-damage-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.mp-damage { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mp-damage-head { display: flex; flex-direction: column; gap: 2px; font-size: 0.85rem; }
+.mp-damage.red .mp-damage-head { align-items: flex-end; text-align: right; }
 .mp-damage-bar { display: flex; height: 10px; border: 1px solid var(--hex-line); }
 .mp-phys { background: #e08a3c; }
 .mp-magic { background: #8a6cf0; }
@@ -433,6 +435,8 @@ table.compact th, table.compact td { padding: 4px 6px; font-size: 0.85rem; }
 @media (max-width: 600px) {
   .mp-lane { grid-template-columns: 1fr; text-align: center; }
   .mp-champ, .mp-champ.red { justify-content: center; }
+  .mp-damage-pair { grid-template-columns: 1fr; }
+  .mp-damage.red .mp-damage-head { align-items: flex-start; text-align: left; }
 }
 
 .cs-grid-scroll { height: 560px; overflow-y: auto; overscroll-behavior: contain; padding-right: 6px; }
