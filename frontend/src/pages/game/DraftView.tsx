@@ -96,6 +96,15 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
     onError: onChange,
   })
 
+  // tell the server what I'm hovering on my turn, so a timeout locks it in instead of a random champion
+  const hovered = !draft.complete && draft.timers_enabled && myTurn && selected && !used.has(selected) ? selected : null
+  useEffect(() => {
+    if (draft.complete || !draft.timers_enabled || !myTurn) return
+    api(`/games/${game.game_id}/draft/hover`, { body: { champion_id: hovered, draft_action: draft.current_action } }).catch(
+      () => {},
+    )
+  }, [game.game_id, hovered, draft.current_action, draft.complete, draft.timers_enabled, myTurn])
+
   // ----- finalization: after the last pick, each side swaps champions or positions, then locks in
   const finalizing = draft.complete
   const editing = game.status === 'LANE_ASSIGNMENT'

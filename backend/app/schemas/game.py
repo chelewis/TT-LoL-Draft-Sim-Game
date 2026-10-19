@@ -40,6 +40,11 @@ class DraftActionIn(BaseModel):
     champion_id: int
 
 
+class DraftHoverIn(BaseModel):
+    champion_id: int | None
+    draft_action: int   # the action the hover is for; a stale hover for an earlier action is ignored
+
+
 class LaneAssignment(BaseModel):
     lane: str
     champion_id: int

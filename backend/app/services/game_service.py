@@ -353,6 +353,7 @@ def draft_actions(game: Game) -> list[str]:
 def _begin_action(game: Game, started_at) -> None:
     """Start the timer for the game's current action (no expiry when timers are disabled)."""
     game.action_started_at = started_at
+    game.hovered_champion_id = None
     if not game.timers_enabled:
         game.action_expires_at = None
         return
@@ -388,6 +389,7 @@ def _record_action(db: Session, game: Game, draft: DraftState, team: str, action
     game.current_action = draft.cursor
     if draft.complete:
         game.action_started_at = game.action_expires_at = None
+        game.hovered_champion_id = None
         _transition(game, "LANE_ASSIGNMENT")
         _default_lineups(db, game, draft)
         track("draft_completed", game_id=game.id)
@@ -399,7 +401,8 @@ def _record_action(db: Session, game: Game, draft: DraftState, team: str, action
 
 
 def advance_timeouts(db: Session, game: Game, now=None) -> Events:
-    """Apply automatic random legal actions for every draft timer that has expired."""
+    """Apply an automatic action for every draft timer that has expired: the hovered champion if it is
+    still legal, otherwise a random legal one."""
     events: Events = []
     now = now or utcnow()
     if game.status != "DRAFTING":
@@ -409,7 +412,8 @@ def advance_timeouts(db: Session, game: Game, now=None) -> Events:
     while game.status == "DRAFTING" and game.action_expires_at and game.action_expires_at <= now:
         action = draft.current
         pool = draft.available()
-        champion_id = rng.choice(pool)
+        hovered = game.hovered_champion_id
+        champion_id = hovered if hovered in pool else rng.choice(pool)
         events += _record_action(db, game, draft, action.team, action.action_type, champion_id,
                                  True, game.action_expires_at)
     if events:
@@ -431,6 +435,27 @@ def draft_action(db: Session, game: Game, user: User, action_type: str, champion
         track("invalid_action", game_id=game.id, user_id=user.id, reason=str(exc))
         raise conflict(str(exc)) from exc
     events += _record_action(db, game, draft, side, action_type, champion_id, False, utcnow())
+    db.commit()
+    return events
+
+
+def draft_hover(db: Session, game: Game, user: User, champion_id: int | None, draft_action: int) -> Events:
+    """Remember the champion the acting side has hovered, so a timeout locks it in. Private: never broadcast."""
+    events = advance_timeouts(db, game)
+    if game.status != "DRAFTING":
+        raise conflict("The draft is not in progress.")
+    draft = load_draft(db, game)
+    current = draft.current
+    if current is None or draft_action != draft.cursor:
+        return events                    # the action already resolved; the hover is stale
+    if not game.is_solo and current.team != side_of(game, user.id):
+        raise conflict("It is not your turn.")
+    if champion_id is not None:
+        try:
+            draft.validate(current.team, current.action_type, champion_id)
+        except DraftError as exc:
+            raise conflict(str(exc)) from exc
+    game.hovered_champion_id = champion_id
     db.commit()
     return events
 

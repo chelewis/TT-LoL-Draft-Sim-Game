@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models import Game, User
-from app.schemas.game import ChatIn, DraftActionIn, LineupIn, ReadyIn, SeriesReadyIn
+from app.schemas.game import ChatIn, DraftActionIn, DraftHoverIn, LineupIn, ReadyIn, SeriesReadyIn
 from app.services import game_service as svc
 from app.websocket.manager import manager
 
@@ -65,6 +65,14 @@ async def ban(game_id: int, body: DraftActionIn, db: Session = Depends(get_db),
               user: User = Depends(get_current_user)):
     game = await _load(db, game_id, user)
     await manager.publish(svc.draft_action(db, game, user, "BAN", body.champion_id))
+    return svc.draft_view(db, game)
+
+
+@router.post("/{game_id}/draft/hover")
+async def hover(game_id: int, body: DraftHoverIn, db: Session = Depends(get_db),
+                user: User = Depends(get_current_user)):
+    game = await _load(db, game_id, user)
+    await manager.publish(svc.draft_hover(db, game, user, body.champion_id, body.draft_action))
     return svc.draft_view(db, game)
 
 

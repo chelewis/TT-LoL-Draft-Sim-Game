@@ -188,6 +188,23 @@ def test_single_timeout_advances_one_action(alice, bob, default_team_ids):
     assert after["history"][0]["auto"] is True
 
 
+def test_timeout_locks_in_hovered_champion(alice, bob, default_team_ids):
+    gid = start_draft(alice, bob, default_team_ids)
+    # only the acting side can hover, and only legal champions
+    assert bob.post(f"/games/{gid}/draft/hover", {"champion_id": 7, "draft_action": 0}).status_code == 409
+    assert alice.post(f"/games/{gid}/draft/hover", {"champion_id": 99999, "draft_action": 0}).status_code == 409
+    assert alice.post(f"/games/{gid}/draft/hover", {"champion_id": 7, "draft_action": 0}).status_code == 200
+    with SessionLocal() as db:
+        game = db.get(Game, gid)
+        game_service.advance_timeouts(db, game, now=game.action_expires_at + timedelta(seconds=1))
+    after = alice.get(f"/games/{gid}/draft").json()
+    assert after["history"][0] == {"action_number": 0, "team": "BLUE", "action_type": "BAN", "champion_id": 7, "auto": True}
+    # the hover belonged to the resolved action: a stale hover is ignored and red's timeout stays random
+    assert alice.post(f"/games/{gid}/draft/hover", {"champion_id": 8, "draft_action": 0}).status_code == 200
+    with SessionLocal() as db:
+        assert db.get(Game, gid).hovered_champion_id is None
+
+
 def test_hidden_player_data(alice, bob, default_team_ids):
     gid = start_draft(alice, bob, default_team_ids, hide=True)
     mine = alice.get(f"/games/{gid}/state").json()

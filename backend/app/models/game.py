@@ -47,6 +47,8 @@ class Game(Base):
     current_action: Mapped[int] = mapped_column(Integer, default=0)
     action_started_at: Mapped[datetime | None] = mapped_column(DateTime)
     action_expires_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # champion the acting side has hovered for the current action; locked in instead of a random one on timeout
+    hovered_champion_id: Mapped[int | None] = mapped_column(Integer)
     seed: Mapped[int | None] = mapped_column(Integer)
     simulation_version: Mapped[str | None] = mapped_column(String(16))
     started_at: Mapped[datetime | None] = mapped_column(DateTime)
