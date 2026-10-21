@@ -81,6 +81,35 @@ def win_rate_lane_multiplier(match: Match, team: TeamState, lane: str) -> float:
     return mult
 
 
+def _assist_fraction(lane: str, other: str, lane_cfg: dict, team: TeamState | None = None) -> float:
+    """Share of `other`'s base score added to `lane`'s. Given a team, its jungle/support focus boost applies."""
+    assist = lane_cfg["assist"]
+    if other == "JUNGLE":
+        frac, helper = assist["jungle"], "JUNGLE"
+    elif other == "SUPPORT" and lane == "BOT":
+        frac, helper = assist["support_to_bot"], "SUPPORT"
+    else:
+        return assist["other"]
+    if team is not None and _focus_weight(team, helper):
+        frac *= 1.0 + lane_cfg["focus_assist_boost"]
+    return frac
+
+
+def assist_totals(config: dict) -> dict[str, float]:
+    """Each lane's score as a multiple of its base score when every teammate has the same base score."""
+    lane_cfg = config["lane"]
+    return {l: 1.0 + sum(_assist_fraction(l, o, lane_cfg) for o in LANES if o != l) for l in LANES}
+
+
+def role_factors(config: dict) -> dict[str, float]:
+    """Per-lane multiplier that evens out the roles' assist shares (all 1.0 when `normalise_assists` is off)."""
+    totals = assist_totals(config)
+    if not config["lane"]["normalise_assists"]:
+        return {l: 1.0 for l in LANES}
+    mean = sum(totals.values()) / len(totals)
+    return {l: mean / t for l, t in totals.items()}
+
+
 def run_lane_phase(match: Match) -> None:
     """Compute lane scores, apply assists, hand out 15-minute gold and emit LANE_RESULT events."""
     cfg = match.config
@@ -99,7 +128,9 @@ def run_lane_phase(match: Match) -> None:
             advantaged = "BLUE" if label.startswith("A") else "RED"
             pb.matchup_label = pr.matchup_label = f"{advantaged}_{label.split('_')[1]}"
 
-    # 2) base scores (blue first, then red, lane by lane: fixed RNG draw order)
+    # 2) base scores (blue first, then red, lane by lane: fixed RNG draw order). `unscaled` is the same
+    #    score without the lane phase's champion scaling, which fights take back out.
+    unscaled: dict[str, dict[str, float]] = {"BLUE": {}, "RED": {}}
     for team in (blue, red):
         for lane in LANES:
             p = team.players[lane]
@@ -110,39 +141,27 @@ def run_lane_phase(match: Match) -> None:
             score *= p.matchup_multiplier
             score *= team_lane_multiplier(team, lane, cfg)
             score *= win_rate_lane_multiplier(match, team, lane)
-            score *= scaling_multiplier(p.champion, "lane", cfg)
-            p.base_score = max(score, lane_cfg["min_score"])
+            unscaled[team.side][lane] = max(score, lane_cfg["min_score"])
+            p.base_score = max(score * scaling_multiplier(p.champion, "lane", cfg), lane_cfg["min_score"])
 
-    # 3) 15-minute CS gold differences use the base scores (reference order), before assists
-    gold_diffs: dict[str, float] = {}
-    for lane in LANES:
-        pb, pr = blue.players[lane], red.players[lane]
-        gb = pb.base_score + pb.spec.cs * 10
-        gr = pr.base_score + pr.spec.cs * 10
-        gold_diffs[lane] = abs(gb - gr)
-
-    # 4) lane assists computed from a snapshot of the base scores, then applied
+    # 3) lane assists from a snapshot of the base scores, then each role's total assist share is evened out
+    factors = role_factors(cfg)
     for team in (blue, red):
         snapshot = {l: team.players[l].base_score for l in LANES}
-        assist = lane_cfg["assist"]
-        boost = lane_cfg["focus_assist_boost"]
+        flat = unscaled[team.side]
         for lane in LANES:
-            total = snapshot[lane]
+            total, total_unscaled = snapshot[lane], flat[lane]
             for other in LANES:
                 if other == lane:
                     continue
-                if other == "JUNGLE":
-                    frac = assist["jungle"]
-                    frac *= 1.0 + boost * (1.0 if _focus_weight(team, "JUNGLE") else 0.0)
-                elif other == "SUPPORT" and lane == "BOT":
-                    frac = assist["support_to_bot"]
-                    frac *= 1.0 + boost * (1.0 if _focus_weight(team, "SUPPORT") else 0.0)
-                else:
-                    frac = assist["other"]
-                total += snapshot[other] * frac * team.synergy_factor
-            team.players[lane].lane_score = total
+                frac = _assist_fraction(lane, other, lane_cfg, team) * team.synergy_factor
+                total += snapshot[other] * frac
+                total_unscaled += flat[other] * frac
+            p = team.players[lane]
+            p.lane_score = total * factors[lane]
+            p.lane_unscaled_ratio = total_unscaled / total
 
-    # 5) CS and gold at the end of the lane phase; the lane winner also takes the gold difference
+    # 4) CS and gold at the end of the lane phase; the lane winner also takes their lead as gold
     eco = cfg["economy"]
     for team in (blue, red):
         for lane in LANES:
@@ -152,19 +171,19 @@ def run_lane_phase(match: Match) -> None:
             p.gold = p.cs * eco["gold_per_cs"]
     match.cs_minute = float(eco["lane_minutes"])
 
+    # the lead is the lane score margin (brought back to base-score size) plus the CS stat difference
+    assist_mean = sum(assist_totals(cfg).values()) / len(LANES)
     for lane in LANES:
         pb, pr = blue.players[lane], red.players[lane]
-        if pb.lane_score > pr.lane_score:
-            winner = "BLUE"
-            pb.gold += gold_diffs[lane]
-        elif pr.lane_score > pb.lane_score:
-            winner = "RED"
-            pr.gold += gold_diffs[lane]
-        else:
-            winner = None
+        winner, gold = None, 0.0
+        if pb.lane_score != pr.lane_score:
+            winner = "BLUE" if pb.lane_score > pr.lane_score else "RED"
+            w, l = (pb, pr) if winner == "BLUE" else (pr, pb)
+            gold = max((w.lane_score - l.lane_score) / assist_mean + (w.spec.cs - l.spec.cs) * 10, 0.0)
+            w.gold += gold
         match.emit("LANE_RESULT", lane=lane, winner=winner,
                    blue_player=pb.spec.id, red_player=pr.spec.id,
                    blue_champion=pb.champion.id, red_champion=pr.champion.id,
                    blue_score=round(pb.lane_score), red_score=round(pr.lane_score),
-                   gold_diff=round(gold_diffs[lane]), matchup=pb.matchup_label,
+                   gold_diff=round(gold), matchup=pb.matchup_label,
                    counter_rate=match.matchups.enemy_rate(pb.champion.id, pr.champion.id))

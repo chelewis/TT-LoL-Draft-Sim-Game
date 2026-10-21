@@ -64,7 +64,8 @@ def _run_events(match: Match, events: list[tuple[float, str, dict]]) -> None:
             roll_tower(match)
         else:
             blue, red = match.sides
-            attacker, defender = (blue, red) if match.rng.random() < 0.5 else (red, blue)
+            # the more aggressive team starts more fights, and so brings the bigger group to skirmishes
+            attacker, defender = (blue, red) if match.rng.random() < match.initiative_chance(blue) else (red, blue)
             run_fight(match, attacker, defender, params["n_att"], params["n_def"], kind.upper())
 
 

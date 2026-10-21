@@ -8,15 +8,26 @@ from .win_rates import ally_delta, counter_delta, multiplier
 
 
 def skill_check(player: PlayerState, rng, config: dict) -> float:
-    """Percent performance swing. Difficulty amplifies the comfort effect between 1x and Dx.
+    """Percent performance swing in one fight, centred on the player's comfort.
 
-    Positive comfort on a hard champion has a higher ceiling; negative comfort on a hard
-    champion is more punishing. Scaled by `skill_check.scale`.
+    Each difficulty step above 1 widens the swing both ways, so a hard champion has a higher ceiling but can
+    also fail. Below `mastery` comfort it also pulls the centre down, so an unpractised hard champion is
+    the most punishing pick. Scaled by `skill_check.scale`.
     """
+    cfg = config["skill_check"]
     c = player.comfort * 100.0
-    d = player.champion.difficulty
-    lo, hi = sorted((c, c * d))
-    return rng.uniform(lo, hi) * config["skill_check"]["scale"]
+    steps = max(player.champion.difficulty - 1, 0)
+    centre = c - steps * cfg["low_comfort_penalty"] * max(cfg["mastery"] - c, 0.0)
+    spread = steps * cfg["spread"]
+    return rng.uniform(centre - spread, centre + spread) * cfg["scale"]
+
+
+def dmg_stat_multiplier(player: PlayerState, config: dict) -> float:
+    """Fight performance from the player's dmg stat: x1.0 at the middle of the stat range."""
+    scale = config["fight"]["dmg_stat_scale"]
+    lo, hi = config["lane"]["strength_fit"]["stat_range"]
+    mid, half = (lo + hi) / 2, (hi - lo) / 2
+    return max(1.0 + scale * (player.spec.dmg - mid) / half, 0.1)
 
 
 def fight_multiplier(match: Match, team: TeamState, size: int) -> float:
@@ -55,10 +66,12 @@ def win_rate_fight_multiplier(match: Match, members: list[PlayerState], enemies:
 
 
 def _performance(match: Match, p: PlayerState) -> float:
-    """A fighter's strength in this fight: lane score and gold, the skill check, and how strong the champion
-    is at this point of the game."""
-    base = (p.lane_score + p.gold) / 2.0
+    """A fighter's strength in this fight: lane score and gold, the skill check, the player's dmg stat and how
+    strong the champion is at this point of the game. The lane phase's champion scaling is taken back out of
+    the lane score, so only this phase's scaling counts."""
+    base = (p.lane_score * p.lane_unscaled_ratio + p.gold) / 2.0
     base *= scaling_multiplier(p.champion, match.phase, match.config)
+    base *= dmg_stat_multiplier(p, match.config)
     return max(1.0, base * (1.0 + skill_check(p, match.rng, match.config) / 100.0))
 
 

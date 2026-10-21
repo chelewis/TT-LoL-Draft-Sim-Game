@@ -56,7 +56,7 @@ MANAGEMENT_CONFIG: dict[str, Any] = {
 }
 
 SIMULATION_CONFIG: dict[str, Any] = {
-    "version": "2.3.0",
+    "version": "2.4.0",
     # Comfort modifiers (fractions, NOT whole-number multipliers).
     "comfort": {"best": 0.40, "comfort": 0.25, "familiar": 0.10, "vulnerable": -0.10},
     # Tier by position in the player's ordered 5-champion pool.
@@ -83,8 +83,14 @@ SIMULATION_CONFIG: dict[str, Any] = {
         "matchup_multiplier": {"slight": 1.25, "strong": 1.5, "strong_threshold": 2},
         "assist": {"jungle": 0.45, "support_to_bot": 0.5, "other": 0.10},
         "focus_assist_boost": 0.25,
+        # The assist fractions give each role a different total share (bot gets the most, jungle the least).
+        # When on, each lane score is rescaled so equal players in every role end up with equal scores.
+        "normalise_assists": True,
     },
-    "skill_check": {"scale": 0.5},
+    # Per-fight swing, in percent, centred on the comfort modifier (x scale). Each difficulty step above 1
+    # widens the swing by `spread` points both ways, and pulls the centre down by `low_comfort_penalty` per
+    # comfort point below `mastery`: hard champions have a higher ceiling but can fail, worst when unpractised.
+    "skill_check": {"scale": 0.5, "spread": 30.0, "mastery": 25.0, "low_comfort_penalty": 0.5},
     "economy": {
         "gold_per_cs": 19.8,
         "kill": 300,
@@ -131,11 +137,17 @@ SIMULATION_CONFIG: dict[str, Any] = {
     },
     "fight": {
         "damage_weight": 1.0,
-        "sturdiness_weight": 0.5,
+        "sturdiness_weight": 1.0,  # equal to damage, so tanks are not outclassed by carries
         "control_scale": 0.5,      # weight of CC + mobility + utility above/below average
-        "control_average": 6.0,
+        "control_average": 5.25,   # the champion pool's average CC + mobility + utility
         "even_threshold": 0.02,
         "dominance_scale": 2.5,
+        # Chance a side starts a fight (and so brings the bigger group to a skirmish):
+        # 0.5 + scale * (its share of both teams' summed aggr - 0.5), clamped to initiative_bounds.
+        "initiative_scale": 1.0,
+        "initiative_bounds": [0.2, 0.8],
+        # Fight performance from the player's dmg stat: 1 + scale * (dmg - mid) / half over the 1-10 range.
+        "dmg_stat_scale": 0.10,
     },
     "winner_rule": "nexus",
     "team_style": {

@@ -26,6 +26,8 @@ class PlayerState:
     matchup_multiplier: float = 1.0
     base_score: float = 0.0
     lane_score: float = 0.0
+    # lane score without the lane phase's champion scaling, as a share of lane_score (fights use it)
+    lane_unscaled_ratio: float = 1.0
     cs: float = 0.0
     gold: float = 0.0
     kills: int = 0
@@ -212,6 +214,15 @@ class Match:
         a = self.objective_control(team, roll)
         b = self.objective_control(self.other(team), roll)
         return a / (a + b) if a + b > 0 else 0.5
+
+    def initiative_chance(self, team: TeamState) -> float:
+        """Chance `team` starts the next fight, from its share of both teams' aggression."""
+        f = self.config["fight"]
+        mine = sum(p.spec.aggr for p in team.players.values())
+        theirs = sum(p.spec.aggr for p in self.other(team).players.values())
+        share = mine / (mine + theirs) if mine + theirs > 0 else 0.5
+        lo, hi = f["initiative_bounds"]
+        return max(lo, min(hi, 0.5 + f["initiative_scale"] * (share - 0.5)))
 
     def end(self, winner: str, condition: str) -> None:
         self.winner = winner
