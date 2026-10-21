@@ -10,6 +10,8 @@ from app.game.models import Champion
 
 SEED_DIR = Path(__file__).parent / "seed"
 DEFAULT_WIN_RATE = 50.0
+DEFAULT_SCALING = 2
+SCALING_VALUES = (1, 2, 3)
 CLASS_FIXES = {"Assasin": "Assassin"}
 
 
@@ -79,6 +81,21 @@ def load_seed_data(seed_dir: Path = SEED_DIR) -> SeedData:
         if key in stats:
             warnings.append(f"ChampionStatistics.csv has two rows for {r['Champion']!r} (line {r['_line']} wins); delete the stale one")
         stats[key] = r
+
+    scaling: dict[str, int] = {}
+    for r in _rows("champion_scaling.csv", seed_dir):
+        label = f"champion_scaling.csv line {r['_line']} ({r.get('champion_name', '?')!r})"
+        try:
+            value = int(r["scaling"])
+        except (KeyError, ValueError) as exc:
+            raise SeedDataError(f"{label}: scaling must be 1, 2 or 3") from exc
+        if value not in SCALING_VALUES:
+            raise SeedDataError(f"{label}: scaling must be 1, 2 or 3, not {value}")
+        key = _norm(r["champion_name"])
+        if key in scaling:
+            warnings.append(f"champion_scaling.csv has two rows for {r['champion_name']!r} (line {r['_line']} wins); delete the stale one")
+        scaling[key] = value
+
     champions: list[Champion] = []
     placeholder_ids: dict[int, str] = {}
     for r in _rows("Champions.csv", seed_dir):
@@ -95,6 +112,10 @@ def load_seed_data(seed_dir: Path = SEED_DIR) -> SeedData:
         stat = stats.get(_norm(r.get("Name", "")))
         if stat is None:
             warnings.append(f"No statistics row for champion {r.get('Name')!r}; using win rate {DEFAULT_WIN_RATE}")
+        champ_scaling = scaling.get(_norm(r.get("Name", "")))
+        if champ_scaling is None:
+            warnings.append(f"No scaling row for champion {r.get('Name')!r}; using scaling {DEFAULT_SCALING}")
+            champ_scaling = DEFAULT_SCALING
         try:
             if not r.get("Name"):
                 raise ValueError("Name is empty")
@@ -107,6 +128,7 @@ def load_seed_data(seed_dir: Path = SEED_DIR) -> SeedData:
                 mobility=_attr(r, "Mobility", warnings), utility=_attr(r, "Utility", warnings),
                 win_rate=float(stat["WinRate"]) if stat else DEFAULT_WIN_RATE,
                 pick_rate=float(stat["PickRate"]) if stat else 0.0,
+                scaling=champ_scaling,
             ))
         except KeyError as exc:
             raise SeedDataError(f"{label}: missing column {exc}") from exc
@@ -190,6 +212,9 @@ def load_seed_data(seed_dir: Path = SEED_DIR) -> SeedData:
     unused = set(stats) - {_norm(c.name) for c in champions}
     if unused:
         warnings.append(f"{len(unused)} statistics rows have no matching champion")
+    unused_scaling = set(scaling) - {_norm(c.name) for c in champions}
+    if unused_scaling:
+        warnings.append(f"{len(unused_scaling)} champion_scaling.csv rows have no matching champion")
 
     return SeedData(champions, players, pools, coaches, teams, rosters, warnings)
 

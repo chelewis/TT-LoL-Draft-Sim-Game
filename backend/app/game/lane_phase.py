@@ -5,6 +5,7 @@ from __future__ import annotations
 from .config import FOCUS_TO_LANE, LANES
 from .matchup import apply_coach_draft, lane_matchup
 from .models import Champion, PlayerSpec
+from .scaling import scaling_multiplier
 from .state import Match, PlayerState, TeamState
 from .win_rates import ally_delta, counter_delta, multiplier
 
@@ -109,6 +110,7 @@ def run_lane_phase(match: Match) -> None:
             score *= p.matchup_multiplier
             score *= team_lane_multiplier(team, lane, cfg)
             score *= win_rate_lane_multiplier(match, team, lane)
+            score *= scaling_multiplier(p.champion, "lane", cfg)
             p.base_score = max(score, lane_cfg["min_score"])
 
     # 3) 15-minute CS gold differences use the base scores (reference order), before assists

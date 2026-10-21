@@ -110,6 +110,13 @@ export function remainingSeconds(expiresAt: string | null, now: number = Date.no
   return Math.max(0, Math.ceil((Date.parse(expiresAt) - now) / 1000))
 }
 
+/** When a champion (scaling 1, 2 or 3) or a comp (the average of its champions) is strongest. */
+export function scalingLabel(score: number): string {
+  if (score <= 1.6) return 'Early game'
+  if (score >= 2.4) return 'Late game'
+  return 'Neutral scaling'
+}
+
 /** Plain-language lane matchup text for the results screen. */
 export function matchupText(matchup: string | null): string {
   if (!matchup) return 'Even matchup'

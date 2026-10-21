@@ -24,6 +24,7 @@ class Champion:
     utility: int
     win_rate: float = 50.0
     pick_rate: float = 0.0
+    scaling: int = 2  # 1 early game, 2 neutral, 3 late game
 
     @property
     def offence(self) -> int:
@@ -58,7 +59,7 @@ class Champion:
             "difficulty": self.difficulty, "damage_type": self.damage_type,
             "damage": self.damage, "sturdiness": self.sturdiness, "crowd_control": self.cc,
             "mobility": self.mobility, "utility": self.utility,
-            "win_rate": self.win_rate, "pick_rate": self.pick_rate,
+            "win_rate": self.win_rate, "pick_rate": self.pick_rate, "scaling": self.scaling,
             "offence": self.offence, "defence": self.defence, "control": self.control,
             "strength": self.strength, "weakness": self.weakness,
         }

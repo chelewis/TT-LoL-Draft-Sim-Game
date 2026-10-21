@@ -12,7 +12,7 @@ import { useCountdownTick } from '../../hooks/useCountdownTick'
 import { useChampions, useCountdown, usePlayers } from '../../hooks/useData'
 import { useTurnAlert } from '../../hooks/useTurnAlert'
 import { alertsState, disableAlerts, disablePullBack, enableAlerts, enablePullBack, pullBackState, turnAlertKey } from '../../lib/alerts'
-import { LANE_LABEL, TIER_LABEL, TIER_MODIFIER, comfortTier, isHidden, isSolo, rankLabel, roleLabel } from '../../lib/format'
+import { LANE_LABEL, TIER_LABEL, TIER_MODIFIER, comfortTier, isHidden, isSolo, rankLabel, roleLabel, scalingLabel } from '../../lib/format'
 import { lineupAssignments, swapLanes, type Lineup, type SwapKind } from '../../lib/lineup'
 import { isSoundOn, playSound, setSoundOn } from '../../lib/sound'
 
@@ -798,7 +798,7 @@ function ChampionDetail({ champion: c, hints }: { champion: Champion | undefined
           <strong>{c.name}</strong>
           <span className="muted small">
             {normalizeClass(c.class)} · difficulty {c.difficulty} ·{' '}
-            {c.damage_type === 'P' ? 'physical' : c.damage_type === 'M' ? 'magic' : 'mixed'} damage · WR {c.win_rate}% · PR {c.pick_rate}%
+            {c.damage_type === 'P' ? 'physical' : c.damage_type === 'M' ? 'magic' : 'mixed'} damage · WR {c.win_rate}% · PR {c.pick_rate}% · {scalingLabel(c.scaling)}
           </span>
         </div>
         <div className="cs-detail-stats small">

@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { comfortTier, draftRules, isSolo, formatDuration, formatMetric, isSoloSource, matchupText, overBudgetNotice, rankLabel, remainingSeconds, riotSourceLabel, riotSourceTag, roleLabel } from './format'
+import { comfortTier, draftRules, isSolo, formatDuration, formatMetric, isSoloSource, matchupText, overBudgetNotice, rankLabel, remainingSeconds, riotSourceLabel, riotSourceTag, roleLabel, scalingLabel } from './format'
+
+describe('scalingLabel', () => {
+  it('names champion scaling scores', () => {
+    expect(scalingLabel(1)).toBe('Early game')
+    expect(scalingLabel(2)).toBe('Neutral scaling')
+    expect(scalingLabel(3)).toBe('Late game')
+  })
+  it('names comp averages by their lean', () => {
+    expect(scalingLabel(1.4)).toBe('Early game')
+    expect(scalingLabel(2.2)).toBe('Neutral scaling')
+    expect(scalingLabel(2.6)).toBe('Late game')
+  })
+})
 
 describe('comfortTier', () => {
   const pool = [10, 20, 30, 40, 50]

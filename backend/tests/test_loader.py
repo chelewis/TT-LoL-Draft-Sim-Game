@@ -34,6 +34,31 @@ def test_missing_data_is_reported_not_fatal(tmp_path):
     assert any("No statistics row" in w and "Brandnew" in w for w in data.warnings)
     brandnew = next(c for c in data.champions if c.name == "Brandnew")
     assert brandnew.win_rate == 50.0
+    assert any("No scaling row" in w and "Brandnew" in w for w in data.warnings)
+    assert brandnew.scaling == 2
+
+
+def test_bad_scaling_value_is_an_error(tmp_path):
+    import shutil
+    import pytest
+    from app.data.loader import SEED_DIR, SeedDataError
+    seed_copy = tmp_path / "seed"
+    shutil.copytree(SEED_DIR, seed_copy)
+    path = seed_copy / "champion_scaling.csv"
+    path.write_text(path.read_text(encoding="utf-8").rstrip("\n") + "\nBrandnew,4\n", encoding="utf-8")
+    with pytest.raises(SeedDataError, match="scaling must be 1, 2 or 3"):
+        load_seed_data(seed_copy)
+
+
+def test_every_champion_has_a_scaling_row():
+    """A champion without a champion_scaling.csv row would silently be treated as neutral (2)."""
+    warnings = [w for w in load_seed_data().warnings if "scaling" in w]
+    assert not warnings, warnings
+
+
+def test_scaling_scores_are_loaded(seed):
+    by_name = {c.name: c.scaling for c in seed.champions}
+    assert by_name["Blitzcrank"] == 1 and by_name["Ahri"] == 2 and by_name["Azir"] == 3
 
 
 def test_pools_have_five_distinct_champions(seed):

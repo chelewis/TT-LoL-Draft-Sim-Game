@@ -4,7 +4,7 @@ import type { Champion, GameState, Lane, MatchupPreview, MatchupTeam, Side } fro
 import { LANES } from '../../api/types'
 import { ChampionIcon, LaneIcon } from '../../components/ChampionArt'
 import { ErrorNotice, Loading } from '../../components/common'
-import { LANE_LABEL } from '../../lib/format'
+import { LANE_LABEL, scalingLabel } from '../../lib/format'
 import { formatPoints, formatRate, physicalShare, rateTone } from '../../lib/matchupPanel'
 
 const SIDES: Side[] = ['BLUE', 'RED']
@@ -131,6 +131,9 @@ function DamageMix({ side, team }: { side: Side; team: MatchupTeam }) {
       <div className="mp-damage-nums">
         <span>Physical {team.damage_profile.physical} ({Math.round(phys * 100)}%)</span>
         <span>Magic {team.damage_profile.magic} ({Math.round((1 - phys) * 100)}%)</span>
+      </div>
+      <div className="mp-damage-nums">
+        <span>Scaling {team.scaling.toFixed(1)}: {scalingLabel(team.scaling)}</span>
       </div>
     </div>
   )

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .objectives import siege
+from .scaling import scaling_multiplier
 from .state import PHASE_SCALING_WEIGHT, Match, PlayerState, TeamState
 from .win_rates import ally_delta, counter_delta, multiplier
 
@@ -54,7 +55,10 @@ def win_rate_fight_multiplier(match: Match, members: list[PlayerState], enemies:
 
 
 def _performance(match: Match, p: PlayerState) -> float:
+    """A fighter's strength in this fight: lane score and gold, the skill check, and how strong the champion
+    is at this point of the game."""
     base = (p.lane_score + p.gold) / 2.0
+    base *= scaling_multiplier(p.champion, match.phase, match.config)
     return max(1.0, base * (1.0 + skill_check(p, match.rng, match.config) / 100.0))
 
 

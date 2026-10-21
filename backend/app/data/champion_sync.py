@@ -32,6 +32,7 @@ FIELDS = {
     "name": "name", "champ_class": "champ_class", "style": "style", "difficulty": "difficulty",
     "damage_type": "damage_type", "damage": "damage", "sturdiness": "sturdiness", "crowd_control": "cc",
     "mobility": "mobility", "utility": "utility", "win_rate": "win_rate", "pick_rate": "pick_rate",
+    "scaling": "scaling",
 }
 
 
@@ -143,7 +144,8 @@ def _new_row(champ: EngineChampion) -> Champion:
     return Champion(id=champ.id, name=champ.name, champ_class=champ.champ_class, style=champ.style,
                     difficulty=champ.difficulty, damage_type=champ.damage_type, damage=champ.damage,
                     sturdiness=champ.sturdiness, crowd_control=champ.cc, mobility=champ.mobility,
-                    utility=champ.utility, win_rate=champ.win_rate, pick_rate=champ.pick_rate, enabled=True)
+                    utility=champ.utility, win_rate=champ.win_rate, pick_rate=champ.pick_rate,
+                    scaling=champ.scaling, enabled=True)
 
 
 def log_report(report: SyncReport) -> None:

@@ -22,6 +22,7 @@ from app.game.config import DRAFT_CONFIG, GAME_CONFIG, LANES, SIMULATION_CONFIG,
 from app.game.draft_engine import DraftError, DraftState, new_draft, rebuild_draft
 from app.game.models import CoachSpec, PlayerSpec, TeamSetup
 from app.game.simulation_engine import simulate_match
+from app.game.scaling import comp_scaling
 from app.game.state import damage_balance_penalty, damage_profile
 from app.game.win_rates import ally_delta
 from app.models import (ChatMessage, Champion, DraftActionRow, Game, GameTeamSnapshot, Lobby, MatchEventRow, MatchResultRow,
@@ -594,6 +595,7 @@ def matchup_preview(db: Session, game: Game, user: User) -> dict:
             "totals": {a: sum(getattr(c, a) for c in members) for a in ATTRIBUTES},
             "ally_synergy": rate(ally_delta(team_ids, table, cfg)),
             "duo_win_rate": duo,
+            "scaling": comp_scaling(members),
         }
 
     lanes = {}
@@ -610,7 +612,8 @@ def matchup_preview(db: Session, game: Game, user: User) -> dict:
         "counter_data": matchup_service.has_rates(db, "enemy"),
         "settings": {"win_rates_enabled": wr["enabled"], "baseline": wr["baseline"],
                      "damage_balance_enabled": db_cfg["enabled"], "damage_threshold": db_cfg["threshold"],
-                     "max_damage_penalty": db_cfg["max_penalty"]},
+                     "max_damage_penalty": db_cfg["max_penalty"],
+                     "champion_scaling_enabled": cfg["champion_scaling"]["enabled"]},
     }
 
 

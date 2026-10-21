@@ -51,6 +51,8 @@ export interface Champion {
   utility: number
   win_rate: number
   pick_rate: number
+  /** 1 early game, 2 neutral, 3 late game */
+  scaling: number
   strength: string
   weakness: string
 }
@@ -360,6 +362,8 @@ export interface ResultTeam {
     damage_penalty?: number
     /** the comp's average same-team win rate minus the baseline, in points */
     ally_synergy?: number
+    /** average champion scaling, 1 (early) to 3 (late); missing on results from before simulation 2.3.0 */
+    scaling?: number
   }
 }
 
@@ -415,6 +419,8 @@ export interface MatchupTeam {
   ally_synergy: number | null
   /** bot + support same-team win rate; null when there is no data */
   duo_win_rate: number | null
+  /** average champion scaling, 1 (early) to 3 (late) */
+  scaling: number
 }
 /** GET /games/{id}/matchups: what the drafted comps mean for the simulation. */
 export interface MatchupPreview {
@@ -425,7 +431,7 @@ export interface MatchupPreview {
   lanes: Record<Lane, { blue: number | null; red: number | null; blue_win_rate: number | null }>
   /** false when the against-team matrix has no win rates at all */
   counter_data: boolean
-  settings: { win_rates_enabled: boolean; baseline: number; damage_balance_enabled: boolean; damage_threshold: number; max_damage_penalty: number }
+  settings: { win_rates_enabled: boolean; baseline: number; damage_balance_enabled: boolean; damage_threshold: number; max_damage_penalty: number; champion_scaling_enabled: boolean }
 }
 
 export interface ComfortPreview {

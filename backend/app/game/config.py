@@ -56,7 +56,7 @@ MANAGEMENT_CONFIG: dict[str, Any] = {
 }
 
 SIMULATION_CONFIG: dict[str, Any] = {
-    "version": "2.2.0",
+    "version": "2.3.0",
     # Comfort modifiers (fractions, NOT whole-number multipliers).
     "comfort": {"best": 0.40, "comfort": 0.25, "familiar": 0.10, "vulnerable": -0.10},
     # Tier by position in the player's ordered 5-champion pool.
@@ -165,7 +165,22 @@ SIMULATION_CONFIG: dict[str, Any] = {
         "max_penalty": 0.25,
         "phase_weights": {"early": 0.5, "mid": 1.0, "late": 1.0, "overtime": 1.0},
     },
+    # Champion power curve by game phase, from each champion's scaling score (champion_scaling.csv:
+    # 1 early game, 2 neutral, 3 late game). The multiplier applies to the champion's lane score in the lane
+    # phase and to its fight performance in later phases.
+    "champion_scaling": {
+        "enabled": True,
+        "curves": {
+            "1": {"lane": 1.10, "early": 1.10, "mid": 1.00, "late": 0.92, "overtime": 0.88},
+            "2": {"lane": 1.00, "early": 1.00, "mid": 1.00, "late": 1.00, "overtime": 1.00},
+            "3": {"lane": 0.92, "early": 0.92, "mid": 1.00, "late": 1.10, "overtime": 1.14},
+        },
+    },
 }
+
+_SCALING_LABELS = {"1": "Early game champions", "3": "Late game champions"}
+_PHASE_LABELS = {"lane": "Lane phase", "early": "Early game", "mid": "Mid game", "late": "Late game",
+                 "overtime": "Overtime"}
 
 # Settings admins may change on the Simulation Settings page, stored as overrides of SIMULATION_CONFIG.
 # kind "bool" or "number"; numbers are checked against min/max.
@@ -204,6 +219,14 @@ EDITABLE_SETTINGS: list[dict[str, Any]] = [
      "step": 0.05, "label": "Late game weight", "help": "How much of the penalty applies in late game fights."},
     {"path": "damage_balance.phase_weights.overtime", "group": "Damage balance", "kind": "number", "min": 0, "max": 2,
      "step": 0.05, "label": "Overtime weight", "help": "How much of the penalty applies in overtime fights."},
+    {"path": "champion_scaling.enabled", "group": "Champion scaling", "kind": "bool",
+     "label": "Use champion scaling",
+     "help": "Early game champions are stronger in lane and early fights, late game champions in late fights."},
+    *[{"path": f"champion_scaling.curves.{score}.{phase}", "group": "Champion scaling", "kind": "number",
+       "min": 0.5, "max": 1.5, "step": 0.01, "label": f"{who}: {_PHASE_LABELS[phase].lower()}",
+       "help": f"Multiplier on lane score (lane phase) or fight performance (later phases). 1 = no effect. "
+               f"Neutral (scaling 2) champions always use 1."}
+      for score, who in _SCALING_LABELS.items() for phase in _PHASE_LABELS],
 ]
 EDITABLE_BY_PATH = {s["path"]: s for s in EDITABLE_SETTINGS}
 

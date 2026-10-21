@@ -14,6 +14,7 @@ from .lane_phase import run_lane_phase
 from .models import Champion, MatchResult, MatchupTable, TeamSetup
 from .objectives import roll_baron, roll_dragon, roll_tower
 from .ranking import assign_ranks, pick_mvp_and_ace
+from .scaling import comp_scaling
 from .state import Match, PlayerState, TeamState
 from .win_rates import ally_delta
 
@@ -116,7 +117,8 @@ def _team_dict(match: Match, team: TeamState) -> dict:
         "comp": {"win_rate": round(sum(wr) / len(wr), 2), "damage_profile": team.damage_profile(),
                  "damage_penalty": round(team.damage_balance_penalty(match.config), 3),
                  "ally_synergy": round(ally_delta([p.champion.id for p in team.ordered_players()],
-                                                  match.matchups, match.config), 1)},
+                                                  match.matchups, match.config), 1),
+                 "scaling": comp_scaling(p.champion for p in team.players.values())},
     }
 
 
