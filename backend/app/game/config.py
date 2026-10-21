@@ -148,6 +148,11 @@ SIMULATION_CONFIG: dict[str, Any] = {
         "initiative_bounds": [0.2, 0.8],
         # Fight performance from the player's dmg stat: 1 + scale * (dmg - mid) / half over the 1-10 range.
         "dmg_stat_scale": 0.10,
+        # Damage dealt/taken figures in the result (reporting only: no rolls, no effect on the fight).
+        # Dealt = the damage part of a fighter's power x scale; the enemy's damage is taken in proportion to
+        # sturdiness, with fighters who died taking `damage_taken_death_bonus` more.
+        "damage_report_scale": 0.4,    # puts a carry at roughly 20k over a 30-minute game
+        "damage_taken_death_bonus": 0.5,
     },
     "winner_rule": "nexus",
     "team_style": {

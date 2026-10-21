@@ -76,7 +76,8 @@ def _performance(match: Match, p: PlayerState) -> float:
 
 
 def _side_power(match: Match, team: TeamState, members: list[PlayerState], perf: dict[str, float],
-                enemies: list[PlayerState]) -> float:
+                enemies: list[PlayerState]) -> tuple[float, dict[str, float]]:
+    """The side's fight power, and each member's damage share of it (by lane), for the damage report."""
     f = match.config["fight"]
     damage_weight = f["damage_weight"] * damage_effectiveness(match, team)
     weighted = sum(perf[p.lane] * (damage_weight * p.champion.damage
@@ -84,8 +85,35 @@ def _side_power(match: Match, team: TeamState, members: list[PlayerState], perf:
     n = len(members)
     control = sum(p.champion.cc + p.champion.mobility + p.champion.utility for p in members) / n
     control_mod = 1.0 + f["control_scale"] * (control - f["control_average"]) / f["control_average"]
-    return (weighted * max(control_mod, 0.1) * fight_multiplier(match, team, n)
-            * win_rate_fight_multiplier(match, members, enemies))
+    control_mod, style, rates = (max(control_mod, 0.1), fight_multiplier(match, team, n),
+                                 win_rate_fight_multiplier(match, members, enemies))
+    power = weighted * control_mod * style * rates
+    side = control_mod * style * rates
+    offence = {p.lane: perf[p.lane] * damage_weight * p.champion.damage * side for p in members}
+    return power, offence
+
+
+def _record_damage(match: Match, sides: list[tuple[TeamState, list[PlayerState], dict[str, float]]],
+                   events: list[tuple[PlayerState, PlayerState]]) -> dict[str, dict[str, list[int]]]:
+    """Add this fight's damage dealt and taken to each fighter; returns {side: {lane: [dealt, taken]}}.
+    Reporting only: it makes no rolls and changes nothing the fight decided."""
+    f = match.config["fight"]
+    died = {id(victim) for _, victim in events}
+    dealt = {team.side: {p.lane: round(offence[p.lane] * f["damage_report_scale"]) for p in members}
+             for team, members, offence in sides}
+    out: dict[str, dict[str, list[int]]] = {}
+    for (team, members, _), (enemy, _, _) in zip(sides, reversed(sides)):
+        incoming = sum(dealt[enemy.side].values())
+        weights = {p.lane: p.champion.sturdiness * ((1.0 + f["damage_taken_death_bonus"]) if id(p) in died else 1.0)
+                   for p in members}
+        total = sum(weights.values())
+        out[team.side] = {}
+        for p in members:
+            taken = round(incoming * weights[p.lane] / total) if total > 0 else 0
+            p.damage_dealt += dealt[team.side][p.lane]
+            p.damage_taken += taken
+            out[team.side][p.lane] = [dealt[team.side][p.lane], taken]
+    return out
 
 
 def _choose_weighted_distinct(rng, candidates: list[PlayerState], weights: dict[str, float], k: int) -> list[PlayerState]:
@@ -107,8 +135,8 @@ def run_fight(match: Match, attacker: TeamState, defender: TeamState, n_att: int
     perf_a = {p.lane: _performance(match, p) for p in att}
     perf_d = {p.lane: _performance(match, p) for p in dfn}
 
-    power_a = _side_power(match, attacker, att, perf_a, dfn)
-    power_d = _side_power(match, defender, dfn, perf_d, att)
+    power_a, offence_a = _side_power(match, attacker, att, perf_a, dfn)
+    power_d, offence_d = _side_power(match, defender, dfn, perf_d, att)
     dominance = abs(power_a - power_d) / (power_a + power_d)
 
     kills_a = kills_d = 0
@@ -127,6 +155,7 @@ def run_fight(match: Match, attacker: TeamState, defender: TeamState, n_att: int
 
     a_events = _resolve_pair(match, att, dfn, perf_a, perf_d, kills_a)
     d_events = _resolve_pair(match, dfn, att, perf_d, perf_a, kills_d)
+    damage = _record_damage(match, [(attacker, att, offence_a), (defender, dfn, offence_d)], a_events + d_events)
 
     for killer, victim in a_events + d_events:
         killer.kills += 1
@@ -151,6 +180,7 @@ def run_fight(match: Match, attacker: TeamState, defender: TeamState, n_att: int
                attackers=[p.lane for p in att], defenders=[p.lane for p in dfn],
                winner=winner.side if winner else None,
                kills={attacker.side: kills_a, defender.side: kills_d},
+               damage=damage,
                log=[{"killer": k.champion.name, "victim": v.champion.name, "team": k.team}
                     for k, v in a_events + d_events])
 

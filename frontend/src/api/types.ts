@@ -341,6 +341,8 @@ export interface ResultPlayer {
   assists: number
   cs: number
   gold: number
+  damage_dealt?: number           // missing on results simulated before damage was tracked
+  damage_taken?: number
   kda: number
   rank: number
   rank_score: number

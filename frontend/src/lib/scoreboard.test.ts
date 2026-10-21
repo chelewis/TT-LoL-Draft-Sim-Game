@@ -28,7 +28,7 @@ describe('scoreAt', () => {
   it('starts from nothing', () => {
     const score = scoreAt(result, log, [], 0)
     expect(score.teams.BLUE).toMatchObject({ kills: 0, gold: 0, towers: 0, dragons: 0 })
-    expect(score.players[playerKey('BLUE', 'TOP')]).toEqual({ kills: 0, deaths: 0, assists: 0, cs: 0, gold: 0 })
+    expect(score.players[playerKey('BLUE', 'TOP')]).toEqual({ kills: 0, deaths: 0, assists: 0, cs: 0, gold: 0, damageDealt: null, damageTaken: null })
   })
 
   it('credits kills, deaths and assists from a fight', () => {
@@ -48,8 +48,20 @@ describe('scoreAt', () => {
 
   it('ends on the final result', () => {
     const score = scoreAt(result, log, log, 1800)
-    expect(score.players[playerKey('BLUE', 'TOP')]).toEqual({ kills: 1, deaths: 0, assists: 0, cs: 600, gold: 10000 })
+    expect(score.players[playerKey('BLUE', 'TOP')]).toEqual({ kills: 1, deaths: 0, assists: 0, cs: 600, gold: 10000, damageDealt: null, damageTaken: null })
     expect(score.teams.BLUE).toMatchObject({ kills: 1, gold: 50000, towers: 1 })
+  })
+
+  it('adds up damage from the fights shown so far', () => {
+    const damage = { BLUE: { TOP: [1200, 300], MID: [800, 500] }, RED: { TOP: [600, 2000] } }
+    const second = event(6, 25, 'FIGHT', { ...fight.payload, damage })
+    const withDamage = [laneResult, dragon, { ...fight, payload: { ...fight.payload, damage } }, tower, second, end]
+    const before = scoreAt(result, withDamage, [laneResult], 900)
+    expect(before.players[playerKey('BLUE', 'TOP')]).toMatchObject({ damageDealt: 0, damageTaken: 0 })
+    const after = scoreAt(result, withDamage, withDamage, 1800)
+    expect(after.players[playerKey('BLUE', 'TOP')]).toMatchObject({ damageDealt: 2400, damageTaken: 600 })
+    expect(after.players[playerKey('RED', 'TOP')]).toMatchObject({ damageDealt: 1200, damageTaken: 4000 })
+    expect(after.players[playerKey('RED', 'MID')]).toMatchObject({ damageDealt: 0, damageTaken: 0 })   // never fought
   })
 
   it('leaves gold out for a game whose events carry none', () => {

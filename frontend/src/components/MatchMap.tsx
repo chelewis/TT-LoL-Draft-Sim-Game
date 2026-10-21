@@ -112,6 +112,8 @@ function PlayerMarker({ player, champion, teamName, mvp, ace }: {
           <dt>K / D / A</dt><dd>{player.kills} / {player.deaths} / {player.assists} (KDA {player.kda})</dd>
           <dt>CS</dt><dd>{player.cs}</dd>
           <dt>Gold</dt><dd>{player.gold.toLocaleString()}</dd>
+          {player.damage_dealt != null && <><dt>Damage dealt</dt><dd>{player.damage_dealt.toLocaleString()}</dd></>}
+          {player.damage_taken != null && <><dt>Damage taken</dt><dd>{player.damage_taken.toLocaleString()}</dd></>}
           <dt>Champion pool</dt><dd>{TIER_LABEL[player.comfort_tier] ?? player.comfort_tier}</dd>
         </dl>
       </div>

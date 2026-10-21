@@ -33,6 +33,8 @@ class PlayerState:
     kills: int = 0
     deaths: int = 0
     assists: int = 0
+    damage_dealt: int = 0
+    damage_taken: int = 0
 
 
 @dataclass

@@ -97,6 +97,7 @@ def _player_dict(p: PlayerState) -> dict:
         "comfort_tier": p.tier, "lane_score": round(p.lane_score, 1),
         "kills": p.kills, "deaths": p.deaths, "assists": p.assists,
         "cs": round(p.cs), "gold": round(p.gold),
+        "damage_dealt": p.damage_dealt, "damage_taken": p.damage_taken,
     }
 
 

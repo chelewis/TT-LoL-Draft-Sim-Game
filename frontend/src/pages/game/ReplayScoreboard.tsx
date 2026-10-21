@@ -3,7 +3,7 @@ import type { Champion, Lane, MatchResult, Side } from '../../api/types'
 import { LANES } from '../../api/types'
 import { ChampionIcon, LaneIcon } from '../../components/ChampionArt'
 import { formatDuration } from '../../lib/format'
-import { formatGold, playerKey, type Score, type TeamScore } from '../../lib/scoreboard'
+import { formatGold, formatThousands, playerKey, type Score, type TeamScore } from '../../lib/scoreboard'
 
 const ICONS: Record<'tower' | 'gold' | 'kills', ReactNode> = {
   tower: <path d="M7 3h2v2h2V3h2v2h2V3h2v5l-2 2v8h2v3H7v-3h2v-8L7 8z" />,
@@ -61,10 +61,12 @@ export function ReplayHud({ names, score, clockSeconds }: { names: Record<Side, 
 /** Both teams' players lane by lane, blue on the left and red mirrored on the right. */
 export function ReplayPlayers({ result, score, champions }: { result: MatchResult; score: Score; champions: Map<number, Champion> }) {
   const showGold = score.teams.BLUE.gold != null
+  const showDamage = Object.values(score.players).some((s) => s.damageDealt != null)
+  const columns = 3 + (showGold ? 1 : 0) + (showDamage ? 1 : 0)
   const cells = (side: Side, lane: Lane) => {
     const p = result.players.find((x) => x.team === side && x.lane === lane)
     const s = score.players[playerKey(side, lane)]
-    if (!p || !s) return Array.from({ length: showGold ? 4 : 3 }, (_, i) => <td key={`${side}${i}`} />)
+    if (!p || !s) return Array.from({ length: columns }, (_, i) => <td key={`${side}${i}`} />)
     const out = [
       <td key={`${side}p`} className={`replay-player ${side.toLowerCase()}`}>
         <span className="replay-player-tag">
@@ -75,12 +77,18 @@ export function ReplayPlayers({ result, score, champions }: { result: MatchResul
       showGold && <td key={`${side}g`} className="num replay-gold">{(s.gold ?? 0).toLocaleString()}</td>,
       <td key={`${side}k`} className="num">{s.kills}/{s.deaths}/{s.assists}</td>,
       <td key={`${side}c`} className="num">{s.cs}</td>,
+      showDamage && (
+        <td key={`${side}d`} className="num" title="Damage dealt / taken">
+          {formatThousands(s.damageDealt ?? 0)} / {formatThousands(s.damageTaken ?? 0)}
+        </td>
+      ),
     ]
     return side === 'BLUE' ? out : out.reverse()
   }
   const heads = (side: Side) => {
     const out = [<th key={`${side}p`} className={`replay-player ${side.toLowerCase()}`}>Player</th>, showGold && <th key={`${side}g`} className="num">Gold</th>,
-      <th key={`${side}k`} className="num">K/D/A</th>, <th key={`${side}c`} className="num">CS</th>]
+      <th key={`${side}k`} className="num">K/D/A</th>, <th key={`${side}c`} className="num">CS</th>,
+      showDamage && <th key={`${side}d`} className="num" title="Damage dealt / taken">Dmg</th>]
     return side === 'BLUE' ? out : out.reverse()
   }
   return (
