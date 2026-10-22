@@ -29,6 +29,7 @@ class PlayerState:
     # lane score without the lane phase's champion scaling, as a share of lane_score (fights use it)
     lane_unscaled_ratio: float = 1.0
     cs: float = 0.0
+    cs_rate: float = 0.0  # CS per minute from here on
     gold: float = 0.0
     kills: int = 0
     deaths: int = 0
@@ -149,7 +150,8 @@ class Match:
             except KeyError as exc:
                 raise ValueError(f"Unknown champion id {setup.lineup[lane]}") from exc
             tier = comfort_tier(spec, champ.id, self.config)
-            players[lane] = PlayerState(lane, spec, champ, tier, comfort_modifier(tier, self.config), side)
+            players[lane] = PlayerState(lane, spec, champ, tier, comfort_modifier(tier, self.config), side,
+                                        cs_rate=spec.cs * self.config["cs"]["role_factors"][lane])
         synergy = 1.0 + (setup.coach.synergy - 5) * self.config["coach"]["synergy_scale"]
         return TeamState(side, setup, players,
                          TeamStructures(st["towers_per_lane"], st["nexus_towers"]), max(synergy, 0.0))
@@ -179,16 +181,21 @@ class Match:
         """Advance everyone's CS (and CS gold) to `minute`. Never moves backwards."""
         if minute <= self.cs_minute:
             return
-        eco = self.config["economy"]
+        per_cs = self.config["economy"]["gold_per_cs"]
         for team in self.teams.values():
             for p in team.players.values():
-                factor = eco["support_cs_factor"] if p.lane == "SUPPORT" else 1.0
-                target = p.spec.cs * minute * factor
-                gained = target - p.cs
-                if gained > 0:
-                    p.gold += gained * eco["gold_per_cs"]
-                    p.cs = target
+                gained = p.cs_rate * (minute - self.cs_minute)
+                p.cs += gained
+                p.gold += gained * per_cs
         self.cs_minute = minute
+
+    def lose_cs(self, p: PlayerState, minutes: float) -> float:
+        """Take `minutes` of farm (and its gold) off a player, e.g. time spent dead. Returns the CS lost.
+        Gold from everything else is untouched, so `event_gold` does not change."""
+        lost = min(p.cs, p.cs_rate * minutes)
+        p.cs -= lost
+        p.gold -= lost * self.config["economy"]["gold_per_cs"]
+        return lost
 
     # ---- derived strength ----
     def gold_factor(self, team: TeamState) -> float:

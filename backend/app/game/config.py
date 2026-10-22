@@ -56,7 +56,7 @@ MANAGEMENT_CONFIG: dict[str, Any] = {
 }
 
 SIMULATION_CONFIG: dict[str, Any] = {
-    "version": "2.4.0",
+    "version": "2.5.0",
     # Comfort modifiers (fractions, NOT whole-number multipliers).
     "comfort": {"best": 0.40, "comfort": 0.25, "familiar": 0.10, "vulnerable": -0.10},
     # Tier by position in the player's ordered 5-champion pool.
@@ -97,11 +97,21 @@ SIMULATION_CONFIG: dict[str, Any] = {
         "assist": 150,
         "tower": 250,
         "soul_bonus": 1000,
-        "support_cs_factor": 0.15,
         "lane_minutes": 15,
         "bounty_gold_deficit": 2000,
         "bounty_gold": 250,
         "bounty_lane_score": 150,
+    },
+    # CS per minute = the player's cs stat x their role factor. In the lane phase (to `lane_minutes`) some roles
+    # farm more or less: a lane-phase multiplier of 1 + scale * 2 * (share - 0.5), where share = mine / (mine +
+    # the enemy's), so at most +/- scale. Deaths and jungle ganks cost minutes of farm.
+    "cs": {
+        "role_factors": {"TOP": 1.0, "JUNGLE": 0.8, "MID": 1.0, "BOT": 1.0, "SUPPORT": 0.15},
+        "support_scale": 0.15,   # bot: own support's lane score vs the enemy support's
+        "jungle_scale": 0.10,    # top/mid: own jungler's lane score vs the enemy jungler's
+        "focus_bonus": 0.08,     # top/mid: primary focus lane (half for secondary), x coach synergy
+        "death_minutes": {"early": 0.5, "mid": 0.75, "late": 1.0, "overtime": 1.25},
+        "gank_minutes": 0.4,     # jungler, per early-phase fight they join
     },
     "phases": [
         {"name": "early", "minutes": [3, 15], "max_dragons": 3, "max_barons": 0, "max_towers": 5,
@@ -244,6 +254,27 @@ EDITABLE_SETTINGS: list[dict[str, Any]] = [
        "help": f"Multiplier on lane score (lane phase) or fight performance (later phases). 1 = no effect. "
                f"Neutral (scaling 2) champions always use 1."}
       for score, who in _SCALING_LABELS.items() for phase in _PHASE_LABELS],
+    *[{"path": f"cs.role_factors.{lane}", "group": "CS", "kind": "number", "min": 0, "max": 1.5, "step": 0.05,
+       "label": f"{lane.title()} CS factor", "help": "CS per minute = the player's CS stat x this."}
+      for lane in LANES],
+    {"path": "cs.support_scale", "group": "CS", "kind": "number", "min": 0, "max": 0.5, "step": 0.01,
+     "label": "Support effect on bot CS",
+     "help": "Most the bot laner's lane-phase CS can rise or fall from their support beating or losing to the "
+             "enemy support (0.15 = 15%)."},
+    {"path": "cs.jungle_scale", "group": "CS", "kind": "number", "min": 0, "max": 0.5, "step": 0.01,
+     "label": "Jungle effect on top/mid CS",
+     "help": "Most top and mid lane-phase CS can rise or fall from their jungler beating or losing to the enemy "
+             "jungler."},
+    {"path": "cs.focus_bonus", "group": "CS", "kind": "number", "min": 0, "max": 0.5, "step": 0.01,
+     "label": "Lane focus CS bonus",
+     "help": "Extra lane-phase CS for a top or mid lane that is the team's primary focus (half for secondary)."},
+    *[{"path": f"cs.death_minutes.{phase}", "group": "CS", "kind": "number", "min": 0, "max": 5, "step": 0.05,
+       "label": f"Farm lost per death: {_PHASE_LABELS[phase].lower()}",
+       "help": "Minutes of farm a player loses each time they die."}
+      for phase in ("early", "mid", "late", "overtime")],
+    {"path": "cs.gank_minutes", "group": "CS", "kind": "number", "min": 0, "max": 5, "step": 0.05,
+     "label": "Farm lost per jungle gank",
+     "help": "Minutes of farm a jungler loses for each early game fight they join."},
 ]
 EDITABLE_BY_PATH = {s["path"]: s for s in EDITABLE_SETTINGS}
 

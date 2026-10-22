@@ -110,6 +110,27 @@ def role_factors(config: dict) -> dict[str, float]:
     return {l: mean / t for l, t in totals.items()}
 
 
+def _share_multiplier(mine: float, theirs: float, scale: float) -> float:
+    """1 + scale * 2 * (share - 0.5): +scale when `mine` is everything, -scale when it is nothing."""
+    total = mine + theirs
+    share = mine / total if total > 0 else 0.5
+    return 1.0 + scale * 2.0 * (share - 0.5)
+
+
+def lane_cs_multiplier(team: TeamState, enemy: TeamState, lane: str, config: dict) -> float:
+    """Lane-phase CS multiplier. Bot farms more when their support wins the support matchup; top and mid farm
+    more when their jungler wins the jungle matchup and when the team focuses their lane."""
+    cfg = config["cs"]
+    if lane == "BOT":
+        return _share_multiplier(team.players["SUPPORT"].lane_score, enemy.players["SUPPORT"].lane_score,
+                                 cfg["support_scale"])
+    if lane in ("TOP", "MID"):
+        mult = _share_multiplier(team.players["JUNGLE"].lane_score, enemy.players["JUNGLE"].lane_score,
+                                 cfg["jungle_scale"])
+        return mult + cfg["focus_bonus"] * team.synergy_factor * _focus_weight(team, lane)
+    return 1.0
+
+
 def run_lane_phase(match: Match) -> None:
     """Compute lane scores, apply assists, hand out 15-minute gold and emit LANE_RESULT events."""
     cfg = match.config
@@ -161,13 +182,13 @@ def run_lane_phase(match: Match) -> None:
             p.lane_score = total * factors[lane]
             p.lane_unscaled_ratio = total_unscaled / total
 
-    # 4) CS and gold at the end of the lane phase; the lane winner also takes their lead as gold
+    # 4) CS and gold at the end of the lane phase (the lane multiplier covers these minutes only, so cs_rate
+    #    is left as the role's base rate); the lane winner also takes their lead as gold
     eco = cfg["economy"]
     for team in (blue, red):
         for lane in LANES:
             p = team.players[lane]
-            factor = eco["support_cs_factor"] if lane == "SUPPORT" else 1.0
-            p.cs = p.spec.cs * eco["lane_minutes"] * factor
+            p.cs = p.cs_rate * eco["lane_minutes"] * lane_cs_multiplier(team, match.other(team), lane, cfg)
             p.gold = p.cs * eco["gold_per_cs"]
     match.cs_minute = float(eco["lane_minutes"])
 

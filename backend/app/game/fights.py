@@ -169,6 +169,7 @@ def run_fight(match: Match, attacker: TeamState, defender: TeamState, n_att: int
             p.gold += eco["assist"] * assists
     attacker.kills += kills_a
     defender.kills += kills_d
+    cs_lost = _lose_farm(match, att + dfn, [v for _, v in a_events + d_events])
 
     for team in (attacker, defender):
         if team.elder_fights > 0:
@@ -181,6 +182,7 @@ def run_fight(match: Match, attacker: TeamState, defender: TeamState, n_att: int
                winner=winner.side if winner else None,
                kills={attacker.side: kills_a, defender.side: kills_d},
                damage=damage,
+               cs_lost=cs_lost,
                log=[{"killer": k.champion.name, "victim": v.champion.name, "team": k.team}
                     for k, v in a_events + d_events])
 
@@ -188,6 +190,25 @@ def run_fight(match: Match, attacker: TeamState, defender: TeamState, n_att: int
         won_kills = kills_a if winner is attacker else kills_d
         if won_kills >= match.config["structures"]["siege_min_kills"]:
             siege(match, winner, won_kills, reason=kind.lower())
+
+
+def _lose_farm(match: Match, fighters: list[PlayerState], victims: list[PlayerState]) -> dict[str, dict[str, int]]:
+    """Farm missed in this fight: everyone who died loses minutes of CS (more later in the game), and a
+    jungler who joins an early game fight pays for the gank. Returns {side: {lane: CS lost}} for those who lost any."""
+    cfg = match.config["cs"]
+    minutes: dict[int, float] = {}
+    for v in victims:
+        minutes[id(v)] = minutes.get(id(v), 0.0) + cfg["death_minutes"].get(match.phase, 0.0)
+    if match.phase == "early":
+        for p in fighters:
+            if p.lane == "JUNGLE":
+                minutes[id(p)] = minutes.get(id(p), 0.0) + cfg["gank_minutes"]
+    out: dict[str, dict[str, int]] = {}
+    for p in fighters:
+        lost = match.lose_cs(p, minutes.get(id(p), 0.0))
+        if lost > 0:
+            out.setdefault(p.team, {})[p.lane] = round(lost)
+    return out
 
 
 def _resolve_pair(match: Match, killers: list[PlayerState], victims: list[PlayerState],
