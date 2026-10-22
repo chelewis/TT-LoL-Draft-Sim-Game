@@ -45,6 +45,17 @@ Turn a real League account into a player (Players page -> **Import from Riot**).
 
 Without a key the import button is hidden and the rest of the game is unaffected. See section 19 of the spec for how stats are derived and the rate limits (a personal key allows about four imports per two minutes).
 
+## Sign in with Google (optional)
+
+Adds a **Continue with Google** button to the login page. Each Google account gets its own game account the first time it signs in. The button stays hidden until the server has a Google client ID.
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), create a project (or pick an existing one).
+2. **APIs & Services > OAuth consent screen**: choose **External**, fill in the app name and support email, and publish it (while it is in *Testing*, only the test users you list can sign in).
+3. **APIs & Services > Credentials > Create credentials > OAuth client ID**, application type **Web application**. Under **Authorized JavaScript origins** add every address the site is opened from, e.g. `https://tt-lol-sim.intelesport.com` and `http://localhost:5173`. No redirect URIs are needed.
+4. Copy the **Client ID** (it ends in `.apps.googleusercontent.com`) into `backend/.env`: `LDM_GOOGLE_CLIENT_ID=...apps.googleusercontent.com`, then restart the backend.
+
+The client ID is public, not a secret, and the client secret is not used. The backend checks every Google sign-in itself: Google's signature, that the token was issued for this client ID, that it has not expired, and that Google has verified the email. If an account registered with a password already uses the same email, Google sign-in refuses rather than merging the two, because this app does not verify emails when people register.
+
 ## Adding or editing champions
 
 Champions come from `backend/app/data/seed/Champions.csv` (this folder is the one place to edit; the root `Data/` folder is just the original reference copy and is not read by the app) (plus win/pick rates from `ChampionStatistics.csv`, matched by name). To add one, append a row with the next free `Id` (156, 157, ...) and the champion's stats; to change one, edit its row.

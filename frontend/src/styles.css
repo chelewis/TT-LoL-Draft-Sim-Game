@@ -740,3 +740,9 @@ table.mx { width: max-content; border-collapse: separate; border-spacing: 0; tab
 .music-volume input { width: 110px; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
+
+/* ---------- sign in with Google ---------- */
+.google-signin { display: flex; flex-direction: column; gap: 12px; }
+.auth-divider { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em; }
+.auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+.google-signin-button { display: flex; justify-content: center; min-height: 44px; }
