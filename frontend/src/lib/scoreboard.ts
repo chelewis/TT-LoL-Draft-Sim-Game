@@ -19,6 +19,8 @@ export interface PlayerScore {
   assists: number
   cs: number
   gold: number | null
+  damageDealt: number | null      // null when the game's fights carry no damage (simulated before they did)
+  damageTaken: number | null
 }
 
 export interface Score {
@@ -43,8 +45,10 @@ const latest = (events: MatchEvent[]) => events.reduce<MatchEvent | undefined>((
 export function scoreAt(result: MatchResult, events: MatchEvent[], revealed: MatchEvent[], clockSeconds: number): Score {
   const players: Record<string, PlayerScore> = {}
   const byChampion: Record<string, PlayerScore> = {}
+  const hasDamage = events.some((e) => e.type === 'FIGHT' && e.payload.damage)
+  const damage = hasDamage ? 0 : null
   for (const p of result.players) {
-    const score: PlayerScore = { kills: 0, deaths: 0, assists: 0, cs: 0, gold: null }
+    const score: PlayerScore = { kills: 0, deaths: 0, assists: 0, cs: 0, gold: null, damageDealt: damage, damageTaken: damage }
     players[playerKey(p.team, p.lane)] = score
     byChampion[`${p.team}:${p.champion}`] = score
   }
@@ -55,8 +59,17 @@ export function scoreAt(result: MatchResult, events: MatchEvent[], revealed: Mat
     const p = e.payload as unknown as {
       attacker: Side; defender: Side; attackers: Lane[]; defenders: Lane[]
       kills: Record<Side, number>; log: { killer: string; victim: string; team: Side }[]
+      damage?: Partial<Record<Side, Partial<Record<Lane, [number, number]>>>>
     }
     for (const side of SIDES) kills[side] += p.kills[side] ?? 0
+    for (const side of SIDES) {
+      for (const [lane, [dealt, taken]] of Object.entries(p.damage?.[side] ?? {}) as [Lane, [number, number]][]) {
+        const score = players[playerKey(side, lane)]
+        if (!score) continue
+        score.damageDealt = (score.damageDealt ?? 0) + dealt
+        score.damageTaken = (score.damageTaken ?? 0) + taken
+      }
+    }
     const own: Record<string, number> = {}
     for (const k of p.log) {
       const killer = byChampion[`${k.team}:${k.killer}`]
@@ -116,7 +129,10 @@ export function scoreAt(result: MatchResult, events: MatchEvent[], revealed: Mat
   return { teams: { BLUE: team('BLUE'), RED: team('RED') }, players }
 }
 
-/** Team gold the way a broadcast shows it: 56.6k. */
-export function formatGold(gold: number): string {
-  return `${(gold / 1000).toFixed(1)}k`
+/** A large number the way a broadcast shows it: 56.6k. */
+export function formatThousands(value: number): string {
+  return `${(value / 1000).toFixed(1)}k`
 }
+
+/** Team gold the way a broadcast shows it: 56.6k. */
+export const formatGold = formatThousands

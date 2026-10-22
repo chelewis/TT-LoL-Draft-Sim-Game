@@ -9,6 +9,7 @@ import MatchMap from '../../components/MatchMap'
 import { OverBudgetBadge } from '../../components/TeamCard'
 import { useChampionMap } from '../../hooks/useData'
 import { LANE_LABEL, TIER_LABEL, formatDuration, isSolo, matchupText, seriesLabel, titleCase } from '../../lib/format'
+import { formatThousands } from '../../lib/scoreboard'
 import { describeEvent, summarize } from '../../lib/summary'
 
 /** Draft effects on the match: one-sided damage being itemized against, and same-team win rates. Absent on old results. */
@@ -300,7 +301,7 @@ function Scoreboard({ side, name, players, mvp, ace }: { side: Side; name: strin
       <div className="table-scroll">
         <table className="compact">
           <thead>
-            <tr><th>Player</th><th>Champion</th><th>Pool</th><th>K/D/A</th><th>CS</th><th>Gold</th><th>Rank</th></tr>
+            <tr><th>Player</th><th>Champion</th><th>Pool</th><th>K/D/A</th><th>CS</th><th>Gold</th><th>Dmg dealt</th><th>Dmg taken</th><th>Rank</th></tr>
           </thead>
           <tbody>
             {players.map((p) => (
@@ -313,6 +314,8 @@ function Scoreboard({ side, name, players, mvp, ace }: { side: Side; name: strin
                 <td>{p.kills}/{p.deaths}/{p.assists}</td>
                 <td>{p.cs}</td>
                 <td>{p.gold.toLocaleString()}</td>
+                <td>{p.damage_dealt != null ? formatThousands(p.damage_dealt) : '—'}</td>
+                <td>{p.damage_taken != null ? formatThousands(p.damage_taken) : '—'}</td>
                 <td>#{p.rank}</td>
               </tr>
             ))}
