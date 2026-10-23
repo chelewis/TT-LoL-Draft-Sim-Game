@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Office Bug Hunt</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- in-game HUD -->
+  <div id="hud" class="hidden">
+    <div id="progress-wrap">
+      <div id="progress-label">Sprint progress</div>
+      <div id="progress-bar"><div id="progress-fill"></div></div>
+    </div>
+    <div id="room-label"></div>
+    <div id="outage-banner" class="hidden"></div>
+
+    <div id="side-panel">
+      <div id="role-card"></div>
+      <ul id="task-list"></ul>
+    </div>
+
+    <canvas id="minimap" width="192" height="128"></canvas>
+
+    <div id="actions">
+      <button id="btn-kill" class="action spy-only" title="Q">Takedown<small>Q</small></button>
+      <button id="btn-sabotage" class="action spy-only" title="X">Outage<small>X</small></button>
+      <button id="btn-report" class="action" title="R">Report<small>R</small></button>
+      <button id="btn-use" class="action" title="E">Use<small>E</small></button>
+    </div>
+
+    <div id="toasts"></div>
+  </div>
+
+  <!-- start menu -->
+  <div id="menu" class="overlay">
+    <div class="panel menu-panel">
+      <h1>Office <span>Bug Hunt</span></h1>
+      <p class="tagline">The release is tomorrow. The devs are squashing bugs. Somebody in this office is quietly putting them back.</p>
+      <div class="menu-grid">
+        <label>Your name <input id="opt-name" maxlength="12" value="You"></label>
+        <label>Coworkers
+          <select id="opt-bots">
+            <option>4</option><option>5</option><option selected>6</option><option>7</option><option>8</option><option>9</option>
+          </select>
+        </label>
+        <label>Spies
+          <select id="opt-spies">
+            <option selected>1</option><option>2</option><option>3</option>
+          </select>
+        </label>
+        <label>Your role
+          <select id="opt-role">
+            <option value="random" selected>Random</option>
+            <option value="dev">Developer</option>
+            <option value="spy">Spy</option>
+          </select>
+        </label>
+        <label>Tickets each
+          <select id="opt-tasks">
+            <option>3</option><option selected>4</option><option>5</option><option>6</option>
+          </select>
+        </label>
+      </div>
+      <button id="btn-start" class="primary">Clock in</button>
+      <details class="howto">
+        <summary>How to play</summary>
+        <ul>
+          <li><b>Developers</b> walk to their ticket desks (yellow) and fix tiny coding bugs. Fix every ticket in the sprint, or let go of every spy, to win.</li>
+          <li><b>Spies</b> blend in, take coworkers offline, push bad commits that reopen fixed tickets, and can take production down. Spies win when they match the devs in number, or prod stays down.</li>
+          <li>Find a logged-off coworker? <b>Report</b> it to call a standup. Or ring the <b>Standup Bell</b> in the Conference Room (once per game).</li>
+          <li>At standup, read the chat, then vote someone out or skip.</li>
+          <li>Taken offline? You become a ghost: you can still fix tickets.</li>
+        </ul>
+        <p class="keys"><kbd>WASD</kbd>/<kbd>Arrows</kbd> or click to move · <kbd>E</kbd> use · <kbd>R</kbd> report · <kbd>Q</kbd> takedown · <kbd>X</kbd> outage · <kbd>M</kbd> map · <kbd>Esc</kbd> close</p>
+      </details>
+    </div>
+  </div>
+
+  <!-- role reveal -->
+  <div id="intro" class="overlay hidden">
+    <div id="intro-text"></div>
+  </div>
+
+  <!-- coding task -->
+  <div id="task-modal" class="overlay hidden">
+    <div class="panel task-panel">
+      <div class="task-head">
+        <div>
+          <div id="task-ticket" class="ticket-id"></div>
+          <h2 id="task-title"></h2>
+        </div>
+        <button id="task-close" class="ghost-btn" title="Esc">✕</button>
+      </div>
+      <p id="task-prompt"></p>
+      <div id="task-code" class="code"></div>
+      <textarea id="task-editor" spellcheck="false" class="hidden"></textarea>
+      <div id="task-choices"></div>
+      <div id="task-tests"></div>
+      <div id="task-footer">
+        <button id="task-run" class="primary hidden">Run tests</button>
+        <div id="task-feedback"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- meeting -->
+  <div id="meeting" class="overlay hidden">
+    <div class="panel meeting-panel">
+      <div class="meeting-head">
+        <h2 id="meeting-title"></h2>
+        <div id="meeting-timer"></div>
+      </div>
+      <div id="meeting-sub"></div>
+      <div class="meeting-body">
+        <div id="vote-cards"></div>
+        <div id="chat-log"></div>
+      </div>
+      <div class="meeting-actions">
+        <span id="meeting-hint"></span>
+        <button id="btn-accuse">Accuse</button>
+        <button id="btn-skip">Skip vote</button>
+        <button id="btn-vote" class="primary">Vote</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- takedown splash -->
+  <div id="splash" class="overlay hidden"><div id="splash-text"></div></div>
+
+  <!-- game over -->
+  <div id="gameover" class="overlay hidden">
+    <div class="panel">
+      <h1 id="over-title"></h1>
+      <p id="over-reason"></p>
+      <div id="over-roster"></div>
+      <button id="btn-again" class="primary">Play again</button>
+    </div>
+  </div>
+
+  <script src="js/map.js"></script>
+  <script src="js/tasks.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>
