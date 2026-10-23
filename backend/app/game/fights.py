@@ -8,15 +8,26 @@ from .win_rates import ally_delta, counter_delta, multiplier
 
 
 def skill_check(player: PlayerState, rng, config: dict) -> float:
-    """Percent performance swing. Difficulty amplifies the comfort effect between 1x and Dx.
+    """Percent performance swing in one fight, centred on the player's comfort.
 
-    Positive comfort on a hard champion has a higher ceiling; negative comfort on a hard
-    champion is more punishing. Scaled by `skill_check.scale`.
+    Each difficulty step above 1 widens the swing both ways, so a hard champion has a higher ceiling but can
+    also fail. Below `mastery` comfort it also pulls the centre down, so an unpractised hard champion is
+    the most punishing pick. Scaled by `skill_check.scale`.
     """
+    cfg = config["skill_check"]
     c = player.comfort * 100.0
-    d = player.champion.difficulty
-    lo, hi = sorted((c, c * d))
-    return rng.uniform(lo, hi) * config["skill_check"]["scale"]
+    steps = max(player.champion.difficulty - 1, 0)
+    centre = c - steps * cfg["low_comfort_penalty"] * max(cfg["mastery"] - c, 0.0)
+    spread = steps * cfg["spread"]
+    return rng.uniform(centre - spread, centre + spread) * cfg["scale"]
+
+
+def dmg_stat_multiplier(player: PlayerState, config: dict) -> float:
+    """Fight performance from the player's dmg stat: x1.0 at the middle of the stat range."""
+    scale = config["fight"]["dmg_stat_scale"]
+    lo, hi = config["lane"]["strength_fit"]["stat_range"]
+    mid, half = (lo + hi) / 2, (hi - lo) / 2
+    return max(1.0 + scale * (player.spec.dmg - mid) / half, 0.1)
 
 
 def fight_multiplier(match: Match, team: TeamState, size: int) -> float:
@@ -55,15 +66,18 @@ def win_rate_fight_multiplier(match: Match, members: list[PlayerState], enemies:
 
 
 def _performance(match: Match, p: PlayerState) -> float:
-    """A fighter's strength in this fight: lane score and gold, the skill check, and how strong the champion
-    is at this point of the game."""
-    base = (p.lane_score + p.gold) / 2.0
+    """A fighter's strength in this fight: lane score and gold, the skill check, the player's dmg stat and how
+    strong the champion is at this point of the game. The lane phase's champion scaling is taken back out of
+    the lane score, so only this phase's scaling counts."""
+    base = (p.lane_score * p.lane_unscaled_ratio + p.gold) / 2.0
     base *= scaling_multiplier(p.champion, match.phase, match.config)
+    base *= dmg_stat_multiplier(p, match.config)
     return max(1.0, base * (1.0 + skill_check(p, match.rng, match.config) / 100.0))
 
 
 def _side_power(match: Match, team: TeamState, members: list[PlayerState], perf: dict[str, float],
-                enemies: list[PlayerState]) -> float:
+                enemies: list[PlayerState]) -> tuple[float, dict[str, float]]:
+    """The side's fight power, and each member's damage share of it (by lane), for the damage report."""
     f = match.config["fight"]
     damage_weight = f["damage_weight"] * damage_effectiveness(match, team)
     weighted = sum(perf[p.lane] * (damage_weight * p.champion.damage
@@ -71,8 +85,35 @@ def _side_power(match: Match, team: TeamState, members: list[PlayerState], perf:
     n = len(members)
     control = sum(p.champion.cc + p.champion.mobility + p.champion.utility for p in members) / n
     control_mod = 1.0 + f["control_scale"] * (control - f["control_average"]) / f["control_average"]
-    return (weighted * max(control_mod, 0.1) * fight_multiplier(match, team, n)
-            * win_rate_fight_multiplier(match, members, enemies))
+    control_mod, style, rates = (max(control_mod, 0.1), fight_multiplier(match, team, n),
+                                 win_rate_fight_multiplier(match, members, enemies))
+    power = weighted * control_mod * style * rates
+    side = control_mod * style * rates
+    offence = {p.lane: perf[p.lane] * damage_weight * p.champion.damage * side for p in members}
+    return power, offence
+
+
+def _record_damage(match: Match, sides: list[tuple[TeamState, list[PlayerState], dict[str, float]]],
+                   events: list[tuple[PlayerState, PlayerState]]) -> dict[str, dict[str, list[int]]]:
+    """Add this fight's damage dealt and taken to each fighter; returns {side: {lane: [dealt, taken]}}.
+    Reporting only: it makes no rolls and changes nothing the fight decided."""
+    f = match.config["fight"]
+    died = {id(victim) for _, victim in events}
+    dealt = {team.side: {p.lane: round(offence[p.lane] * f["damage_report_scale"]) for p in members}
+             for team, members, offence in sides}
+    out: dict[str, dict[str, list[int]]] = {}
+    for (team, members, _), (enemy, _, _) in zip(sides, reversed(sides)):
+        incoming = sum(dealt[enemy.side].values())
+        weights = {p.lane: p.champion.sturdiness * ((1.0 + f["damage_taken_death_bonus"]) if id(p) in died else 1.0)
+                   for p in members}
+        total = sum(weights.values())
+        out[team.side] = {}
+        for p in members:
+            taken = round(incoming * weights[p.lane] / total) if total > 0 else 0
+            p.damage_dealt += dealt[team.side][p.lane]
+            p.damage_taken += taken
+            out[team.side][p.lane] = [dealt[team.side][p.lane], taken]
+    return out
 
 
 def _choose_weighted_distinct(rng, candidates: list[PlayerState], weights: dict[str, float], k: int) -> list[PlayerState]:
@@ -94,8 +135,8 @@ def run_fight(match: Match, attacker: TeamState, defender: TeamState, n_att: int
     perf_a = {p.lane: _performance(match, p) for p in att}
     perf_d = {p.lane: _performance(match, p) for p in dfn}
 
-    power_a = _side_power(match, attacker, att, perf_a, dfn)
-    power_d = _side_power(match, defender, dfn, perf_d, att)
+    power_a, offence_a = _side_power(match, attacker, att, perf_a, dfn)
+    power_d, offence_d = _side_power(match, defender, dfn, perf_d, att)
     dominance = abs(power_a - power_d) / (power_a + power_d)
 
     kills_a = kills_d = 0
@@ -114,6 +155,7 @@ def run_fight(match: Match, attacker: TeamState, defender: TeamState, n_att: int
 
     a_events = _resolve_pair(match, att, dfn, perf_a, perf_d, kills_a)
     d_events = _resolve_pair(match, dfn, att, perf_d, perf_a, kills_d)
+    damage = _record_damage(match, [(attacker, att, offence_a), (defender, dfn, offence_d)], a_events + d_events)
 
     for killer, victim in a_events + d_events:
         killer.kills += 1
@@ -127,6 +169,7 @@ def run_fight(match: Match, attacker: TeamState, defender: TeamState, n_att: int
             p.gold += eco["assist"] * assists
     attacker.kills += kills_a
     defender.kills += kills_d
+    cs_lost = _lose_farm(match, att + dfn, [v for _, v in a_events + d_events])
 
     for team in (attacker, defender):
         if team.elder_fights > 0:
@@ -138,6 +181,8 @@ def run_fight(match: Match, attacker: TeamState, defender: TeamState, n_att: int
                attackers=[p.lane for p in att], defenders=[p.lane for p in dfn],
                winner=winner.side if winner else None,
                kills={attacker.side: kills_a, defender.side: kills_d},
+               damage=damage,
+               cs_lost=cs_lost,
                log=[{"killer": k.champion.name, "victim": v.champion.name, "team": k.team}
                     for k, v in a_events + d_events])
 
@@ -145,6 +190,25 @@ def run_fight(match: Match, attacker: TeamState, defender: TeamState, n_att: int
         won_kills = kills_a if winner is attacker else kills_d
         if won_kills >= match.config["structures"]["siege_min_kills"]:
             siege(match, winner, won_kills, reason=kind.lower())
+
+
+def _lose_farm(match: Match, fighters: list[PlayerState], victims: list[PlayerState]) -> dict[str, dict[str, int]]:
+    """Farm missed in this fight: everyone who died loses minutes of CS (more later in the game), and a
+    jungler who joins an early game fight pays for the gank. Returns {side: {lane: CS lost}} for those who lost any."""
+    cfg = match.config["cs"]
+    minutes: dict[int, float] = {}
+    for v in victims:
+        minutes[id(v)] = minutes.get(id(v), 0.0) + cfg["death_minutes"].get(match.phase, 0.0)
+    if match.phase == "early":
+        for p in fighters:
+            if p.lane == "JUNGLE":
+                minutes[id(p)] = minutes.get(id(p), 0.0) + cfg["gank_minutes"]
+    out: dict[str, dict[str, int]] = {}
+    for p in fighters:
+        lost = match.lose_cs(p, minutes.get(id(p), 0.0))
+        if lost > 0:
+            out.setdefault(p.team, {})[p.lane] = round(lost)
+    return out
 
 
 def _resolve_pair(match: Match, killers: list[PlayerState], victims: list[PlayerState],
