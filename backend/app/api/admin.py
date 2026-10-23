@@ -3,15 +3,16 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import require_admin
 from app.models import User
-from app.schemas.admin import MatchupChangesIn, SimulationSettingsIn
+from app.schemas.admin import MatchupChangesIn, PasswordResetIn, SimulationSettingsIn
 from app.services import matchup_service as svc
 from app.services import simulation_settings_service as sim_settings
+from app.services import user_admin_service as users
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 log = logging.getLogger(__name__)
@@ -57,3 +58,18 @@ def reset_simulation_settings(db: Session = Depends(get_db), user: User = Depend
     out = sim_settings.reset(db, user.id)
     log.info("admin_simulation_settings_reset user_id=%s", user.id)
     return out
+
+
+# ------------------------------------------------- users
+@router.get("/users")
+def list_users(db: Session = Depends(get_db)):
+    return users.list_users(db)
+
+
+@router.post("/users/{user_id}/password", status_code=204)
+def reset_user_password(user_id: int, body: PasswordResetIn, db: Session = Depends(get_db),
+                        user: User = Depends(require_admin)):
+    users.reset_password(db, user_id, body.password)
+    log.info("admin_password_reset admin_id=%s user_id=%s", user.id, user_id)
+    return Response(status_code=204)
+

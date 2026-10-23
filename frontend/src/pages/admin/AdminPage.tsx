@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import GlobalsPage from './GlobalsPage'
 import SimulationSettingsPage from './SimulationSettingsPage'
+import UsersPage from './UsersPage'
 import WinratesPage from './WinratesPage'
 import { ADMIN_HOME, adminTrail } from './nav'
 
@@ -15,6 +16,7 @@ export default function AdminPage() {
         <Route path="champions/winrates/:matrix?" element={<WinratesPage />} />
         <Route path="simulation" element={<SimulationSettingsPage />} />
         <Route path="globals" element={<GlobalsPage />} />
+        <Route path="users" element={<UsersPage />} />
         <Route path="*" element={<p className="muted">Page not found.</p>} />
       </Routes>
     </div>
