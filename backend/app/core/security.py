@@ -22,14 +22,25 @@ def verify_password(password: str, hashed: str) -> bool:
 
 
 def create_access_token(user_id: int) -> str:
-    expires = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_minutes)
-    return jwt.encode({"sub": str(user_id), "exp": expires}, settings.secret_key, algorithm=ALGORITHM)
+    now = datetime.now(timezone.utc)
+    expires = now + timedelta(minutes=settings.access_token_minutes)
+    # sub-second issued-at, so a login straight after a password reset is still told apart from one before it
+    return jwt.encode({"sub": str(user_id), "iat": now.timestamp(), "exp": expires},
+                      settings.secret_key, algorithm=ALGORITHM)
+
+
+def decode_access_claims(token: str) -> tuple[int, float | None] | None:
+    """Return (user id, issued-at in Unix seconds) for a valid token, or None. Tokens made before
+    issued-at was recorded have None for it."""
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
+        issued = payload.get("iat")
+        return int(payload["sub"]), float(issued) if issued is not None else None
+    except (jwt.PyJWTError, KeyError, ValueError, TypeError):
+        return None
 
 
 def decode_access_token(token: str) -> int | None:
     """Return the user id in a valid token, or None."""
-    try:
-        payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
-        return int(payload["sub"])
-    except (jwt.PyJWTError, KeyError, ValueError):
-        return None
+    claims = decode_access_claims(token)
+    return claims[0] if claims else None

@@ -12,9 +12,9 @@ from fastapi.responses import FileResponse
 from app.api import admin, auth, games, lobbies, management, series
 from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine
-from app.core.security import decode_access_token
+from app.core.dependencies import user_from_token
 from app.data.seed_db import seed_database
-from app.models import Game, User
+from app.models import Game
 from app.services import game_service
 from app.services.timeouts import timeout_loop
 from app.websocket.manager import manager
@@ -52,9 +52,8 @@ def create_app() -> FastAPI:
 
     @app.websocket("/ws/games/{game_id}")
     async def game_socket(websocket: WebSocket, game_id: int, token: str = ""):
-        user_id = decode_access_token(token)
         with SessionLocal() as db:
-            user = db.get(User, user_id) if user_id else None
+            user = user_from_token(db, token)
             game = db.get(Game, game_id)
             allowed = bool(user and game and game_service.side_of(game, user.id))
             side = game_service.side_of(game, user.id) if allowed else None

@@ -13,6 +13,7 @@ export const ADMIN_NAV: (AdminLink | AdminGroup)[] = [
   { label: 'Champions', items: [{ label: 'Winrates', to: '/admin/champions/winrates' }] },
   { label: 'Simulation Settings', to: '/admin/simulation' },
   { label: 'Globals', to: '/admin/globals' },
+  { label: 'Users', to: '/admin/users' },
 ]
 
 export const ADMIN_HOME = '/admin/champions/winrates'

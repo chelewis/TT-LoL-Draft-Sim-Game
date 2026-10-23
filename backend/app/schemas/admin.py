@@ -15,3 +15,7 @@ class MatchupChangesIn(BaseModel):
 
 class SimulationSettingsIn(BaseModel):
     values: dict[str, bool | float] = Field(min_length=1, max_length=200)  # dotted config path -> new value
+
+
+class PasswordResetIn(BaseModel):
+    password: str = Field(min_length=8, max_length=128)   # same rule as sign-up
