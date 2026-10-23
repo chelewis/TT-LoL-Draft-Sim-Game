@@ -740,3 +740,11 @@ table.mx { width: max-content; border-collapse: separate; border-spacing: 0; tab
 .music-volume input { width: 110px; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
+
+/* admin: users */
+.users-email { overflow-wrap: anywhere; }
+.user-reset-row td { background: var(--panel-2); }
+.user-reset { padding: 8px 0; }
+.user-reset-input { gap: 8px; align-items: center; margin-top: 4px; }
+.user-reset-input input { flex: 1 1 220px; min-width: 0; }
+.users-table .num { text-align: right; }
