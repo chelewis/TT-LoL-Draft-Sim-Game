@@ -11,6 +11,14 @@ export interface AdminGroup {
 
 export const ADMIN_NAV: (AdminLink | AdminGroup)[] = [
   { label: 'Champions', items: [{ label: 'Winrates', to: '/admin/champions/winrates' }] },
+  {
+    label: 'Defaults',
+    items: [
+      { label: 'Teams', to: '/admin/defaults/teams' },
+      { label: 'Players', to: '/admin/defaults/players' },
+      { label: 'Coaches', to: '/admin/defaults/coaches' },
+    ],
+  },
   { label: 'Simulation Settings', to: '/admin/simulation' },
   { label: 'Globals', to: '/admin/globals' },
 ]

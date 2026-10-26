@@ -20,6 +20,20 @@ interface GameConfig {
 
 const useConfig = () => useQuery({ queryKey: ['config'], queryFn: () => api<GameConfig>('/config'), staleTime: Infinity })
 
+/** Whose content a page manages: the signed-in user's own, or (admin area) the default content everyone sees.
+ * Reads always use the normal routes, which list defaults too; writes go to `api`. Links stay under `home`. */
+export interface Scope {
+  defaults: boolean
+  api: string
+  home: string
+}
+
+export const USER_SCOPE: Scope = { defaults: false, api: '', home: '' }
+export const DEFAULTS_SCOPE: Scope = { defaults: true, api: '/admin/defaults', home: '/admin/defaults' }
+
+const confirmDelete = (scope: Scope, name: string) =>
+  window.confirm(scope.defaults ? `Delete default ${name}? It is also removed from any player's team that uses it.` : `Delete ${name}?`)
+
 function useInvalidate() {
   const qc = useQueryClient()
   return () => {
@@ -30,14 +44,37 @@ function useInvalidate() {
 }
 
 // ------------------------------------------------------------------ teams
-export function TeamsPage() {
+export function TeamsPage({ scope = USER_SCOPE }: { scope?: Scope }) {
   const teams = useTeams()
   const invalidate = useInvalidate()
-  const del = useMutation({ mutationFn: (id: number) => api(`/teams/${id}`, { method: 'DELETE' }), onSuccess: invalidate })
+  const del = useMutation({ mutationFn: (id: number) => api(`${scope.api}/teams/${id}`, { method: 'DELETE' }), onSuccess: invalidate })
   const dup = useMutation({ mutationFn: (id: number) => api(`/teams/${id}/duplicate`, { method: 'POST' }), onSuccess: invalidate })
 
   const mine = (teams.data ?? []).filter((t) => !t.is_default)
   const defaults = (teams.data ?? []).filter((t) => t.is_default)
+
+  if (scope.defaults) return (
+    <div className="stack">
+      <div className="row between wrap">
+        <h1>Default teams</h1>
+        <Link className="button primary" to={`${scope.home}/teams/new`}>New default team</Link>
+      </div>
+      <p className="muted">Every player can see and duplicate these teams. Changes apply to new games straight away.</p>
+      <ErrorNotice error={del.error} />
+      {teams.isLoading && <Loading />}
+      <div className="grid two">
+        {defaults.map((t) => (
+          <TeamRow key={t.id} team={t} actions={
+            <>
+              <Link className="button ghost small" to={`${scope.home}/teams/${t.id}`}>Edit</Link>
+              <button className="ghost small danger" onClick={() => confirmDelete(scope, t.name) && del.mutate(t.id)}>Delete</button>
+            </>
+          } />
+        ))}
+      </div>
+      <p><Link to={`${scope.home}/players`}>Default players →</Link> · <Link to={`${scope.home}/coaches`}>Default coaches →</Link></p>
+    </div>
+  )
 
   return (
     <div className="stack">
@@ -93,7 +130,7 @@ function TeamRow({ team, actions }: { team: Team; actions: React.ReactNode }) {
   )
 }
 
-export function TeamEditorPage() {
+export function TeamEditorPage({ scope = USER_SCOPE }: { scope?: Scope }) {
   const { teamId } = useParams()
   const isNew = !teamId || teamId === 'new'
   const navigate = useNavigate()
@@ -127,23 +164,28 @@ export function TeamEditorPage() {
         name, logo, style1: style1 || null, style2: style2 || null, focus1: focus1 || null, focus2: focus2 || null,
         coach_id: coachId ? Number(coachId) : null, roster,
       }
-      return isNew ? api<Team>('/teams', { body }) : api<Team>(`/teams/${teamId}`, { method: 'PUT', body })
+      return isNew ? api<Team>(`${scope.api}/teams`, { body }) : api<Team>(`${scope.api}/teams/${teamId}`, { method: 'PUT', body })
     },
-    onSuccess: () => { invalidate(); navigate('/teams') },
+    onSuccess: () => { invalidate(); navigate(`${scope.home}/teams`) },
   })
 
   const submit = (e: FormEvent) => { e.preventDefault(); save.mutate() }
+  // a default team may only use default players and coaches
+  const playerOptions = (players.data ?? []).filter((p) => !scope.defaults || p.is_default)
+  const coachOptions = (coaches.data ?? []).filter((c) => !scope.defaults || c.is_default)
   const overBudget = LANES.flatMap((l) => {
-    const p = players.data?.find((x) => x.id === roster[l])
+    const p = playerOptions.find((x) => x.id === roster[l])
     return p && p.over_budget_by > 0 ? [p] : []
   })
 
   if (!isNew && existing.isLoading) return <Loading />
-  if (existing.data?.is_default) return <div className="card"><p>Default teams are read-only. Duplicate it from My teams to edit a copy.</p><Link to="/teams">← Back</Link></div>
+  if (existing.data && existing.data.is_default !== scope.defaults) return scope.defaults
+    ? <div className="card"><p>This is not a default team.</p><Link to={`${scope.home}/teams`}>← Back</Link></div>
+    : <div className="card"><p>Default teams are read-only. Duplicate it from My teams to edit a copy.</p><Link to="/teams">← Back</Link></div>
 
   return (
     <form className="stack" onSubmit={submit}>
-      <h1>{isNew ? 'New team' : 'Edit team'}</h1>
+      <h1>{isNew ? 'New' : 'Edit'}{scope.defaults ? ' default' : ''} team</h1>
       <div className="card stack">
         <div className="grid two">
           <label>Team name<input value={name} onChange={(e) => setName(e.target.value)} maxLength={40} required /></label>
@@ -163,7 +205,7 @@ export function TeamEditorPage() {
           <label>Coach
             <select value={coachId} onChange={(e) => setCoachId(e.target.value)}>
               <option value="">Choose…</option>
-              {(coaches.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name} (Draft {c.draft} / Synergy {c.synergy}){c.is_default ? ' — default' : ''}</option>)}
+              {coachOptions.map((c) => <option key={c.id} value={c.id}>{c.name} (Draft {c.draft} / Synergy {c.synergy}){c.is_default && !scope.defaults ? ' — default' : ''}</option>)}
             </select>
           </label>
         </div>
@@ -174,8 +216,8 @@ export function TeamEditorPage() {
           <label key={lane}>{LANE_LABEL[lane]}
             <select value={roster[lane] ?? ''} onChange={(e) => setRoster({ ...roster, [lane]: e.target.value ? Number(e.target.value) : undefined })}>
               <option value="">Empty</option>
-              {(players.data ?? []).filter((p) => p.role === lane || p.secondary_role === lane).map((p) => (
-                <option key={p.id} value={p.id}>{p.name} ({p.stat_total}){p.role !== lane ? ' · secondary' : ''}{p.over_budget_by > 0 ? ' ⚠' : ''}{p.is_default ? ' — default' : ''}</option>
+              {playerOptions.filter((p) => p.role === lane || p.secondary_role === lane).map((p) => (
+                <option key={p.id} value={p.id}>{p.name} ({p.stat_total}){p.role !== lane ? ' · secondary' : ''}{p.over_budget_by > 0 ? ' ⚠' : ''}{p.is_default && !scope.defaults ? ' — default' : ''}</option>
               ))}
             </select>
           </label>
@@ -185,23 +227,25 @@ export function TeamEditorPage() {
             ⚠ {overBudget.map((p) => p.name).join(', ')} exceed the stat ceiling. You can still save; this team will show a "potentially illegal team" warning to your opponent.
           </div>
         )}
-        <p className="small muted">Players are created in <Link to="/players/new">My players</Link>.</p>
+        <p className="small muted">Players are created in {scope.defaults
+          ? <Link to={`${scope.home}/players/new`}>Default players</Link>
+          : <Link to="/players/new">My players</Link>}.</p>
       </div>
       <ErrorNotice error={save.error} />
       <div className="row wrap">
         <button className="primary" disabled={save.isPending}>Save team</button>
-        <Link className="button ghost" to="/teams">Cancel</Link>
+        <Link className="button ghost" to={`${scope.home}/teams`}>Cancel</Link>
       </div>
     </form>
   )
 }
 
 // ---------------------------------------------------------------- players
-export function PlayersPage() {
+export function PlayersPage({ scope = USER_SCOPE }: { scope?: Scope }) {
   const riotStatus = useRiotStatus()
   const players = usePlayers()
   const invalidate = useInvalidate()
-  const del = useMutation({ mutationFn: (id: number) => api(`/players/${id}`, { method: 'DELETE' }), onSuccess: invalidate })
+  const del = useMutation({ mutationFn: (id: number) => api(`${scope.api}/players/${id}`, { method: 'DELETE' }), onSuccess: invalidate })
   const champs = useChampions()
   const names = new Map((champs.data ?? []).map((c) => [c.id, c.name]))
   const mine = (players.data ?? []).filter((p) => !p.is_default)
@@ -216,13 +260,23 @@ export function PlayersPage() {
       <td>{p.aggr}/{p.aware}/{p.pos}/{p.dmg}/{p.cs}</td>
       <td>{p.stat_total}</td>
       <td className="small muted">{p.pool.map((id) => names.get(id)).join(', ')}</td>
-      <td>{!p.is_default && <>
-        <Link className="button ghost small" to={`/players/${p.id}`}>Edit</Link>{' '}
-        <button type="button" className="ghost small danger" onClick={() => window.confirm(`Delete ${p.name}?`) && del.mutate(p.id)}>Delete</button></>}</td>
+      <td>{p.is_default === scope.defaults && <>
+        <Link className="button ghost small" to={`${scope.home}/players/${p.id}`}>Edit</Link>{' '}
+        <button type="button" className="ghost small danger" onClick={() => confirmDelete(scope, p.name) && del.mutate(p.id)}>Delete</button></>}</td>
     </tr>
   )
   const table = (list: Player[]) => (
     <div className="table-scroll"><table><thead><tr><th>Name</th><th>Role</th><th title="aggr/aware/pos/dmg/cs">Stats</th><th>Total</th><th>Champion pool</th><th /></tr></thead><tbody>{list.map(row)}</tbody></table></div>
+  )
+  if (scope.defaults) return (
+    <div className="stack">
+      <div className="row between wrap"><h1>Default players</h1>
+        <Link className="button primary" to={`${scope.home}/players/new`}>New default player</Link></div>
+      <ErrorNotice error={del.error} />
+      {players.isLoading && <Loading />}
+      {table(defaults)}
+      <p><Link to={`${scope.home}/teams`}>← Default teams</Link></p>
+    </div>
   )
   return (
     <div className="stack">
@@ -241,7 +295,7 @@ export function PlayersPage() {
   )
 }
 
-export function PlayerEditorPage() {
+export function PlayerEditorPage({ scope = USER_SCOPE }: { scope?: Scope }) {
   const { playerId } = useParams()
   const isNew = !playerId || playerId === 'new'
   const navigate = useNavigate()
@@ -288,7 +342,7 @@ export function PlayerEditorPage() {
 
   useEffect(() => {
     const draft = (location.state as { draft?: RiotPreview } | null)?.draft
-    if (isNew && draft) applyDraft(draft)
+    if (isNew && draft && !scope.defaults) applyDraft(draft)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -307,9 +361,9 @@ export function PlayerEditorPage() {
   const save = useMutation({
     mutationFn: () => {
       const body = { name, role, secondary_role: secondary || null, age, region, ...stats, pool: pool.map(Number), riot_ref: riotRef }
-      return isNew ? api<Player>('/players', { body }) : api<Player>(`/players/${playerId}`, { method: 'PUT', body })
+      return isNew ? api<Player>(`${scope.api}/players`, { body }) : api<Player>(`${scope.api}/players/${playerId}`, { method: 'PUT', body })
     },
-    onSuccess: () => { invalidate(); navigate('/players') },
+    onSuccess: () => { invalidate(); navigate(`${scope.home}/players`) },
   })
   const submit = (e: FormEvent) => { e.preventDefault(); save.mutate() }
   const setStat = (key: keyof typeof stats, value: number) => setStats({ ...stats, [key]: Math.max(1, Math.min(10, value || 1)) })
@@ -317,11 +371,14 @@ export function PlayerEditorPage() {
   const poolValid = pool.every(Boolean) && new Set(pool).size === pool.length
 
   if (!isNew && existing.isLoading) return <Loading />
+  if (existing.data && existing.data.is_default !== scope.defaults) return (
+    <div className="card"><p>{scope.defaults ? 'This is not a default player.' : 'Default players are read-only.'}</p><Link to={`${scope.home}/players`}>← Back</Link></div>
+  )
 
   return (
     <form className="stack" onSubmit={submit}>
-      <h1>{isNew ? 'New player' : 'Edit player'}</h1>
-      {(riotRef || existing.data?.riot) && (
+      <h1>{isNew ? 'New' : 'Edit'}{scope.defaults ? ' default' : ''} player</h1>
+      {!scope.defaults && (riotRef || existing.data?.riot) && (
         <div className="card stack">
           <div className="row between wrap">
             <span>🔗 Imported from Riot: <strong>{existing.data?.riot ? `${existing.data.riot.game_name}#${existing.data.riot.tag_line}` : 'new import'}</strong> <span className="badge">unverified</span></span>
@@ -391,7 +448,7 @@ export function PlayerEditorPage() {
       <ErrorNotice error={save.error} />
       <div className="row wrap">
         <button className="primary" disabled={save.isPending || !poolValid}>Save player</button>
-        <Link className="button ghost" to="/players">Cancel</Link>
+        <Link className="button ghost" to={`${scope.home}/players`}>Cancel</Link>
       </div>
     </form>
   )
@@ -498,7 +555,7 @@ function ChampionFitCard({ stats, pool }: { stats: { aggr: number; aware: number
 }
 
 // ---------------------------------------------------------------- coaches
-export function CoachesPage() {
+export function CoachesPage({ scope = USER_SCOPE }: { scope?: Scope }) {
   const coaches = useCoaches()
   const config = useConfig()
   const invalidate = useInvalidate()
@@ -511,20 +568,20 @@ export function CoachesPage() {
   const save = useMutation({
     mutationFn: () => {
       const body = { name, draft, synergy }
-      return editing ? api(`/coaches/${editing.id}`, { method: 'PUT', body }) : api('/coaches', { body })
+      return editing ? api(`${scope.api}/coaches/${editing.id}`, { method: 'PUT', body }) : api(`${scope.api}/coaches`, { body })
     },
     onSuccess: () => { invalidate(); reset() },
   })
-  const del = useMutation({ mutationFn: (id: number) => api(`/coaches/${id}`, { method: 'DELETE' }), onSuccess: invalidate })
+  const del = useMutation({ mutationFn: (id: number) => api(`${scope.api}/coaches/${id}`, { method: 'DELETE' }), onSuccess: invalidate })
   function reset() { setEditing(null); setName(''); setDraft(5); setSynergy(5) }
   function edit(c: Coach) { setEditing(c); setName(c.name); setDraft(c.draft); setSynergy(c.synergy) }
 
   return (
     <div className="stack">
-      <h1>Coaches</h1>
+      <h1>{scope.defaults ? 'Default coaches' : 'Coaches'}</h1>
       <p className="muted">Draft makes your favourable lane matchups stronger in the match simulation. Synergy strengthens team cohesion (lane assists and playstyle bonuses).</p>
       <form className="card stack" onSubmit={(e) => { e.preventDefault(); save.mutate() }}>
-        <h2>{editing ? 'Edit coach' : 'New coach'}</h2>
+        <h2>{editing ? 'Edit' : 'New'}{scope.defaults ? ' default' : ''} coach</h2>
         <label>Name<input value={name} onChange={(e) => setName(e.target.value)} maxLength={40} required /></label>
         <label>Draft: <strong>{draft}</strong><input type="range" min={1} max={10} value={draft} onChange={(e) => setDraft(Number(e.target.value))} /></label>
         <label>Synergy: <strong>{synergy}</strong><input type="range" min={1} max={10} value={synergy} onChange={(e) => setSynergy(Number(e.target.value))} /></label>
@@ -535,16 +592,16 @@ export function CoachesPage() {
           {editing && <button type="button" className="ghost" onClick={reset}>Cancel</button>}
         </div>
       </form>
-      {(coaches.data ?? []).map((c) => (
+      {(coaches.data ?? []).filter((c) => !scope.defaults || c.is_default).map((c) => (
         <div key={c.id} className="list-row">
-          <span>{c.name} — Draft {c.draft}, Synergy {c.synergy} {c.is_default && <span className="badge">default</span>}</span>
-          {!c.is_default && <span className="row">
+          <span>{c.name} — Draft {c.draft}, Synergy {c.synergy} {c.is_default && !scope.defaults && <span className="badge">default</span>}</span>
+          {c.is_default === scope.defaults && <span className="row">
             <button className="ghost small" onClick={() => edit(c)}>Edit</button>
-            <button className="ghost small danger" onClick={() => window.confirm(`Delete ${c.name}?`) && del.mutate(c.id)}>Delete</button>
+            <button className="ghost small danger" onClick={() => confirmDelete(scope, c.name) && del.mutate(c.id)}>Delete</button>
           </span>}
         </div>
       ))}
-      <p><Link to="/teams">← Teams</Link></p>
+      <p><Link to={`${scope.home}/teams`}>← {scope.defaults ? 'Default teams' : 'Teams'}</Link></p>
     </div>
   )
 }

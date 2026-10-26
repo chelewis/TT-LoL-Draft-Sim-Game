@@ -93,21 +93,24 @@ def _visible(model, user_id: int):
     return or_(model.owner_user_id == user_id, model.owner_user_id.is_(None))
 
 
-def get_visible(db: Session, model, obj_id: int, user_id: int):
+def get_visible(db: Session, model, obj_id: int, user_id: int | None):
     obj = db.get(model, obj_id)
     if obj is None or (obj.owner_user_id is not None and obj.owner_user_id != user_id):
         raise not_found()
     return obj
 
 
-def get_owned(db: Session, model, obj_id: int, user_id: int):
+def get_owned(db: Session, model, obj_id: int, user_id: int | None):
+    """The row if it belongs to this owner. owner None is the admin's default-content scope."""
     obj = get_visible(db, model, obj_id, user_id)
-    if obj.owner_user_id is None:
+    if obj.owner_user_id is None and user_id is not None:
         raise forbidden("Default content is read-only. Duplicate it to make your own copy.")
     return obj
 
 
-def _check_limit(db: Session, model, user_id: int, limit: int, label: str) -> None:
+def _check_limit(db: Session, model, user_id: int | None, limit: int, label: str) -> None:
+    if user_id is None:   # default content has no per-user limit
+        return
     count = db.scalar(select(func.count()).select_from(model).where(model.owner_user_id == user_id))
     if count >= limit:
         raise conflict(f"You have reached the limit of {limit} {label}.")
@@ -140,10 +143,12 @@ def _check_budget(player: Player) -> None:
         raise bad_request(f"Stats may total at most {stat_budget(player.riot_rank_tier)}.")
 
 
-def _apply_riot(player: Player, body: PlayerIn, user_id: int) -> None:
+def _apply_riot(player: Player, body: PlayerIn, user_id: int | None) -> None:
     """Link the player to a Riot account if the body carries a valid preview token for this user."""
     if not body.riot_ref:
         return
+    if user_id is None:
+        raise bad_request("Default players cannot be linked to a Riot account.")
     from app.services.riot_import_service import decode_riot_ref
     ref = decode_riot_ref(body.riot_ref, user_id)
     player.riot_puuid, player.riot_game_name = ref["puuid"], ref["game_name"]
@@ -162,7 +167,7 @@ def _apply_player(player: Player, body: PlayerIn) -> None:
     player.pool_entries = [PlayerPoolEntry(position=i + 1, champion_id=cid) for i, cid in enumerate(body.pool)]
 
 
-def create_player(db: Session, user_id: int, body: PlayerIn) -> Player:
+def create_player(db: Session, user_id: int | None, body: PlayerIn) -> Player:
     _validate_player(db, body)
     _check_limit(db, Player, user_id, CFG["max_players_per_user"], "players")
     player = Player(owner_user_id=user_id)
@@ -174,7 +179,7 @@ def create_player(db: Session, user_id: int, body: PlayerIn) -> Player:
     return player
 
 
-def update_player(db: Session, user_id: int, player_id: int, body: PlayerIn) -> Player:
+def update_player(db: Session, user_id: int | None, player_id: int, body: PlayerIn) -> Player:
     player = get_owned(db, Player, player_id, user_id)
     _validate_player(db, body)
     if not CFG["allow_off_role_roster"]:
@@ -191,7 +196,7 @@ def update_player(db: Session, user_id: int, player_id: int, body: PlayerIn) -> 
     return player
 
 
-def delete_player(db: Session, user_id: int, player_id: int) -> None:
+def delete_player(db: Session, user_id: int | None, player_id: int) -> None:
     player = get_owned(db, Player, player_id, user_id)
     for slot in db.scalars(select(TeamRosterSlot).where(TeamRosterSlot.player_id == player.id)):
         db.delete(slot)  # the affected teams become unselectable until refilled
@@ -209,7 +214,7 @@ def _validate_coach(body: CoachIn) -> None:
         raise bad_request(f"Draft + Synergy may total at most {CFG['coach_stat_budget']}.")
 
 
-def create_coach(db: Session, user_id: int, body: CoachIn) -> Coach:
+def create_coach(db: Session, user_id: int | None, body: CoachIn) -> Coach:
     _validate_coach(body)
     _check_limit(db, Coach, user_id, CFG["max_coaches_per_user"], "coaches")
     coach = Coach(owner_user_id=user_id, name=body.name, draft=body.draft, synergy=body.synergy)
@@ -218,7 +223,7 @@ def create_coach(db: Session, user_id: int, body: CoachIn) -> Coach:
     return coach
 
 
-def update_coach(db: Session, user_id: int, coach_id: int, body: CoachIn) -> Coach:
+def update_coach(db: Session, user_id: int | None, coach_id: int, body: CoachIn) -> Coach:
     coach = get_owned(db, Coach, coach_id, user_id)
     _validate_coach(body)
     coach.name, coach.draft, coach.synergy = body.name, body.draft, body.synergy
@@ -226,7 +231,7 @@ def update_coach(db: Session, user_id: int, coach_id: int, body: CoachIn) -> Coa
     return coach
 
 
-def delete_coach(db: Session, user_id: int, coach_id: int) -> None:
+def delete_coach(db: Session, user_id: int | None, coach_id: int) -> None:
     coach = get_owned(db, Coach, coach_id, user_id)
     for team in db.scalars(select(Team).where(Team.coach_id == coach.id)):
         team.coach_id = None
@@ -235,7 +240,7 @@ def delete_coach(db: Session, user_id: int, coach_id: int) -> None:
 
 
 # ------------------------------------------------------------------ teams
-def _validate_team(db: Session, user_id: int, body: TeamIn, team_id: int | None) -> None:
+def _validate_team(db: Session, user_id: int | None, body: TeamIn, team_id: int | None) -> None:
     for style in (body.style1, body.style2):
         if style is not None and style not in STYLES:
             raise bad_request(f"Playstyle must be one of {', '.join(STYLES)}.")
@@ -272,7 +277,7 @@ def _apply_team(team: Team, body: TeamIn) -> None:
     team.slots = [TeamRosterSlot(lane=lane, player_id=pid) for lane, pid in body.roster.items() if pid is not None]
 
 
-def create_team(db: Session, user_id: int, body: TeamIn) -> Team:
+def create_team(db: Session, user_id: int | None, body: TeamIn) -> Team:
     _validate_team(db, user_id, body, None)
     _check_limit(db, Team, user_id, CFG["max_teams_per_user"], "teams")
     team = Team(owner_user_id=user_id)
@@ -282,7 +287,7 @@ def create_team(db: Session, user_id: int, body: TeamIn) -> Team:
     return team
 
 
-def update_team(db: Session, user_id: int, team_id: int, body: TeamIn) -> Team:
+def update_team(db: Session, user_id: int | None, team_id: int, body: TeamIn) -> Team:
     team = get_owned(db, Team, team_id, user_id)
     _validate_team(db, user_id, body, team.id)
     team.slots.clear()
@@ -292,7 +297,7 @@ def update_team(db: Session, user_id: int, team_id: int, body: TeamIn) -> Team:
     return team
 
 
-def delete_team(db: Session, user_id: int, team_id: int) -> None:
+def delete_team(db: Session, user_id: int | None, team_id: int) -> None:
     team = get_owned(db, Team, team_id, user_id)
     db.delete(team)
     db.commit()
