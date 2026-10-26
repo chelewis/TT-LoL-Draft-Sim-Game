@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { CoachesPage, DEFAULTS_SCOPE, PlayerEditorPage, PlayersPage, TeamEditorPage, TeamsPage } from '../ManagementPages'
 import GlobalsPage from './GlobalsPage'
 import SimulationSettingsPage from './SimulationSettingsPage'
 import UsersPage from './UsersPage'
@@ -14,6 +15,13 @@ export default function AdminPage() {
       <Routes>
         <Route index element={<Navigate to={ADMIN_HOME} replace />} />
         <Route path="champions/winrates/:matrix?" element={<WinratesPage />} />
+        <Route path="defaults/teams" element={<TeamsPage scope={DEFAULTS_SCOPE} />} />
+        <Route path="defaults/teams/new" element={<TeamEditorPage scope={DEFAULTS_SCOPE} />} />
+        <Route path="defaults/teams/:teamId" element={<TeamEditorPage scope={DEFAULTS_SCOPE} />} />
+        <Route path="defaults/players" element={<PlayersPage scope={DEFAULTS_SCOPE} />} />
+        <Route path="defaults/players/new" element={<PlayerEditorPage scope={DEFAULTS_SCOPE} />} />
+        <Route path="defaults/players/:playerId" element={<PlayerEditorPage scope={DEFAULTS_SCOPE} />} />
+        <Route path="defaults/coaches" element={<CoachesPage scope={DEFAULTS_SCOPE} />} />
         <Route path="simulation" element={<SimulationSettingsPage />} />
         <Route path="globals" element={<GlobalsPage />} />
         <Route path="users" element={<UsersPage />} />

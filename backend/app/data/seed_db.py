@@ -1,6 +1,6 @@
 """Idempotent import of the seed CSVs into the database as default (system) content.
 
-System rows have owner_user_id = NULL: visible to everyone, editable by nobody.
+System rows have owner_user_id = NULL: visible to everyone, editable only by admins.
 """
 from __future__ import annotations
 
@@ -35,7 +35,9 @@ def seed_database(db: Session, data: SeedData | None = None) -> None:
     log_report(sync_champions(db, data))
     seed_matchups(db)
 
-    if db.scalar(select(func.count()).select_from(Team).where(Team.owner_user_id.is_(None))):
+    # seed defaults only into an empty database: admins may since have edited or deleted any of them
+    if any(db.scalar(select(func.count()).select_from(m).where(m.owner_user_id.is_(None)))
+           for m in (Team, Player, Coach)):
         return
 
     coach_ids: dict[int, int] = {}
