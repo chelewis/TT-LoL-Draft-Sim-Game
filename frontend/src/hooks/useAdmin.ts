@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
-import type { MatchupKind, MatchupMatrix, SimulationSettings } from '../api/types'
+import type { AdminUser, MatchupKind, MatchupMatrix, SimulationSettings } from '../api/types'
 import { toChanges, type Pending } from '../lib/matchups'
 
 const matchupsKey = (kind: MatchupKind) => ['admin', 'matchups', kind]
@@ -59,3 +59,18 @@ export function useResetSimulationSettings() {
     onSuccess: (data) => qc.setQueryData(simulationKey, data),
   })
 }
+
+const usersKey = ['admin', 'users']
+
+export const useAdminUsers = () => useQuery({ queryKey: usersKey, queryFn: () => api<AdminUser[]>('/admin/users') })
+
+/** Set a user's password; this also signs them out everywhere. */
+export function useResetPassword() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ userId, password }: { userId: number; password: string }) =>
+      api(`/admin/users/${userId}/password`, { body: { password } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: usersKey }),
+  })
+}
+

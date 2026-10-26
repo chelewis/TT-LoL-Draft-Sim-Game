@@ -7,6 +7,8 @@ interface AuthValue {
   loading: boolean
   login: (username: string, password: string) => Promise<void>
   register: (username: string, email: string, password: string) => Promise<void>
+  /** Sign in (or sign up) with the ID token from Google Identity Services. */
+  loginWithGoogle: (credential: string) => Promise<void>
   logout: () => void
 }
 
@@ -41,6 +43,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login: async (username, password) => accept(await api<TokenResponse>('/auth/login', { body: { username, password } })),
       register: async (username, email, password) =>
         accept(await api<TokenResponse>('/auth/register', { body: { username, email, password } })),
+      loginWithGoogle: async (credential) => accept(await api<TokenResponse>('/auth/google', { body: { credential } })),
       logout: () => {
         api('/auth/logout', { method: 'POST' }).catch(() => undefined)
         tokenStore.clear()

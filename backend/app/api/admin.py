@@ -15,6 +15,11 @@ from app.services import matchup_service as svc
 from app.services import simulation_settings_service as sim_settings
 from app.services import team_management_service as teams
 
+from app.schemas.admin import MatchupChangesIn, PasswordResetIn, SimulationSettingsIn
+from app.services import matchup_service as svc
+from app.services import simulation_settings_service as sim_settings
+from app.services import user_admin_service as users
+
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 log = logging.getLogger(__name__)
 
@@ -128,3 +133,18 @@ def delete_default_coach(coach_id: int, db: Session = Depends(get_db), user: Use
     teams.delete_coach(db, None, coach_id)   # teams using it, users' included, are left without a coach
     log.info("admin_default_coach_deleted user_id=%s id=%s", user.id, coach_id)
     return Response(status_code=204)
+
+
+# ------------------------------------------------- users
+@router.get("/users")
+def list_users(db: Session = Depends(get_db)):
+    return users.list_users(db)
+
+
+@router.post("/users/{user_id}/password", status_code=204)
+def reset_user_password(user_id: int, body: PasswordResetIn, db: Session = Depends(get_db),
+                        user: User = Depends(require_admin)):
+    users.reset_password(db, user_id, body.password)
+    log.info("admin_password_reset admin_id=%s user_id=%s", user.id, user_id)
+    return Response(status_code=204)
+

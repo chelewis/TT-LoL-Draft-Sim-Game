@@ -34,6 +34,10 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class GoogleLoginRequest(BaseModel):
+    credential: str = Field(min_length=20, max_length=4096)   # the ID token from Google Identity Services
+
+
 class UserOut(BaseModel):
     id: int
     username: str

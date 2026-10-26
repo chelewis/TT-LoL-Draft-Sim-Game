@@ -2,9 +2,10 @@ import { useState, type FormEvent } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { ErrorNotice } from '../components/common'
+import GoogleSignIn from '../components/GoogleSignIn'
 
 export default function LoginPage() {
-  const { user, login, register } = useAuth()
+  const { user, login, register, loginWithGoogle } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [mode, setMode] = useState<'login' | 'register'>('login')
@@ -16,6 +17,19 @@ export default function LoginPage() {
 
   const from = (location.state as { from?: string } | null)?.from ?? '/'
   if (user) return <Navigate to={from} replace />
+
+  async function google(credential: string) {
+    setError(null)
+    setBusy(true)
+    try {
+      await loginWithGoogle(credential)
+      navigate(from, { replace: true })
+    } catch (err) {
+      setError(err)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault()
@@ -70,6 +84,7 @@ export default function LoginPage() {
         <button className="primary" disabled={busy}>
           {busy ? 'Please wait…' : mode === 'login' ? 'Log in' : 'Create account'}
         </button>
+        <GoogleSignIn onCredential={google} />
       </form>
     </div>
   )

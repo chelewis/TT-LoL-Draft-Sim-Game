@@ -33,6 +33,21 @@ export type SimulationSettingField = {
   default: number | boolean
   value: number | boolean
 } & ({ kind: 'bool' } | { kind: 'number'; min: number; max: number; step: number })
+/** GET /admin/users: one row per site user. */
+export interface AdminUser {
+  id: number
+  username: string
+  email: string
+  is_admin: boolean
+  created_at: string | null
+  /** when an admin last reset the password; null if never */
+  password_changed_at: string | null
+  teams: number
+  players: number
+  /** finished games played */
+  games: number
+}
+
 export interface SimulationSettings {
   fields: SimulationSettingField[]
   updated_at: string | null
