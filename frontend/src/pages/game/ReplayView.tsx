@@ -6,7 +6,8 @@ import { Loading } from '../../components/common'
 import MatchMap from '../../components/MatchMap'
 import { useChampionMap } from '../../hooks/useData'
 import { REPLAY_END_PAUSE_MS, buildReplay, gameClockSeconds } from '../../lib/replay'
-import { scoreAt } from '../../lib/scoreboard'
+import GoldGraph from '../../components/GoldGraph'
+import { goldDiff, goldTimeline, scoreAt } from '../../lib/scoreboard'
 import { ReplayHud, ReplayPlayers } from './ReplayScoreboard'
 
 /**
@@ -68,6 +69,16 @@ export default function ReplayView({ game, onDone }: { game: GameState; onDone: 
     () => (result.data && events.data ? scoreAt(result.data, events.data.events, revealed, clock) : null),
     [result.data, events.data, revealed, clock],
   )
+  const timeline = useMemo(
+    () => (result.data && events.data ? goldTimeline(result.data, events.data.events) : null),
+    [result.data, events.data],
+  )
+  // the graph so far, ending exactly on the scoreboard's current gold
+  const liveDiff = score ? goldDiff(score) : null
+  const goldPoints = useMemo(
+    () => (timeline && liveDiff != null ? [...timeline.filter((p) => p.seconds < clock), { seconds: clock, diff: liveDiff }] : null),
+    [timeline, clock, liveDiff],
+  )
 
   return (
     <div className="card stack replay">
@@ -83,6 +94,7 @@ export default function ReplayView({ game, onDone }: { game: GameState; onDone: 
             </ol>
             <MatchMap live result={result.data} events={revealed} champions={champions} names={names} />
           </div>
+          {goldPoints && <GoldGraph points={goldPoints} names={names} objectives={revealed} />}
           <ReplayPlayers result={result.data} score={score} champions={champions} />
         </>
       )}

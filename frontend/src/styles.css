@@ -146,6 +146,30 @@ table.compact th, table.compact td { padding: 4px 6px; font-size: 0.85rem; }
 .replay-kills .blue { color: var(--blue); } .replay-kills .red { color: var(--red); }
 .replay-kills .replay-icon { width: 20px; height: 20px; }
 .replay-clock { font-size: 18px; font-weight: 600; line-height: 1; color: var(--muted); font-variant-numeric: tabular-nums; }
+.replay-gold-diff { display: inline-flex; align-items: center; gap: 4px; font-size: 16px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.replay-gold-diff.blue { color: var(--blue); } .replay-gold-diff.red { color: var(--red); } .replay-gold-diff.even { color: var(--muted); }
+
+/* gold lead over time: blue above the zero line, red below */
+.gold-graph { display: block; width: 100%; height: auto; background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius); }
+.gold-graph-grid { stroke: var(--line); stroke-width: 1; }
+.gold-graph-zero { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; }
+.gold-graph-axis { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.gold-graph-team { font-size: 12px; font-weight: 700; }
+.gold-graph-team.blue { fill: var(--blue); } .gold-graph-team.red { fill: var(--red); }
+.gold-graph-area.blue { fill: var(--blue); fill-opacity: 0.25; } .gold-graph-area.red { fill: var(--red); fill-opacity: 0.25; }
+.gold-graph-line { fill: none; stroke-width: 2; stroke-linejoin: round; }
+.gold-graph-line.blue { stroke: var(--blue); } .gold-graph-line.red { stroke: var(--red); }
+.gold-graph-figure { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.gold-graph-objective circle { stroke: var(--panel-2); stroke-width: 1.5; }
+.gold-graph-objective path { fill: #fff; fill-rule: evenodd; }
+.gold-graph-objective.blue circle { fill: var(--blue); } .gold-graph-objective.red circle { fill: var(--red); }
+.gold-graph-objective.neutral circle { fill: var(--muted); stroke: none; }
+/* the Elder Dragon and the Baron are the big ones: a gold ring sets them apart */
+.gold-graph-objective.elder-dragon circle, .gold-graph-objective.baron circle, .gold-graph-objective.nexus circle { stroke: var(--gold); stroke-width: 2; }
+.gold-graph-objective.elder-dragon path { fill: var(--gold); }
+.gold-graph-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.gold-graph-legend li { display: inline-flex; align-items: center; gap: 5px; }
+.gold-graph-legend .gold-graph-objective.elder-dragon circle, .gold-graph-legend .gold-graph-objective.baron circle, .gold-graph-legend .gold-graph-objective.nexus circle { stroke-width: 1.5; }
 
 .replay-body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; align-items: start; }
 .replay-feed {
@@ -170,6 +194,7 @@ table.compact th, table.compact td { padding: 4px 6px; font-size: 0.85rem; }
   .replay-body .match-map { max-width: 340px; }
   .replay-hud { gap: 8px; padding: 8px; }
   .replay-kills { font-size: 26px; gap: 8px; }
+  .replay-gold-diff { font-size: 14px; }
   /* the champion icon is enough to tell the players apart */
   .replay-player-name { display: none; }
 }

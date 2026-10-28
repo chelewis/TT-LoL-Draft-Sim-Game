@@ -3,7 +3,7 @@ import type { Champion, Lane, MatchResult, Side } from '../../api/types'
 import { LANES } from '../../api/types'
 import { ChampionIcon, LaneIcon } from '../../components/ChampionArt'
 import { formatDuration } from '../../lib/format'
-import { formatGold, formatThousands, playerKey, type Score, type TeamScore } from '../../lib/scoreboard'
+import { formatGold, formatThousands, goldDiff, playerKey, type Score, type TeamScore } from '../../lib/scoreboard'
 
 const ICONS: Record<'tower' | 'gold' | 'kills', ReactNode> = {
   tower: <path d="M7 3h2v2h2V3h2v2h2V3h2v5l-2 2v8h2v3H7v-3h2v-8L7 8z" />,
@@ -40,6 +40,27 @@ function TeamPanel({ side, name, team }: { side: Side; name: string; team: TeamS
   )
 }
 
+/** The gold difference, with an arrow pointing at the side that leads, in that side's colour. */
+function GoldLead({ names, diff }: { names: Record<Side, string>; diff: number | null }) {
+  if (diff == null) return null
+  const leader: Side | null = diff > 0 ? 'BLUE' : diff < 0 ? 'RED' : null
+  const arrow = (points: string) => (
+    <svg className="replay-gold-arrow" width={12} height={12} viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d={points} /></svg>
+  )
+  return (
+    <span
+      className={`replay-gold-diff ${leader ? leader.toLowerCase() : 'even'}`}
+      role="img"
+      aria-label={leader ? `Gold lead: ${names[leader]} by ${Math.abs(diff).toLocaleString()}` : 'Gold even'}
+      title="Gold difference"
+    >
+      {leader === 'BLUE' && arrow('M9 1L2 6l7 5z')}
+      {formatGold(Math.abs(diff))}
+      {leader === 'RED' && arrow('M3 1l7 5-7 5z')}
+    </span>
+  )
+}
+
 /** Broadcast-style top bar: each side's towers, gold and objectives around the kill score and the game clock. */
 export function ReplayHud({ names, score, clockSeconds }: { names: Record<Side, string>; score: Score; clockSeconds: number }) {
   return (
@@ -52,6 +73,7 @@ export function ReplayHud({ names, score, clockSeconds }: { names: Record<Side, 
           <b className="red">{score.teams.RED.kills}</b>
         </div>
         <span className="replay-clock" role="timer" aria-label="Game time">{formatDuration(clockSeconds)}</span>
+        <GoldLead names={names} diff={goldDiff(score)} />
       </div>
       <TeamPanel side="RED" name={names.RED} team={score.teams.RED} />
     </div>

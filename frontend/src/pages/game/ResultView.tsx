@@ -9,7 +9,8 @@ import MatchMap from '../../components/MatchMap'
 import { OverBudgetBadge } from '../../components/TeamCard'
 import { useChampionMap } from '../../hooks/useData'
 import { LANE_LABEL, TIER_LABEL, formatDuration, isSolo, matchupText, seriesLabel, titleCase } from '../../lib/format'
-import { formatThousands } from '../../lib/scoreboard'
+import GoldGraph from '../../components/GoldGraph'
+import { formatThousands, goldTimeline } from '../../lib/scoreboard'
 import { describeEvent, summarize } from '../../lib/summary'
 
 /** Draft effects on the match: one-sided damage being itemized against, and same-team win rates. Absent on old results. */
@@ -51,6 +52,7 @@ export default function ResultView({ game }: { game: GameState }) {
   const youWon = r.winner === me
   const bySide = (side: Side) => r.players.filter((p) => p.team === side)
   const playerName = (id: number) => r.players.find((p) => p.player_id === id)?.name ?? ''
+  const goldPoints = events.data ? goldTimeline(r, events.data.events) : null
 
   return (
     <div className="stack">
@@ -89,6 +91,13 @@ export default function ResultView({ game }: { game: GameState }) {
           : events.error || !events.data ? <ErrorNotice error={events.error ?? new Error('The map could not be loaded.')} />
             : <MatchMap result={r} events={events.data.events} champions={champions} names={names} />}
       </div>
+
+      {goldPoints && (
+        <div className="card stack">
+          <h2>Gold difference</h2>
+          <GoldGraph points={goldPoints} names={names} objectives={events.data?.events} />
+        </div>
+      )}
 
       <div className="grid two">
         {(['BLUE', 'RED'] as Side[]).map((side) => (

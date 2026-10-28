@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Lane, MatchEvent, MatchResult, Side } from '../api/types'
 import { LANES } from '../api/types'
-import { formatGold, playerKey, scoreAt } from './scoreboard'
+import { formatGold, goldDiff, goldTimeline, playerKey, scoreAt } from './scoreboard'
 
 // every player ends on 600 CS and 10,000 gold; champions are named after their side and lane
 const players = (['BLUE', 'RED'] as Side[]).flatMap((team) =>
@@ -69,6 +69,34 @@ describe('scoreAt', () => {
     const score = scoreAt(result, old, old, 1800)
     expect(score.teams.BLUE.gold).toBeNull()
     expect(score.players[playerKey('BLUE', 'TOP')]).toMatchObject({ kills: 1, cs: 600, gold: null })
+  })
+})
+
+describe('goldDiff', () => {
+  it('is positive when Blue leads', () => {
+    // at 20:00 Blue has the tower and fight gold on top of the same CS gold as Red
+    const diff = goldDiff(scoreAt(result, log, [dragon, laneResult, fight, tower], 1200))
+    expect(diff).toBeGreaterThan(0)
+  })
+
+  it('is null for a game whose events carry no gold', () => {
+    const old = log.map((e) => ({ ...e, payload: { ...e.payload, event_gold: undefined } }))
+    expect(goldDiff(scoreAt(result, old, old, 1800))).toBeNull()
+  })
+})
+
+describe('goldTimeline', () => {
+  it('has a point every minute from even at the start to the final difference', () => {
+    const points = goldTimeline(result, log)!
+    expect(points).toHaveLength(31)
+    expect(points[0]).toEqual({ seconds: 0, diff: 0 })
+    expect(points[30]).toEqual({ seconds: 1800, diff: 0 })   // every player ends on the same gold
+    expect(points[20]).toEqual({ seconds: 1200, diff: goldDiff(scoreAt(result, log, [dragon, laneResult, fight, tower], 1200)) })
+  })
+
+  it('is null for a game whose events carry no gold', () => {
+    const old = log.map((e) => ({ ...e, payload: { ...e.payload, event_gold: undefined } }))
+    expect(goldTimeline(result, old)).toBeNull()
   })
 })
 

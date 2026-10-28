@@ -129,6 +129,28 @@ export function scoreAt(result: MatchResult, events: MatchEvent[], revealed: Mat
   return { teams: { BLUE: team('BLUE'), RED: team('RED') }, players }
 }
 
+/** Blue's gold minus Red's: positive when Blue leads. Null when the game's events carry no gold. */
+export function goldDiff(score: Score): number | null {
+  const { BLUE, RED } = score.teams
+  return BLUE.gold == null || RED.gold == null ? null : BLUE.gold - RED.gold
+}
+
+export interface GoldPoint {
+  seconds: number
+  diff: number                    // Blue's gold minus Red's
+}
+
+/** The gold difference at every game minute and at the end. Null when the game's events carry no gold. */
+export function goldTimeline(result: MatchResult, events: MatchEvent[]): GoldPoint[] | null {
+  const byClock = [...events].sort((a, b) => a.minute - b.minute || a.sequence - b.sequence)
+  const at = (seconds: number) => goldDiff(scoreAt(result, events, byClock.filter((e) => e.minute * 60 <= seconds), seconds))
+  if (at(result.duration_seconds) == null) return null
+  const points: GoldPoint[] = []
+  for (let s = 0; s < result.duration_seconds; s += 60) points.push({ seconds: s, diff: at(s)! })
+  points.push({ seconds: result.duration_seconds, diff: at(result.duration_seconds)! })
+  return points
+}
+
 /** A large number the way a broadcast shows it: 56.6k. */
 export function formatThousands(value: number): string {
   return `${(value / 1000).toFixed(1)}k`
