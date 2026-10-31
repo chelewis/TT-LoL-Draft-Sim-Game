@@ -128,6 +128,9 @@ class Match:
         self.win_condition: str | None = None
         self.end_minute: float | None = None
         self.elementals_taken = 0
+        # the minute each neutral objective is next alive
+        self.next_dragon_at = float(self.config["objectives"]["dragon_first_spawn"])
+        self.next_baron_at = float(self.config["objectives"]["baron_first_spawn"])
         self.teams: dict[str, TeamState] = {
             "BLUE": self._build_team("BLUE", blue, champions),
             "RED": self._build_team("RED", red, champions),

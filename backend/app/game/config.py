@@ -116,7 +116,7 @@ SIMULATION_CONFIG: dict[str, Any] = {
     "phases": [
         {"name": "early", "minutes": [3, 15], "max_dragons": 3, "max_barons": 0, "max_towers": 5,
          "skirmishes": [2, 8], "skirmish_size": [1, 4], "teamfights": [0, 0], "teamfight_size": [4, 5]},
-        {"name": "mid", "minutes": [15, 25], "max_dragons": 2, "max_barons": 1, "max_towers": 6,
+        {"name": "mid", "minutes": [15, 25], "max_dragons": 2, "max_barons": 2, "max_towers": 6,
          "skirmishes": [2, 8], "skirmish_size": [2, 5], "teamfights": [0, 1], "teamfight_size": [4, 5]},
         {"name": "late", "minutes": [25, 35], "max_dragons": 2, "max_barons": 2, "max_towers": 4,
          "skirmishes": [1, 6], "skirmish_size": [3, 5], "teamfights": [1, 3], "teamfight_size": [4, 5]},
@@ -131,6 +131,12 @@ SIMULATION_CONFIG: dict[str, Any] = {
         "elder_bonus": 0.15,
         "elder_fights": 2,
         "baron_power_play_bonus": 50,
+        # spawn timers (minutes): a dragon/baron rolled before it is up is skipped
+        "dragon_first_spawn": 5,
+        "dragon_respawn": 5,
+        "elder_respawn": 6,
+        "baron_first_spawn": 20,
+        "baron_respawn": 6,
         "gold_control_scale": 1.0,
         "gold_lead_cap": 0.30,
         "control_roll_range": [1, 3],

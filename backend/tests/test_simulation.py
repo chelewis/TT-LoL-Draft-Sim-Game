@@ -99,6 +99,24 @@ def test_soul_only_claimed_once_and_dragon_pool(make_teams, champions):
             assert not any(e.type == "ELDER_DRAGON" for e in res.events[:first_soul])
 
 
+def test_dragons_and_barons_respect_spawn_timers(make_teams, champions):
+    obj = simulation_config()["objectives"]
+    for s in range(30):
+        res = run(make_teams, champions, team_seed=s, seed=s)
+        dragons = [e for e in res.events if e.type in ("DRAGON", "ELDER_DRAGON")]
+        barons = [e for e in res.events if e.type == "BARON"]
+        if dragons:
+            assert dragons[0].minute >= obj["dragon_first_spawn"]
+        for prev, cur in zip(dragons, dragons[1:]):
+            # the gap before an elder is the elder timer, otherwise the dragon timer
+            gap = obj["elder_respawn"] if cur.type == "ELDER_DRAGON" else obj["dragon_respawn"]
+            assert cur.minute - prev.minute >= gap - 1e-9
+        if barons:
+            assert barons[0].minute >= obj["baron_first_spawn"]
+        for prev, cur in zip(barons, barons[1:]):
+            assert cur.minute - prev.minute >= obj["baron_respawn"] - 1e-9
+
+
 def test_late_game_and_overtime_run_only_when_needed(make_teams, champions):
     phases_seen = set()
     for seed in range(60):

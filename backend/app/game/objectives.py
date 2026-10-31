@@ -18,6 +18,8 @@ def _bounty_if_behind(match: Match, team: TeamState, enemy: TeamState) -> None:
 # ---------------------------------------------------------------- dragons
 def roll_dragon(match: Match) -> None:
     obj = match.config["objectives"]
+    if match.minute < match.next_dragon_at:
+        return
     blue, red = match.sides
     any_soul = blue.soul or red.soul
     if not any_soul and match.elementals_taken >= obj["elemental_pool"]:
@@ -27,11 +29,15 @@ def roll_dragon(match: Match) -> None:
     taker.dragons += 1
 
     if any_soul:
+        match.next_dragon_at = match.minute + obj["elder_respawn"]
         taker.elder_fights = obj["elder_fights"]
         match.emit("ELDER_DRAGON", team=taker.side)
         return
 
     match.elementals_taken += 1
+    # once soul is claimed the next dragon is the elder
+    soul_next = taker.dragons >= obj["dragon_soul_at"] and not enemy.soul
+    match.next_dragon_at = match.minute + obj["elder_respawn" if soul_next else "dragon_respawn"]
     match.emit("DRAGON", team=taker.side, dragons=taker.dragons)
     # each dragon buffs the team's lane scores
     for p in taker.players.values():
@@ -68,6 +74,9 @@ def _destroy_lane_structure(match: Match, attacker: TeamState, defender: TeamSta
 
 
 def roll_baron(match: Match) -> None:
+    if match.minute < match.next_baron_at:
+        return
+    match.next_baron_at = match.minute + match.config["objectives"]["baron_respawn"]
     blue, red = match.sides
     taker = blue if match.rng.random() < match.control_ratio(blue) else red
     taker.barons += 1
