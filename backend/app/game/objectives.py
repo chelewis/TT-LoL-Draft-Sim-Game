@@ -54,7 +54,7 @@ def roll_dragon(match: Match) -> None:
 def roll_tower(match: Match) -> None:
     """One tower trade from an objective roll: only lane towers, never inhibitors or the nexus."""
     blue, red = match.sides
-    taker = blue if match.rng.random() < match.control_ratio(blue) else red
+    taker = blue if match.rng.random() < match.control_ratio(blue, towers=True) else red
     enemy = match.other(taker)
     lanes = enemy.structures.lanes_with_tower()
     if not lanes:

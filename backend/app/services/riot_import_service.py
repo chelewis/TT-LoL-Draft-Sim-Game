@@ -21,6 +21,7 @@ from app.integrations.riot.client import RiotClient
 from app.integrations.riot.config import MATCH_COUNT, MIN_GAMES, PLATFORM_CLUSTER, QUEUE_TIERS
 from app.integrations.riot.errors import RiotError, RiotNotFound, RiotRateLimited
 from app.models import Champion, Player
+from app.services import playstyle_service
 from app.services.team_management_service import stat_budget, stat_floor
 
 _cache: dict[tuple, tuple[float, dict]] = {}
@@ -38,9 +39,13 @@ def reset_state() -> None:
 
 # ------------------------------------------------------------ signed token
 def make_riot_ref(user_id: int, puuid: str, game_name: str, tag_line: str, region: str,
-                  source: str | None = None, games: int | None = None, rank: dict | None = None) -> str:
+                  source: str | None = None, games: int | None = None, rank: dict | None = None,
+                  tags: list[dict] | None = None, baseline: dict | None = None) -> str:
+    """`baseline` is what the import produced (role, stats, pool, suggested tags); the saved player's import seal
+    is made from it, so the browser can never change what counts as "unedited"."""
     payload = {"typ": "riot_ref", "uid": user_id, "puuid": puuid, "game_name": game_name, "tag_line": tag_line,
-               "region": region, "source": source, "games": games, "rank": rank,
+               "region": region, "source": source, "games": games, "rank": rank, "tags": tags or [],
+               "baseline": baseline,
                "exp": datetime.now(timezone.utc) + timedelta(hours=2)}
     return jwt.encode(payload, settings.secret_key, algorithm="HS256")
 
@@ -124,6 +129,15 @@ def preview(db: Session, client: RiotClient, user_id: int, riot_id: str | None =
 
     analysis = stat_mapper.analyse(choice.matches, puuid, budget, role=role,
                                    min_games=MIN_GAMES, queue_ids=tier["queue_ids"], floor=floor)
+
+    # playstyle tags: positive ones from challenge progress, negative ones from the games just analysed
+    try:
+        challenge_data = client.challenges_player_data(region, puuid)
+    except RiotError:
+        challenge_data = None       # the import still works; only challenge tags are missed
+    earned = stat_mapper.earned_tags(playstyle_service.enabled_tags(db), challenge_data, analysis.averages,
+                                     analysis.lane)
+    suggested = playstyle_service.suggest(earned)
     riot_champions = ddragon.load_riot_champions(client.ddragon_json)
     mapper = ddragon.ChampionMapper(riot_champions, _our_champions(db))
     pool, unmapped = stat_mapper.build_pool(analysis, mastery, mapper.to_ours, MANAGEMENT_CONFIG["champion_pool_size"])
@@ -150,6 +164,8 @@ def preview(db: Session, client: RiotClient, user_id: int, riot_id: str | None =
     if unmapped:
         names = ", ".join(sorted({mapper.riot_name(k) for k in unmapped}))
         notes.append(f"Not in this game, so skipped: {names}.")
+    if challenge_data is None:
+        notes.append("Riot's challenge data could not be loaded, so no challenge-based playstyle tags were checked.")
     existing = db.scalar(select(Player).where(Player.owner_user_id == user_id, Player.riot_puuid == puuid))
     if existing:
         notes.append(f"You already imported this account as \"{existing.name}\".")
@@ -161,7 +177,7 @@ def preview(db: Session, client: RiotClient, user_id: int, riot_id: str | None =
     result = {
         "player": {"name": game_name[:40], "role": analysis.lane, "secondary_role": secondary_lane,
                    "age": 20, "region": region,
-                   **analysis.stats, "pool": pool},
+                   **analysis.stats, "pool": pool, "tags": suggested},
         "riot": {"game_name": game_name, "tag_line": tag_line, "region": region},
         "analysis": {"games": analysis.games, "lane_counts": analysis.lane_counts, "raw_stats": analysis.raw_stats,
                      "rank": {**(rank or dict.fromkeys(("queue", "tier", "division", "lp", "wins", "losses"))),
@@ -171,11 +187,15 @@ def preview(db: Session, client: RiotClient, user_id: int, riot_id: str | None =
                      "fit": {"budget": analysis.budget, "floor": analysis.floor, "total_before": analysis.total_before_fit,
                              "total_after": sum(analysis.stats.values())},
                      "missing_pool_slots":
-                         MANAGEMENT_CONFIG["champion_pool_size"] - len(pool), "notes": notes},
+                         MANAGEMENT_CONFIG["champion_pool_size"] - len(pool),
+                     "tags": {"earned": _tag_views(db, earned), "suggested": suggested,
+                              "challenges_loaded": challenge_data is not None},
+                     "notes": notes},
         "_puuid": puuid,
         "_source": source["queue"],
         "_games": analysis.games,
         "_rank": rank,
+        "_tags": earned,
     }
     with _lock:
         _cache[cache_key] = (time.monotonic(), result)
@@ -187,15 +207,35 @@ def _with_fresh_ref(result: dict, user_id: int) -> dict:
     out = {k: v for k, v in result.items() if not k.startswith("_")}
     r = result["riot"]
     out["riot_ref"] = make_riot_ref(user_id, result["_puuid"], r["game_name"], r["tag_line"], r["region"],
-                                    result["_source"], result["_games"], result["_rank"])
+                                    result["_source"], result["_games"], result["_rank"], result["_tags"],
+                                    _baseline(result))
     return out
+
+
+def _baseline(result: dict) -> dict:
+    """What this import produced, before the user edits anything."""
+    p = result["player"]
+    polarity = {e["key"]: e["polarity"] for e in result["_tags"]}
+    suggested = list(p.get("tags") or [])
+    return {"role": p["role"], **{s: p[s] for s in stat_mapper.STATS}, "pool": list(p["pool"]),
+            "suggested_tags": suggested, "negative_tags": [k for k in suggested if polarity.get(k) == "negative"]}
+
+
+def _tag_views(db: Session, earned: list[dict]) -> list[dict]:
+    cat = playstyle_service.catalog(db)
+    return [{**playstyle_service.public_tag(cat[e["key"]]), "evidence": e["evidence"]} for e in earned]
 
 
 def refresh(db: Session, client: RiotClient, user_id: int, player: Player, role: str | None = None) -> dict:
     if not player.riot_puuid:
         raise bad_request("That player was not imported from Riot.")
-    return preview(db, client, user_id, region=player.riot_region or "NA1", role=role or player.role,
+    data = preview(db, client, user_id, region=player.riot_region or "NA1", role=role or player.role,
                    puuid=player.riot_puuid)
+    # keep the tags the user chose that are still earned; fall back to the suggestion when none are
+    earned = {t["key"] for t in data["analysis"]["tags"]["earned"]}
+    kept = [k for k in player.playstyle_tags or [] if k in earned]
+    data["player"] = {**data["player"], "tags": kept or data["player"]["tags"]}
+    return data
 
 
 __all__ = ["preview", "refresh", "decode_riot_ref", "RiotError"]

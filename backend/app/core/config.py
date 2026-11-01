@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     riot_api_key: str = ""
     riot_cache_seconds: int = 3600
     riot_user_cooldown_seconds: int = 10
+    # signs the import seal that proves a player's stats came from a Riot import (empty: use secret_key). Keep it
+    # stable: changing it makes every existing seal unverifiable until the player is refreshed from Riot.
+    riot_seal_key: str = ""
     # Sign in with Google (optional). The OAuth "Web application" client ID from Google Cloud Console
     # (APIs & Services > Credentials). Public, not a secret; no client secret is needed. Empty hides the button.
     google_client_id: str = ""

@@ -301,8 +301,11 @@ def snapshot_of(db: Session, game: Game, side: str) -> dict | None:
 
 
 def _player_spec(p: dict) -> PlayerSpec:
+    # playstyle tag effects come from the snapshot, so later admin edits to a tag never change this game;
+    # snapshots from before tags existed have none
+    effects = tuple((e["hook"], float(e["value"])) for t in p.get("tags") or [] for e in t.get("effects") or [])
     return PlayerSpec(p["id"], p["name"], p["role"], p["age"], p["aggr"], p["aware"], p["pos"],
-                      p["dmg"], p["cs"], tuple(p["pool"]))
+                      p["dmg"], p["cs"], tuple(p["pool"]), effects)
 
 
 def _lane_players(snapshot: dict, players: dict[str, int] | None) -> dict[str, dict]:
@@ -848,7 +851,8 @@ def series_result(db: Session, series_id: int, user: User) -> dict:
 
 
 # ---------------------------------------------------------- state views
-HIDDEN_PLAYER_FIELDS = ("age", "aggr", "aware", "pos", "dmg", "cs", "pool", "stat_total", "region", "riot")
+HIDDEN_PLAYER_FIELDS = ("age", "aggr", "aware", "pos", "dmg", "cs", "pool", "stat_total", "region", "riot",
+                        "tags", "earned_tags")
 
 
 def _mask_player(p: dict | None) -> dict | None:

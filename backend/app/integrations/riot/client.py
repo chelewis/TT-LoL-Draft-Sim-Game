@@ -95,6 +95,15 @@ class RiotClient:
                          f"{quote(queue, safe='')}/{quote(tier, safe='')}/{quote(division, safe='')}",
                          params={"page": page})
 
+    def challenges_player_data(self, platform: str, puuid: str) -> dict:
+        """The account's challenge progress: totals, category points and every challenge's level and percentile."""
+        return self._get(f"https://{platform.lower()}.api.riotgames.com/lol/challenges/v1/player-data/"
+                         f"{quote(puuid, safe='')}")
+
+    def challenges_config(self, platform: str) -> list[dict]:
+        """Every challenge's names, description and level thresholds."""
+        return self._get(f"https://{platform.lower()}.api.riotgames.com/lol/challenges/v1/challenges/config")
+
     def ddragon_json(self, url: str) -> Any:
         """Data Dragon is a static CDN: no key and no rate limit."""
         try:

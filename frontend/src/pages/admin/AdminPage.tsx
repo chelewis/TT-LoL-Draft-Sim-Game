@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { CoachesPage, DEFAULTS_SCOPE, PlayerEditorPage, PlayersPage, TeamEditorPage, TeamsPage } from '../ManagementPages'
 import GlobalsPage from './GlobalsPage'
+import PlaystyleTagsPage from './PlaystyleTagsPage'
 import SimulationSettingsPage from './SimulationSettingsPage'
 import UsersPage from './UsersPage'
 import WinratesPage from './WinratesPage'
@@ -22,6 +23,7 @@ export default function AdminPage() {
         <Route path="defaults/players/new" element={<PlayerEditorPage scope={DEFAULTS_SCOPE} />} />
         <Route path="defaults/players/:playerId" element={<PlayerEditorPage scope={DEFAULTS_SCOPE} />} />
         <Route path="defaults/coaches" element={<CoachesPage scope={DEFAULTS_SCOPE} />} />
+        <Route path="playstyle-tags" element={<PlaystyleTagsPage />} />
         <Route path="simulation" element={<SimulationSettingsPage />} />
         <Route path="globals" element={<GlobalsPage />} />
         <Route path="users" element={<UsersPage />} />

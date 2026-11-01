@@ -8,6 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import require_admin
+from app.api.management import get_optional_riot_client
+from app.integrations.riot import challenges
+from app.integrations.riot.errors import RiotError
 from app.models import User
 from app.schemas.admin import MatchupChangesIn, SimulationSettingsIn
 from app.schemas.management import CoachIn, PlayerIn, TeamIn
@@ -15,9 +18,10 @@ from app.services import matchup_service as svc
 from app.services import simulation_settings_service as sim_settings
 from app.services import team_management_service as teams
 
-from app.schemas.admin import MatchupChangesIn, PasswordResetIn, SimulationSettingsIn
+from app.schemas.admin import MatchupChangesIn, PasswordResetIn, PlaystyleTagIn, SimulationSettingsIn
 from app.services import matchup_service as svc
 from app.services import simulation_settings_service as sim_settings
+from app.services import playstyle_service as playstyle
 from app.services import user_admin_service as users
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
@@ -148,3 +152,39 @@ def reset_user_password(user_id: int, body: PasswordResetIn, db: Session = Depen
     log.info("admin_password_reset admin_id=%s user_id=%s", user.id, user_id)
     return Response(status_code=204)
 
+
+# ---------------------------------------------------------- playstyle tags
+@router.get("/playstyle-tags")
+def list_playstyle_tags(db: Session = Depends(get_db)):
+    return playstyle.list_all(db)
+
+
+@router.get("/playstyle-tags/options")
+def playstyle_tag_options(client=Depends(get_optional_riot_client)):
+    """Pickers for the tag editor. The challenge list comes from Riot when a key is set (cached for a day)."""
+    if client is None:
+        return playstyle.options(None, "Riot import is not set up, so challenges can only be added by id.")
+    try:
+        listed = challenges.load(lambda: client.challenges_config("NA1"))
+    except RiotError as exc:
+        return playstyle.options(None, f"Could not load Riot's challenge list: {exc.message}")
+    return playstyle.options(listed)
+
+
+@router.post("/playstyle-tags", status_code=201)
+def create_playstyle_tag(body: PlaystyleTagIn, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    log.info("admin %s created playstyle tag %s", user.username, body.key)
+    return playstyle.create(db, body, user.id)
+
+
+@router.put("/playstyle-tags/{tag_id}")
+def update_playstyle_tag(tag_id: int, body: PlaystyleTagIn, db: Session = Depends(get_db),
+                         user: User = Depends(require_admin)):
+    log.info("admin %s updated playstyle tag %s", user.username, body.key)
+    return playstyle.update(db, tag_id, body, user.id)
+
+
+@router.delete("/playstyle-tags/{tag_id}")
+def delete_playstyle_tag(tag_id: int, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    log.info("admin %s deleted playstyle tag %s", user.username, tag_id)
+    return playstyle.delete(db, tag_id)

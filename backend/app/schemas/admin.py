@@ -19,3 +19,20 @@ class SimulationSettingsIn(BaseModel):
 
 class PasswordResetIn(BaseModel):
     password: str = Field(min_length=8, max_length=128)   # same rule as sign-up
+
+
+class PlaystyleEffectIn(BaseModel):
+    hook: str = Field(max_length=32)
+    value: float
+
+
+class PlaystyleTagIn(BaseModel):
+    key: str = Field(min_length=2, max_length=32)
+    label: str = Field(min_length=1, max_length=40)
+    description: str = Field(default="", max_length=400)
+    polarity: str
+    source: str
+    rule: dict
+    effects: list[PlaystyleEffectIn] = Field(max_length=4)
+    enabled: bool = True
+    sort_order: int = Field(default=0, ge=0, le=100000)

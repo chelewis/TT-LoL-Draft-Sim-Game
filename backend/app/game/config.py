@@ -211,6 +211,34 @@ SIMULATION_CONFIG: dict[str, Any] = {
     },
 }
 
+# Playstyle tag effects (spec "Playstyle tags"). Admins build tags out of these hooks; a new kind of effect needs
+# an entry here and code at the one place the engine applies it. Every tag effect on a player is summed per hook
+# and clamped to +/-cap. `range` limits a single effect's value.
+#   multiplier: the number the hook names is multiplied by (1 + value)
+#   reduction:  the penalty the hook names is multiplied by (1 - value); 1 removes it, negative makes it worse
+PLAYSTYLE_HOOKS: dict[str, dict[str, Any]] = {
+    "lane_score": {"kind": "multiplier", "range": [-0.10, 0.10], "cap": 0.06, "label": "Lane phase score",
+                   "help": "The player's lane score in the lane phase."},
+    "initiative": {"kind": "multiplier", "range": [-0.10, 0.10], "cap": 0.08, "label": "Fight initiative",
+                   "help": "The player's aggression when working out which team starts the next fight."},
+    "objective": {"kind": "multiplier", "range": [-0.10, 0.10], "cap": 0.06, "label": "Objective control",
+                  "help": "The player's awareness + positioning when contesting dragons, barons and towers."},
+    "tower": {"kind": "multiplier", "range": [-0.10, 0.10], "cap": 0.06, "label": "Tower trades",
+              "help": "Extra objective control, only when contesting towers."},
+    "cs_rate": {"kind": "multiplier", "range": [-0.10, 0.10], "cap": 0.08, "label": "CS per minute",
+                "help": "How fast the player farms."},
+    "fight_perf": {"kind": "multiplier", "range": [-0.10, 0.10], "cap": 0.06, "label": "Fight performance",
+                   "help": "The player's strength in skirmishes and teamfights."},
+    "survival": {"kind": "multiplier", "range": [-0.15, 0.15], "cap": 0.10, "label": "Survival in fights",
+                 "help": "Positive: less likely to be the one who dies in a lost fight. Negative: more likely."},
+    "off_pool_penalty": {"kind": "reduction", "range": [-1.0, 1.0], "cap": 1.0,
+                         "label": "Penalty for champions outside the pool",
+                         "help": "1 removes the Vulnerable comfort penalty, 0.5 halves it, -0.5 makes it 50% worse."},
+    "pool_best_bonus": {"kind": "multiplier", "range": [-0.5, 0.5], "cap": 0.5, "label": "Best champion bonus",
+                        "help": "The comfort bonus on the champion at the top of the player's pool."},
+}
+PLAYSTYLE_MAX_TAGS = 5
+
 _SCALING_LABELS = {"1": "Early game champions", "3": "Late game champions"}
 _PHASE_LABELS = {"lane": "Lane phase", "early": "Early game", "mid": "Mid game", "late": "Late game",
                  "overtime": "Overtime"}

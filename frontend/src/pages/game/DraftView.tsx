@@ -13,6 +13,8 @@ import { useChampions, useCountdown, usePlayers } from '../../hooks/useData'
 import { useTurnAlert } from '../../hooks/useTurnAlert'
 import { alertsState, disableAlerts, disablePullBack, enableAlerts, enablePullBack, pullBackState, turnAlertKey } from '../../lib/alerts'
 import { LANE_LABEL, TIER_LABEL, TIER_MODIFIER, comfortTier, isHidden, isSolo, rankLabel, roleLabel, scalingLabel } from '../../lib/format'
+import RiotBadge from '../../components/RiotBadge'
+import TagChips from '../../components/TagChips'
 import { lineupAssignments, swapLanes, type Lineup, type SwapKind } from '../../lib/lineup'
 import { isSoundOn, playSound, setSoundOn } from '../../lib/sound'
 
@@ -716,7 +718,14 @@ function PlayerCard({ player, up, game, byId, onClose }: { player: RosterPlayer;
         <>
           <p className="cs-player-note">
             {[roleLabel(player), player.region, `age ${player.age}`, player.riot?.rank && rankLabel(player.riot.rank)].filter(Boolean).join(' · ')}
+            {' '}<RiotBadge riot={player.riot} />
           </p>
+          {!!player.tags?.length && (
+            <>
+              <div className="cs-swap-group">Playstyle</div>
+              <div className="tag-list"><TagChips tags={player.tags} /></div>
+            </>
+          )}
           <div className="cs-swap-group">Stats · {player.stat_total} / {player.stat_budget}</div>
           <dl className="cs-player-stats">
             {PLAYER_STATS.map((s) => (

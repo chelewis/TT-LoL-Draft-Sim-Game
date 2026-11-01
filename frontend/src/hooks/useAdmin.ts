@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
-import type { AdminUser, MatchupKind, MatchupMatrix, SimulationSettings } from '../api/types'
+import type { AdminPlaystyleTag, AdminUser, MatchupKind, MatchupMatrix, PlaystyleOptions, SimulationSettings } from '../api/types'
 import { toChanges, type Pending } from '../lib/matchups'
 
 const matchupsKey = (kind: MatchupKind) => ['admin', 'matchups', kind]
@@ -74,3 +74,39 @@ export function useResetPassword() {
   })
 }
 
+
+// ------------------------------------------------------------ playstyle tags
+const playstyleKey = ['admin', 'playstyle-tags']
+
+export const usePlaystyleTags = () =>
+  useQuery({ queryKey: playstyleKey, queryFn: () => api<AdminPlaystyleTag[]>('/admin/playstyle-tags') })
+
+export const usePlaystyleOptions = () =>
+  useQuery({ queryKey: [...playstyleKey, 'options'], queryFn: () => api<PlaystyleOptions>('/admin/playstyle-tags/options'), staleTime: Infinity })
+
+export type PlaystyleTagBody = Omit<AdminPlaystyleTag, 'id' | 'players'>
+
+/** Create (no id) or update a tag; resolves once the list has been reloaded. */
+export function useSavePlaystyleTag() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, body }: { id?: number; body: PlaystyleTagBody }) => {
+      const saved = id
+        ? await api<AdminPlaystyleTag>(`/admin/playstyle-tags/${id}`, { method: 'PUT', body })
+        : await api<AdminPlaystyleTag>('/admin/playstyle-tags', { body })
+      await qc.invalidateQueries({ queryKey: playstyleKey })
+      return saved
+    },
+  })
+}
+
+export function useDeletePlaystyleTag() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const res = await api<{ deleted: boolean; disabled: boolean; players: number }>(`/admin/playstyle-tags/${id}`, { method: 'DELETE' })
+      await qc.invalidateQueries({ queryKey: playstyleKey })
+      return res
+    },
+  })
+}

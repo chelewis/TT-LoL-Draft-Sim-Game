@@ -2,13 +2,16 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
-import type { Coach, Lane, Player, RiotPreview, Team } from '../api/types'
+import type { Coach, ImportCheck, Lane, Player, PlaystyleTag, RiotPreview, Team } from '../api/types'
 import { LANES, STYLES } from '../api/types'
 import { ErrorNotice, Loading } from '../components/common'
 import { ChampionIcon } from '../components/ChampionArt'
+import RiotBadge from '../components/RiotBadge'
+import TagChips, { TagChip } from '../components/TagChips'
 import { OverBudgetBadge } from '../components/TeamCard'
 import { useChampionFit, useChampions, useCoaches, usePlayers, useTeams } from '../hooks/useData'
-import { LANE_LABEL, TIER_LABEL, isHidden, rankLabel, riotSourceLabel, riotSourceTag, roleLabel, titleCase } from '../lib/format'
+import { LANE_LABEL, TIER_LABEL, editedFieldsText, isHidden, rankLabel, riotSourceLabel, riotSourceTag, roleLabel, titleCase } from '../lib/format'
+import { MAX_TAGS, sortTags } from '../lib/playstyle'
 import { useRiotStatus } from './RiotImportPage'
 
 interface GameConfig {
@@ -253,9 +256,10 @@ export function PlayersPage({ scope = USER_SCOPE }: { scope?: Scope }) {
 
   const row = (p: Player) => (
     <tr key={p.id}>
-      <td>{p.name} {p.riot && <span className="badge" title="Imported from a Riot account (unverified)">Riot {p.riot.game_name}#{p.riot.tag_line}</span>}
+      <td>{p.name} <RiotBadge riot={p.riot} showAccount />
         {p.riot?.rank && <span className="badge" title={`${riotSourceLabel(p.riot.rank.queue)} rank when imported: ${rankLabel(p.riot.rank, true)}`}>{rankLabel(p.riot.rank)}</span>}
-        {p.riot && riotSourceTag(p.riot.data_source) && <span className="badge badge-warn" title={`Stats come from ${riotSourceLabel(p.riot.data_source)} (${p.riot.games_used ?? '?'} games), not solo queue`}>⚠ {riotSourceTag(p.riot.data_source)}</span>} {p.over_budget_by > 0 && <span className="badge badge-warn" title="Above the soft stat ceiling">⚠ +{p.over_budget_by}</span>}</td>
+        {p.riot && riotSourceTag(p.riot.data_source) && <span className="badge badge-warn" title={`Stats come from ${riotSourceLabel(p.riot.data_source)} (${p.riot.games_used ?? '?'} games), not solo queue`}>⚠ {riotSourceTag(p.riot.data_source)}</span>} {p.over_budget_by > 0 && <span className="badge badge-warn" title="Above the soft stat ceiling">⚠ +{p.over_budget_by}</span>}
+        <TagChips tags={p.tags} /></td>
       <td>{roleLabel(p)}</td>
       <td>{p.aggr}/{p.aware}/{p.pos}/{p.dmg}/{p.cs}</td>
       <td>{p.stat_total}</td>
@@ -315,6 +319,11 @@ export function PlayerEditorPage({ scope = USER_SCOPE }: { scope?: Scope }) {
   const [riotNotes, setRiotNotes] = useState<string[]>([])
   const [riotSource, setRiotSource] = useState<{ queue: string; games: number } | null>(null)
   const [riotRank, setRiotRank] = useState<RiotPreview['analysis']['rank'] | null>(null)
+  // playstyle tags: the keys kept, and the tags the Riot account earned to choose from
+  const [tags, setTags] = useState<string[]>([])
+  const [earned, setEarned] = useState<PlaystyleTag[]>([])
+  // what the Riot import produced: changing role, stats, imported pool champions or weaknesses marks the player edited
+  const [baseline, setBaseline] = useState<ImportCheck['original']>(null)
   const location = useLocation()
   const riotStatus = useRiotStatus()
 
@@ -330,6 +339,11 @@ export function PlayerEditorPage({ scope = USER_SCOPE }: { scope?: Scope }) {
     setRiotNotes(draft.analysis.notes)
     setRiotSource({ queue: draft.analysis.source.queue, games: draft.analysis.source.games })
     setRiotRank(draft.analysis.rank)
+    setEarned(draft.analysis.tags?.earned ?? [])
+    setTags(d.tags ?? [])
+    const negative = new Set((draft.analysis.tags?.earned ?? []).filter((t) => t.polarity === 'negative').map((t) => t.key))
+    setBaseline({ role: d.role, aggr: d.aggr, aware: d.aware, pos: d.pos, dmg: d.dmg, cs: d.cs, pool: d.pool,
+      negative_tags: (d.tags ?? []).filter((k) => negative.has(k)) })
   }
 
   useEffect(() => {
@@ -338,6 +352,9 @@ export function PlayerEditorPage({ scope = USER_SCOPE }: { scope?: Scope }) {
     setName(p.name); setRole(p.role); setSecondary(p.secondary_role ?? ''); setAge(p.age); setRegion(p.region)
     setStats({ aggr: p.aggr, aware: p.aware, pos: p.pos, dmg: p.dmg, cs: p.cs })
     setPool(p.pool.map(String))
+    setTags((p.tags ?? []).map((t) => t.key))
+    setEarned(p.earned_tags ?? [])
+    setBaseline(p.riot?.import_check?.original ?? null)
   }, [existing.data])
 
   useEffect(() => {
@@ -357,10 +374,19 @@ export function PlayerEditorPage({ scope = USER_SCOPE }: { scope?: Scope }) {
   const budget = riotRank?.budget ?? existing.data?.stat_budget ?? config.data?.player_stat_budget ?? 32
   const over = total - budget
   const sorted = useMemo(() => [...(champs.data ?? [])].sort((a, b) => a.name.localeCompare(b.name)), [champs.data])
+  const changed = baseline ? [
+    ...(role !== baseline.role ? ['role'] : []),
+    ...(['aggr', 'aware', 'pos', 'dmg', 'cs'] as const).filter((k) => stats[k] !== baseline[k]),
+    ...(baseline.pool.some((id, i) => pool[i] !== String(id)) ? ['pool'] : []),
+    ...(baseline.negative_tags.some((k) => !tags.includes(k)) ? ['tags'] : []),
+  ] : []
+  const champName = (id: number) => champs.data?.find((c) => c.id === id)?.name ?? String(id)
 
   const save = useMutation({
     mutationFn: () => {
-      const body = { name, role, secondary_role: secondary || null, age, region, ...stats, pool: pool.map(Number), riot_ref: riotRef }
+      const linked = Boolean(riotRef || existing.data?.riot)
+      const body = { name, role, secondary_role: secondary || null, age, region, ...stats, pool: pool.map(Number), riot_ref: riotRef,
+        ...(linked && !scope.defaults ? { tags } : {}) }
       return isNew ? api<Player>(`${scope.api}/players`, { body }) : api<Player>(`${scope.api}/players/${playerId}`, { method: 'PUT', body })
     },
     onSuccess: () => { invalidate(); navigate(`${scope.home}/players`) },
@@ -395,13 +421,19 @@ export function PlayerEditorPage({ scope = USER_SCOPE }: { scope?: Scope }) {
               : <p className="muted small">Source: {riotSourceLabel(queue)}{games ? ` · ${games} games` : ''}</p>
           })()}
           {riotNotes.map((n) => <div key={n} className="notice notice-warn">{n}</div>)}
+          {!riotRef && existing.data?.riot?.import_check?.status === 'unverified' && (
+            <div className="notice notice-warn">This import can't be verified (it was imported before checks existed, or its record changed). Refresh it from Riot to verify it.</div>
+          )}
+          {changed.length > 0 ? (
+            <div className="notice notice-warn">Saving will mark this player as <strong>edited</strong> (changed from the Riot import: {editedFieldsText(changed)}). Name, age, region and secondary role are free to change.</div>
+          ) : baseline && <p className="small muted">✓ Matches the Riot import. Name, age, region and secondary role can change without affecting this.</p>}
           {riotRef && !isNew && <p className="small muted">Refreshed values are loaded below. Press Save to keep them.</p>}
         </div>
       )}
       <div className="card stack">
         <div className="grid two">
           <label>Name<input value={name} onChange={(e) => setName(e.target.value)} maxLength={40} required /></label>
-          <label>Primary role
+          <label>Primary role{baseline && role !== baseline.role && <span className="small muted"> (imported {LANE_LABEL[baseline.role]})</span>}
             <select value={role} onChange={(e) => { const l = e.target.value as Lane; setRole(l); if (l === secondary) setSecondary('') }}>{LANES.map((l) => <option key={l} value={l}>{LANE_LABEL[l]}</option>)}</select>
           </label>
           <label>Secondary role
@@ -414,6 +446,9 @@ export function PlayerEditorPage({ scope = USER_SCOPE }: { scope?: Scope }) {
           <label>Region<input value={region} onChange={(e) => setRegion(e.target.value)} maxLength={16} /></label>
         </div>
       </div>
+      {!scope.defaults && (riotRef || existing.data?.riot) && (
+        <PlaystyleTagsCard earned={earned} tags={tags} setTags={setTags} />
+      )}
       <div className="card stack">
         <div className="row between wrap">
           <h2>Stats</h2>
@@ -421,7 +456,7 @@ export function PlayerEditorPage({ scope = USER_SCOPE }: { scope?: Scope }) {
         </div>
         <div className="grid stats-inputs">
           {([['aggr', 'Aggression'], ['aware', 'Awareness'], ['pos', 'Positioning'], ['dmg', 'Damage'], ['cs', 'Farming (CS)']] as const).map(([key, label]) => (
-            <label key={key}>{label}: <strong>{stats[key]}</strong>
+            <label key={key}>{label}: <strong>{stats[key]}</strong>{baseline && stats[key] !== baseline[key] && <span className="small muted"> (imported {baseline[key]})</span>}
               <input type="range" min={1} max={10} value={stats[key]} onChange={(e) => setStat(key, Number(e.target.value))} />
             </label>
           ))}
@@ -436,7 +471,7 @@ export function PlayerEditorPage({ scope = USER_SCOPE }: { scope?: Scope }) {
         <h2>Champion pool</h2>
         <p className="small muted">Exactly five champions. Order matters: the first is this player's best pick. Champions outside the pool play at −10%.</p>
         {pool.map((value, i) => (
-          <label key={i}>{poolLabels[i]}
+          <label key={i}>{poolLabels[i]}{baseline && i < baseline.pool.length && pool[i] !== String(baseline.pool[i]) && <span className="small muted"> (imported {champName(baseline.pool[i])})</span>}
             <select value={value} onChange={(e) => setPool(pool.map((v, j) => (j === i ? e.target.value : v)))} required>
               <option value="">Choose a champion…</option>
               {sorted.map((c) => <option key={c.id} value={c.id} disabled={pool.includes(String(c.id)) && pool[i] !== String(c.id)}>{c.name} ({c.class})</option>)}
@@ -451,6 +486,42 @@ export function PlayerEditorPage({ scope = USER_SCOPE }: { scope?: Scope }) {
         <Link className="button ghost" to={`${scope.home}/players`}>Cancel</Link>
       </div>
     </form>
+  )
+}
+
+/** Choose which earned playstyle tags the player keeps (up to MAX_TAGS). Tags can't be added unless earned. */
+function PlaystyleTagsCard({ earned, tags, setTags }: { earned: PlaystyleTag[]; tags: string[]; setTags: (t: string[]) => void }) {
+  const byKey = new Map(earned.map((t) => [t.key, t]))
+  const kept = tags.map((k) => byKey.get(k)).filter((t): t is PlaystyleTag => Boolean(t))
+  const spare = sortTags(earned.filter((t) => !tags.includes(t.key)))
+  const full = kept.length >= MAX_TAGS
+  return (
+    <div className="card stack">
+      <div className="row between wrap">
+        <h2>Playstyle tags</h2>
+        <span className="badge">{kept.length} / {MAX_TAGS}</span>
+      </div>
+      <p className="small muted">
+        Earned from this Riot account: ▲ strengths from its challenge levels, ▼ weaknesses from its recent games. Each tag nudges the simulation a little (hover for details).
+        You can remove any tag, including weaknesses, and only add tags the account earned.
+      </p>
+      {earned.length === 0 ? <p className="muted small">This account has not earned any playstyle tags.</p> : (
+        <>
+          <div className="tag-list">
+            {kept.length === 0 && <span className="muted small">No tags kept.</span>}
+            {sortTags(kept).map((t) => <TagChip key={t.key} tag={t} onRemove={() => setTags(tags.filter((k) => k !== t.key))} />)}
+          </div>
+          {spare.length > 0 && (
+            <div className="stack">
+              <span className="muted small">Also earned{full ? ` (remove one to add another; ${MAX_TAGS} at most)` : ''}:</span>
+              <div className="tag-list">
+                {spare.map((t) => <TagChip key={t.key} tag={t} onAdd={() => setTags([...tags, t.key])} addDisabled={full} />)}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
   )
 }
 

@@ -47,8 +47,11 @@ class FakeRiotClient:
     """
 
     def __init__(self, games=14, champion_cycle=(103, 266, 84, 12, 32, 34, 62, 9999), mine=None, lane="MIDDLE",
-                 flex=0, normal=0, aram=0, remakes=None, rank="GOLD"):
+                 flex=0, normal=0, aram=0, remakes=None, rank="GOLD", challenges=None):
+        # `challenges`: {challenge id: level or (level, percentile)} for lol-challenges-v1, or "fail" to make that
+        # endpoint error. The default account has no challenge progress.
         self.calls: list[str] = []
+        self.challenges = challenges if challenges is not None else {}
         self.ranks = rank if isinstance(rank, dict) else {"SOLO": rank, "FLEX": rank}
         self.accounts = {("faker", "kr1"): {"puuid": "puuid-faker", "gameName": "Faker", "tagLine": "KR1"}}
         self.queue_games = {"420": games, "440": flex, "normal": normal}
@@ -107,6 +110,25 @@ class FakeRiotClient:
         types = {"SOLO": "RANKED_SOLO_5x5", "FLEX": "RANKED_FLEX_SR"}
         return [{"queueType": types[q], "tier": tier, "rank": "II", "leaguePoints": 45, "wins": 60, "losses": 40}
                 for q, tier in self.ranks.items() if tier]
+
+    def challenges_player_data(self, platform, puuid):
+        self._log("challenges")
+        if self.challenges == "fail":
+            from app.integrations.riot.errors import RiotUnavailable
+            raise RiotUnavailable("Riot's servers are having problems. Please try again later.")
+        rows = []
+        for cid, level in self.challenges.items():
+            level, percentile = level if isinstance(level, tuple) else (level, 0.05)
+            rows.append({"challengeId": cid, "level": level, "percentile": percentile, "value": 1000})
+        return {"totalPoints": {"level": "GOLD", "current": 5000, "max": 50000, "percentile": 0.3},
+                "categoryPoints": {}, "challenges": rows, "preferences": {}}
+
+    def challenges_config(self, platform):
+        self._log("challenges_config")
+        return [{"id": 203301, "state": "ENABLED", "thresholds": {"IRON": 15, "DIAMOND": 2000, "CHALLENGER": 5000},
+                 "localizedNames": {"en_US": {"name": "Solo Bolo", "description": "Get solo kills"}}},
+                {"id": 1, "state": "DISABLED", "thresholds": {},
+                 "localizedNames": {"en_US": {"name": "Old one", "description": ""}}}]
 
     def ddragon_json(self, url):
         if url.endswith("versions.json"):
