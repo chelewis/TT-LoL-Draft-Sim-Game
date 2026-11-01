@@ -72,6 +72,7 @@ def _performance(match: Match, p: PlayerState) -> float:
     base = (p.lane_score * p.lane_unscaled_ratio + p.gold) / 2.0
     base *= scaling_multiplier(p.champion, match.phase, match.config)
     base *= dmg_stat_multiplier(p, match.config)
+    base *= 1.0 + p.tag("fight_perf")
     return max(1.0, base * (1.0 + skill_check(p, match.rng, match.config) / 100.0))
 
 
@@ -216,7 +217,8 @@ def _resolve_pair(match: Match, killers: list[PlayerState], victims: list[Player
     if count <= 0:
         return []
     total = sum(victim_perf.values())
-    death_weights = {p.lane: max(total - victim_perf[p.lane], 1e-9) for p in victims}
+    # a `survival` tag makes a player less (or, negative, more) likely to be the one who dies
+    death_weights = {p.lane: max((total - victim_perf[p.lane]) * (1.0 - p.tag("survival")), 1e-9) for p in victims}
     dying = _choose_weighted_distinct(match.rng, victims, death_weights, count)
     return [(match.rng.choices(killers, weights=[killer_perf[k.lane] for k in killers], k=1)[0], v)
             for v in dying]

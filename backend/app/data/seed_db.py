@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.data.champion_sync import log_report, sync_champions
 from app.data.loader import SeedData, SeedDataError, load_seed_data
 from app.data.matchup_seed import seed_matchups
+from app.services.playstyle_service import seed_tags
 from app.models import Champion, Coach, Player, PlayerPoolEntry, Team, TeamRosterSlot
 
 log = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ def seed_database(db: Session, data: SeedData | None = None) -> None:
 
     log_report(sync_champions(db, data))
     seed_matchups(db)
+    seed_tags(db)
 
     # seed defaults only into an empty database: admins may since have edited or deleted any of them
     if any(db.scalar(select(func.count()).select_from(m).where(m.owner_user_id.is_(None)))

@@ -1,5 +1,7 @@
 import { LANES, type HiddenPlayer, type Lane, type Player, type Side, type Team } from '../api/types'
 import { LaneIcon } from './ChampionArt'
+import RiotBadge from './RiotBadge'
+import TagChips from './TagChips'
 import { LANE_LABEL, isHidden, overBudgetNotice, rankLabel, riotSourceLabel, riotSourceTag, titleCase } from '../lib/format'
 
 export function OverBudgetBadge({ team }: { team: Pick<Team, 'over_budget' | 'over_budget_players'> }) {
@@ -46,9 +48,7 @@ function PlayerRow({ lane, player }: { lane: Lane; player: Player | HiddenPlayer
       <td className="muted" title={LANE_LABEL[lane]}><LaneIcon lane={lane} size={16} /></td>
       <td>
         {player.name}
-        {player.riot && (
-          <span className="badge" title={`Imported from Riot: ${player.riot.game_name}#${player.riot.tag_line} (unverified)`}>Riot</span>
-        )}
+        <RiotBadge riot={player.riot} />
         {player.riot?.rank && (
           <span className="badge" title={`${riotSourceLabel(player.riot.rank.queue)} rank when imported: ${rankLabel(player.riot.rank, true)}`}>{rankLabel(player.riot.rank)}</span>
         )}
@@ -60,6 +60,7 @@ function PlayerRow({ lane, player }: { lane: Lane; player: Player | HiddenPlayer
             ⚠ +{player.over_budget_by}
           </span>
         )}
+        <TagChips tags={player.tags} />
       </td>
       <td title="Aggression">{player.aggr}</td>
       <td title="Awareness">{player.aware}</td>

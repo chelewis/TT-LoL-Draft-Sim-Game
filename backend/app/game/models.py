@@ -77,6 +77,7 @@ class PlayerSpec:
     dmg: int
     cs: int
     pool: tuple[int, ...]  # ordered champion ids, best first
+    tag_effects: tuple[tuple[str, float], ...] = ()  # (hook, value) from the player's playstyle tags
 
     @property
     def stat_total(self) -> int:

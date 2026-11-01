@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.clock import utcnow
-from app.core.database import Base
+from app.core.database import Base, JSONType
 
 
 class Coach(Base):
@@ -61,6 +61,12 @@ class Player(Base):
     riot_rank_wins: Mapped[int | None] = mapped_column(Integer)
     riot_rank_losses: Mapped[int | None] = mapped_column(Integer)
     riot_imported_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # playstyle tags: every tag the Riot import earned ([{key, polarity, evidence}], from the signed preview token)
+    # and the keys the user kept (at most PLAYSTYLE_MAX_TAGS, each one earned)
+    riot_earned_tags: Mapped[list | None] = mapped_column(JSONType)
+    playstyle_tags: Mapped[list | None] = mapped_column(JSONType)
+    # signed record of what the Riot import produced (services/import_seal.py); copy it with the player
+    riot_seal: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 

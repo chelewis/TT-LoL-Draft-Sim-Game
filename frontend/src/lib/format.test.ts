@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { comfortTier, draftRules, isSolo, formatDuration, formatMetric, isSoloSource, matchupText, overBudgetNotice, rankLabel, remainingSeconds, riotSourceLabel, riotSourceTag, roleLabel, scalingLabel } from './format'
+import { comfortTier, editedFieldsText, importCheckBadge, draftRules, isSolo, formatDuration, formatMetric, isSoloSource, matchupText, overBudgetNotice, rankLabel, remainingSeconds, riotSourceLabel, riotSourceTag, roleLabel, scalingLabel } from './format'
 
 describe('scalingLabel', () => {
   it('names champion scaling scores', () => {
@@ -124,5 +124,24 @@ describe('roleLabel', () => {
     expect(roleLabel({ role: 'TOP', secondary_role: null })).toBe('Top')
     expect(roleLabel({ role: 'TOP' })).toBe('Top')
     expect(roleLabel({ role: 'TOP', secondary_role: 'MID' })).toBe('Top / Mid')
+  })
+})
+
+describe('importCheckBadge', () => {
+  const base = { edited_fields: [] as string[], original: null }
+  it('marks genuine unedited imports', () => {
+    expect(importCheckBadge({ ...base, status: 'unedited' })).toMatchObject({ text: 'Riot ✓', tone: 'ok' })
+  })
+  it('lists what was edited', () => {
+    const b = importCheckBadge({ ...base, status: 'edited', edited_fields: ['aggr', 'pool', 'tags'] })
+    expect(b.tone).toBe('warn')
+    expect(b.title).toContain('aggression, champion pool, weakness tags')
+  })
+  it('flags imports that cannot be verified, and old snapshots without a check', () => {
+    expect(importCheckBadge({ ...base, status: 'unverified' }).text).toBe('Riot · unverified')
+    expect(importCheckBadge(undefined)).toMatchObject({ text: 'Riot', tone: 'plain' })
+  })
+  it('words edited fields', () => {
+    expect(editedFieldsText(['role', 'cs'])).toBe('role, farming')
   })
 })

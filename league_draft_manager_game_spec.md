@@ -441,6 +441,8 @@ Based on where the assigned champion sits in the player's pool:
 
 A player's pool is always exactly 5 champions, ordered. Only the order matters for the boost; any champion outside the pool gets the −10% penalty.
 
+Playstyle tags (§19.1) can change these values for one player: `off_pool_penalty` scales the Vulnerable penalty by `(1 − value)` (Champion Ocean halves it; One Trick makes it 50% worse) and `pool_best_bonus` scales the Best bonus by `(1 + value)`. The adjusted comfort feeds both the lane score and the fight skill check (§9.3).
+
 **Unit correction required.** The reference code stores these as whole numbers and applies `score + score * comfortBuff`, which multiplies scores by 41× / 26× / 11× / −9×. That is clearly a bug (percent values used as fractions). The port must treat them as **percentages** (`+0.40`, `+0.25`, `+0.10`, `−0.10`) unless deliberate balancing says otherwise.
 
 ### 9.3 Difficulty and skill check
@@ -998,6 +1000,54 @@ Users can turn a real League account into a game player. This is an optional fea
 ### Errors shown to users
 
 Unknown Riot ID (404), fewer than 10 recent games in any single queue (422), bad or expired server key (503), Riot or network trouble (502), rate limited (429), unknown region/role (400).
+
+### 19.1 Playstyle tags
+
+Imported players can carry up to **5 playstyle tags** that nudge the simulation for that player. Hand-made and default players have none.
+
+| | Strengths (▲ positive) | Weaknesses (▼ negative) |
+|---|---|---|
+| Earned from | The account's **Riot challenge levels** (`lol-challenges-v1` player-data, 1 extra request per import): the tag is earned when any of its listed challenges is at or above its minimum level (starter tags: Diamond) | The player's **averages over the imported games** (the same games and lane as the stats): a metric compared with a threshold, optionally per lane, or "never earned" in a lane |
+| Starter tags | Playmaker, Duelist, Objective Hunter, Vision Controller, Farmer, Survivor, Teamfighter, Tower Breaker, Champion Ocean | Reckless, Passive, Poor Farmer, Map Blind, One Trick |
+
+- **Suggestion and choice.** The preview lists every earned tag with why it was earned and suggests up to 5: weaknesses first, then strengths by challenge level (then percentile). In the editor the user may remove any tag, weaknesses included, and add other earned tags, but never a tag the account did not earn. The earned list travels in the signed `riot_ref` token and is stored on the player (`riot_earned_tags`); the kept keys are `playstyle_tags`. A refresh keeps the chosen tags that are still earned, or falls back to the suggestion.
+- **If Riot's challenge data cannot be loaded** the import still works; only challenge tags are skipped and a note says so.
+- **Effects.** A tag has one or more effects `{hook, value}`. Hooks are fixed in code (`PLAYSTYLE_HOOKS` in `game/config.py`); each has an allowed range per effect and a cap on a player's combined value:
+
+| Hook | Applies to | Range | Cap |
+|---|---|---|---|
+| `lane_score` | lane-phase score × (1 + v) | ±10% | ±6% |
+| `initiative` | the player's aggr when deciding who starts a fight | ±10% | ±8% |
+| `objective` | the player's aware + pos in objective control | ±10% | ±6% |
+| `tower` | the same, only for tower rolls | ±10% | ±6% |
+| `cs_rate` | CS per minute | ±10% | ±8% |
+| `fight_perf` | fight performance | ±10% | ±6% |
+| `survival` | weight of being the one who dies in a fight × (1 − v) | ±15% | ±10% |
+| `off_pool_penalty` | the Vulnerable comfort penalty × (1 − v) (§9.2) | ±100% | ±100% |
+| `pool_best_bonus` | the Best comfort bonus × (1 + v) | ±50% | ±50% |
+
+  Tags do not count towards the stat ceiling. A player without tags simulates exactly as before.
+- **Snapshots.** A game snapshot copies each player's tags with their effects, so editing or disabling a tag later never changes a game already started. `hide_player_data` hides tags along with the other player data.
+- **Admin.** Admin → Playstyle Tags lists, creates, edits and deletes tags: label, key, strength/weakness, source (challenges with a search picker over Riot's challenge list, cached for a day; or a recent-games metric with per-lane thresholds), effects, order and enabled. Deleting a tag that players keep disables it instead. The starter tags are added when the table is empty.
+
+### 19.2 Import seal and edit detection
+
+Before players and teams can be shared, every imported player must show whether it is a genuine Riot import and whether its strength was changed since.
+
+- **Seal.** The preview's signed `riot_ref` token now also carries the import's **baseline**: primary role, the five stats, the imported pool champions (best first; fewer than 5 when some don't exist in the game) and the suggested tags. Saving with a `riot_ref` stores a **seal** on the player (`riot_seal`): an HS256 JWT over the Riot account (puuid, region, rank tier, source) and that baseline. It is signed with `LDM_RIOT_SEAL_KEY`, or `LDM_SECRET_KEY` when unset; keep the key stable, because changing it makes every seal unverifiable.
+- **Check.** Each player view carries `riot.import_check = {status, edited_fields, original}`, recomputed on every read:
+
+| Status | Meaning |
+|---|---|
+| `unedited` | The seal verifies, belongs to this account and rank, and nothing below was changed |
+| `edited` | The seal verifies, but `edited_fields` lists what changed: `role`, `aggr`/`aware`/`pos`/`dmg`/`cs`, `pool`, `tags` |
+| `unverified` | Linked to Riot but no valid seal: imported before seals existed, a seal that doesn't match the account or rank, or a changed key. A refresh from Riot fixes it |
+| `none` | Not a Riot import (the player view's `riot` is null) |
+
+- **Rules.** Free to change: name, age, region, secondary role, and any flavour text added later. An edit is: a different primary role or stat; changing or reordering a pool champion the import chose (filling slots it left empty is fine); dropping a suggested ▼ weakness tag (dropping a ▲ strength, or swapping earned tags, is fine). Changing a value back makes the player unedited again, and a refresh from Riot gives a new baseline.
+- **Where shown.** "Riot ✓" (unedited), "Riot · edited" or "Riot · unverified" badges on the player list, team cards and the draft player panel, with details on hover. The editor shows each changed field's imported value and warns before saving an edit. `riot.verified` still means account *ownership* (always false until Riot Sign On).
+- **Games and hidden data.** Snapshots copy the check as it was at draft start. `hide_player_data` hides it along with the rest of `riot`.
+- **Sharing (future).** The seal binds the account and values, not the player row: a shared copy stays verifiable as long as `riot_seal` and the `riot_*` columns are copied with it.
 
 ---
 

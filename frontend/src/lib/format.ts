@@ -1,4 +1,4 @@
-import type { Lane, Player, RiotRank, Team, HiddenPlayer } from '../api/types'
+import type { HiddenPlayer, ImportCheck, Lane, Player, RiotRank, Team } from '../api/types'
 
 export const LANE_LABEL: Record<Lane, string> = {
   TOP: 'Top',
@@ -64,6 +64,31 @@ export function riotSourceLabel(source: string | null | undefined): string {
 /** Short tag for badges, only for non-solo sources (empty for solo). */
 export function riotSourceTag(source: string | null | undefined): string {
   return isSoloSource(source) ? '' : (RIOT_SOURCE_SHORT[source as string] ?? 'Other')
+}
+
+const EDITED_FIELD_LABEL: Record<string, string> = {
+  role: 'role', aggr: 'aggression', aware: 'awareness', pos: 'positioning', dmg: 'damage', cs: 'farming',
+  pool: 'champion pool', tags: 'weakness tags',
+}
+
+/** The fields that make a Riot import "edited", in words: "aggression, champion pool". */
+export function editedFieldsText(fields: string[]): string {
+  return fields.map((f) => EDITED_FIELD_LABEL[f] ?? f).join(', ')
+}
+
+/** Badge text, style and tooltip for a Riot player's import check. */
+export function importCheckBadge(check: ImportCheck | null | undefined): { text: string; tone: 'ok' | 'warn' | 'plain'; title: string } {
+  if (!check) return { text: 'Riot', tone: 'plain', title: 'Imported from a Riot account (not checked for edits)' }
+  switch (check.status) {
+    case 'unedited':
+      return { text: 'Riot ✓', tone: 'ok', title: 'Genuine Riot import; nothing that affects strength was changed' }
+    case 'edited':
+      return { text: 'Riot · edited', tone: 'warn', title: `Imported from Riot, then edited: ${editedFieldsText(check.edited_fields)}` }
+    case 'unverified':
+      return { text: 'Riot · unverified', tone: 'warn', title: "Linked to a Riot account, but the import can't be verified. Refresh it from Riot to check it." }
+    default:
+      return { text: 'Riot', tone: 'plain', title: 'Imported from a Riot account' }
+  }
 }
 
 /** "Emerald II", "Master" or "Unranked"; with `withLp`, "Emerald II · 45 LP". */

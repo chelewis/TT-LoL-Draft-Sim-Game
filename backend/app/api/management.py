@@ -10,7 +10,7 @@ from app.core.dependencies import get_current_user
 from app.game.config import DRAFT_CONFIG, LANES, MANAGEMENT_CONFIG
 from app.models import Champion, Coach, Player, Team, User
 from app.schemas.management import ChampionFitIn, CoachIn, PlayerIn, TeamIn
-from app.services import champion_fit
+from app.services import champion_fit, playstyle_service
 from app.services import team_management_service as svc
 
 router = APIRouter(tags=["management"])
@@ -28,6 +28,12 @@ def public_config(_: User = Depends(get_current_user)):
         "stat_range": m["stat_range"],
         "champion_pool_size": m["champion_pool_size"],
     }
+
+
+@router.get("/playstyle-tags")
+def list_playstyle_tags(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    """Enabled playstyle tags, for labels and tooltips."""
+    return [playstyle_service.public_tag(t) for t in playstyle_service.enabled_tags(db)]
 
 
 @router.get("/champions")
@@ -140,6 +146,14 @@ def get_riot_client():
         yield client
     finally:
         client.close()
+
+
+def get_optional_riot_client():
+    """Dependency: a Riot client, or None when Riot import is not set up (tests override it with a fake)."""
+    if not settings.riot_enabled:
+        yield None
+        return
+    yield from get_riot_client()
 
 
 def _riot_guard():

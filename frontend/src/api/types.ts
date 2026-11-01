@@ -103,6 +103,8 @@ export interface Player {
   stat_budget: number             // this player's soft stat ceiling (higher for high-rank Riot imports)
   over_budget_by: number
   is_default: boolean
+  tags?: PlaystyleTag[]           // playstyle tags in effect (only on Riot imports)
+  earned_tags?: PlaystyleTag[]    // every tag the Riot import earned, to choose from in the editor
   riot?: {
     game_name: string
     tag_line: string
@@ -113,7 +115,82 @@ export interface Player {
     games_used?: number | null
     is_solo_source?: boolean
     rank?: RiotRank | null        // rank at import time; null when unranked or imported before ranks were read
+    import_check?: ImportCheck     // genuine import? edited since? (missing on games started before seals)
   } | null
+}
+
+/** Whether a Riot player is a genuine import and what was changed since (server-signed baseline). */
+export interface ImportCheck {
+  status: 'none' | 'unedited' | 'edited' | 'unverified'
+  edited_fields: string[]          // role, aggr, aware, pos, dmg, cs, pool, tags
+  original: { role: Lane; aggr: number; aware: number; pos: number; dmg: number; cs: number; pool: number[]; negative_tags: string[] } | null
+}
+
+/** One effect of a playstyle tag on the simulation; hooks are listed in lib/playstyle.ts. */
+export interface PlaystyleEffect {
+  hook: string
+  value: number
+}
+
+/** Why a Riot account earned a tag: a challenge level, or an average from its recent games. */
+export interface TagEvidence {
+  source: 'challenge' | 'match'
+  challenge_id?: number
+  challenge_name?: string | null
+  level?: string
+  percentile?: number | null
+  metric?: string
+  label?: string
+  unit?: 'percent' | 'number' | null
+  op?: '>=' | '<='
+  value?: number | null
+  threshold?: number
+}
+
+export interface PlaystyleTag {
+  key: string
+  label: string
+  description: string
+  polarity: 'positive' | 'negative'
+  effects: PlaystyleEffect[]
+  evidence?: TagEvidence | null
+}
+
+/** A tag as admins manage it. */
+export interface AdminPlaystyleTag {
+  id: number
+  key: string
+  label: string
+  description: string
+  polarity: 'positive' | 'negative'
+  source: 'challenge' | 'match'
+  rule: ChallengeRule | MatchRule
+  effects: PlaystyleEffect[]
+  enabled: boolean
+  sort_order: number
+  players: number                // how many players keep it
+}
+
+export interface ChallengeRule {
+  challenges: { id: number; name: string }[]
+  min_level: string
+}
+
+export interface MatchRule {
+  metric: string
+  op: '>=' | '<='
+  value: number | null
+  lanes: Partial<Record<Lane, number | null>>   // lane override; null: the tag does not apply in that lane
+}
+
+export interface PlaystyleOptions {
+  hooks: { hook: string; kind: 'multiplier' | 'reduction'; range: [number, number]; cap: number; label: string; help: string }[]
+  metrics: { metric: string; label: string; unit: 'percent' | 'number'; how: string; benchmarks: Partial<Record<Lane, [number, number]>> | null }[]
+  levels: string[]
+  lanes: Lane[]
+  max_tags: number
+  challenges: { id: number; name: string; description: string; levels: string[] }[]
+  challenges_error: string | null
 }
 
 /** A ranked standing from Riot. Master and above have no division. */
@@ -140,7 +217,7 @@ export interface RiotMetric {
 }
 
 export interface RiotPreview {
-  player: { name: string; role: Lane; secondary_role: Lane | null; age: number; region: string; aggr: number; aware: number; pos: number; dmg: number; cs: number; pool: number[] }
+  player: { name: string; role: Lane; secondary_role: Lane | null; age: number; region: string; aggr: number; aware: number; pos: number; dmg: number; cs: number; pool: number[]; tags?: string[] }
   riot: { game_name: string; tag_line: string; region: string }
   riot_ref: string
   analysis: {
@@ -154,6 +231,7 @@ export interface RiotPreview {
     source: { queue: string; label: string; games: number; is_solo: boolean; tried: Record<string, number> }
     breakdown: Record<string, RiotMetric[]>
     fit: { budget: number; floor: number; total_before: number; total_after: number }
+    tags?: { earned: PlaystyleTag[]; suggested: string[]; challenges_loaded: boolean }
   }
 }
 

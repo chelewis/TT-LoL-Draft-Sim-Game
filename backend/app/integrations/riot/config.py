@@ -81,3 +81,16 @@ RANK_FOR_SOURCE = {"SOLO": ["SOLO"], "FLEX": ["FLEX"], "NORMAL": ["SOLO", "FLEX"
 # Calls per import: 1 account + 1 match list + N matches + 1 rank + 1 mastery. Keep N modest for the 100/2min key.
 MATCH_COUNT = 20
 MIN_GAMES = 10
+
+# Challenges (lol-challenges-v1) earn positive playstyle tags. Levels from lowest to highest; NONE = no progress.
+CHALLENGE_LEVELS = ("NONE", "IRON", "BRONZE", "SILVER", "GOLD", "PLATINUM", "DIAMOND", "MASTER", "GRANDMASTER",
+                    "CHALLENGER")
+
+# Numbers a match-stat playstyle tag can test, besides the METRIC_INFO averages: how varied the player's
+# champions were over the games used.
+TAG_METRIC_INFO = {
+    "unique_champions": {"label": "Different champions played", "unit": "number",
+                         "how": "how many different champions over the games used"},
+    "top_champion_share": {"label": "Share of games on the most played champion", "unit": "percent",
+                           "how": "games on the most played champion / games used"},
+}

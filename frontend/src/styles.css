@@ -779,3 +779,18 @@ table.mx { width: max-content; border-collapse: separate; border-spacing: 0; tab
 .user-reset-input { gap: 8px; align-items: center; margin-top: 4px; }
 .user-reset-input input { flex: 1 1 220px; min-width: 0; }
 .users-table .num { text-align: right; }
+
+/* playstyle tags */
+.tag-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 4px; vertical-align: middle; }
+.tag-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 0.75rem; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); }
+.tag-chip.positive { color: var(--ok); border-color: var(--ok); background: rgba(62, 207, 142, 0.08); }
+.tag-chip.negative { color: var(--red); border-color: var(--red); background: rgba(255, 91, 110, 0.08); }
+.tag-chip-btn { min-height: 0; padding: 0 2px; border: 0; background: none; color: inherit; font-size: 0.8rem; line-height: 1; }
+.tag-chip-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.tag-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag-editor-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+.tag-lane-row { display: grid; grid-template-columns: 6rem minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: center; }
+@media (max-width: 560px) {
+  .tag-editor-row { grid-template-columns: 1fr; }
+  .tag-lane-row { grid-template-columns: 1fr 1fr; }
+}

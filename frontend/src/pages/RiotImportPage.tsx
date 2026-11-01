@@ -4,9 +4,11 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Lane, RiotMetric, RiotPreview } from '../api/types'
 import { ErrorNotice, Loading } from '../components/common'
+import { TagChip } from '../components/TagChips'
 import Tooltip from '../components/Tooltip'
 import { useChampionMap } from '../hooks/useData'
 import { LANE_LABEL, formatMetric, rankLabel, riotSourceLabel } from '../lib/format'
+import { MAX_TAGS, sortTags } from '../lib/playstyle'
 
 export const useRiotStatus = () =>
   useQuery({ queryKey: ['riot-status'], queryFn: () => api<{ enabled: boolean; regions: string[] }>('/riot/status'), staleTime: 60000 })
@@ -164,6 +166,24 @@ export default function RiotImportPage() {
               {Array.from({ length: preview.analysis.missing_pool_slots }, (_, i) => <span key={`m${i}`} className="chip muted">choose in editor</span>)}
             </div>
           </div>
+          {preview.analysis.tags && (
+            <div>
+              <p className="muted small">Playstyle tags (up to {MAX_TAGS}; ▲ strengths from Riot challenges, ▼ weaknesses from these games)</p>
+              {preview.analysis.tags.earned.length === 0 ? (
+                <p className="muted small">No playstyle tags earned.</p>
+              ) : (
+                <div className="tag-list">
+                  {sortTags(preview.analysis.tags.earned).map((t) => <TagChip key={t.key} tag={t} />)}
+                </div>
+              )}
+              {preview.analysis.tags.earned.length > 0 && (
+                <p className="muted small">
+                  Starting with: {(p.tags ?? []).map((k) => preview.analysis.tags!.earned.find((t) => t.key === k)?.label ?? k).join(', ') || 'none'}.
+                  Choose which to keep in the editor.
+                </p>
+              )}
+            </div>
+          )}
           {preview.analysis.notes.map((n) => <div key={n} className="notice notice-warn">{n}</div>)}
           <div className="row wrap">
             <button className="primary" onClick={() => navigate('/players/new', { state: { draft: preview } })}>Open in editor</button>

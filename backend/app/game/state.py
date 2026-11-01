@@ -9,6 +9,7 @@ from typing import Any, Iterable, Mapping
 from .comfort import comfort_modifier, comfort_tier
 from .config import LANES
 from .models import Champion, CoachSpec, MatchEvent, MatchupTable, PlayerSpec, TeamSetup
+from .playstyle import adjust_comfort, effect_totals
 from .structures import TeamStructures
 
 PHASE_SCALING_WEIGHT = {"lane": 0.0, "early": 0.0, "mid": 0.5, "late": 1.0, "overtime": 1.0}
@@ -36,6 +37,10 @@ class PlayerState:
     assists: int = 0
     damage_dealt: int = 0
     damage_taken: int = 0
+    tags: dict[str, float] = field(default_factory=dict)  # playstyle hook -> combined value
+
+    def tag(self, hook: str) -> float:
+        return self.tags.get(hook, 0.0)
 
 
 @dataclass
@@ -153,8 +158,10 @@ class Match:
             except KeyError as exc:
                 raise ValueError(f"Unknown champion id {setup.lineup[lane]}") from exc
             tier = comfort_tier(spec, champ.id, self.config)
-            players[lane] = PlayerState(lane, spec, champ, tier, comfort_modifier(tier, self.config), side,
-                                        cs_rate=spec.cs * self.config["cs"]["role_factors"][lane])
+            tags = effect_totals(spec)
+            comfort = adjust_comfort(comfort_modifier(tier, self.config), tier, tags)
+            cs_rate = spec.cs * self.config["cs"]["role_factors"][lane] * (1.0 + tags.get("cs_rate", 0.0))
+            players[lane] = PlayerState(lane, spec, champ, tier, comfort, side, cs_rate=cs_rate, tags=tags)
         synergy = 1.0 + (setup.coach.synergy - 5) * self.config["coach"]["synergy_scale"]
         return TeamState(side, setup, players,
                          TeamStructures(st["towers_per_lane"], st["nexus_towers"]), max(synergy, 0.0))
@@ -210,9 +217,11 @@ class Match:
         lead = max(-obj["gold_lead_cap"], min(obj["gold_lead_cap"], lead))
         return 1.0 + lead * obj["gold_control_scale"]
 
-    def objective_control(self, team: TeamState, roll: bool = True) -> float:
-        """(sum aware + sum pos) * roll, scaled by scaling-style, gold lead and power play."""
-        base = sum(p.spec.aware + p.spec.pos for p in team.players.values())
+    def objective_control(self, team: TeamState, roll: bool = True, towers: bool = False) -> float:
+        """(sum aware + sum pos) * roll, scaled by scaling-style, gold lead and power play. Each player's share is
+        scaled by their playstyle tags (`objective`, plus `tower` when contesting towers)."""
+        base = sum((p.spec.aware + p.spec.pos) * (1.0 + p.tag("objective") + (p.tag("tower") if towers else 0.0))
+                   for p in team.players.values())
         lo, hi = self.config["objectives"]["control_roll_range"]
         multiplier = self.rng.randint(lo, hi) if roll else (lo + hi) / 2
         value = base * multiplier
@@ -222,16 +231,16 @@ class Match:
             value += self.config["objectives"]["baron_power_play_bonus"]
         return value
 
-    def control_ratio(self, team: TeamState, roll: bool = True) -> float:
-        a = self.objective_control(team, roll)
-        b = self.objective_control(self.other(team), roll)
+    def control_ratio(self, team: TeamState, roll: bool = True, towers: bool = False) -> float:
+        a = self.objective_control(team, roll, towers)
+        b = self.objective_control(self.other(team), roll, towers)
         return a / (a + b) if a + b > 0 else 0.5
 
     def initiative_chance(self, team: TeamState) -> float:
         """Chance `team` starts the next fight, from its share of both teams' aggression."""
         f = self.config["fight"]
-        mine = sum(p.spec.aggr for p in team.players.values())
-        theirs = sum(p.spec.aggr for p in self.other(team).players.values())
+        mine = sum(p.spec.aggr * (1.0 + p.tag("initiative")) for p in team.players.values())
+        theirs = sum(p.spec.aggr * (1.0 + p.tag("initiative")) for p in self.other(team).players.values())
         share = mine / (mine + theirs) if mine + theirs > 0 else 0.5
         lo, hi = f["initiative_bounds"]
         return max(lo, min(hi, 0.5 + f["initiative_scale"] * (share - 0.5)))

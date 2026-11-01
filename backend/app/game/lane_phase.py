@@ -158,6 +158,7 @@ def run_lane_phase(match: Match) -> None:
             raw = raw_lane_score(p.spec, p.champion, match.rng, cfg)
             score = raw * lane_cfg["scale"]
             score *= 1.0 + p.comfort
+            score *= 1.0 + p.tag("lane_score")
             score *= strength_fit(p.spec, p.champion, cfg)
             score *= p.matchup_multiplier
             score *= team_lane_multiplier(team, lane, cfg)

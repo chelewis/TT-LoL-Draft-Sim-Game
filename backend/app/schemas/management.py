@@ -16,6 +16,9 @@ class PlayerIn(BaseModel):
     cs: int
     pool: list[int]
     riot_ref: str | None = None   # opaque token from /riot/preview linking this player to a Riot account
+    # playstyle tag keys to keep (each earned by the linked Riot account); None keeps the current ones, or the
+    # suggested ones when `riot_ref` is a new import
+    tags: list[str] | None = Field(default=None, max_length=10)
 
 
 class ChampionFitIn(BaseModel):

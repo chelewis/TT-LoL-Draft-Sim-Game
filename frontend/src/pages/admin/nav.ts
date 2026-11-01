@@ -19,6 +19,7 @@ export const ADMIN_NAV: (AdminLink | AdminGroup)[] = [
       { label: 'Coaches', to: '/admin/defaults/coaches' },
     ],
   },
+  { label: 'Playstyle Tags', to: '/admin/playstyle-tags' },
   { label: 'Simulation Settings', to: '/admin/simulation' },
   { label: 'Globals', to: '/admin/globals' },
   { label: 'Users', to: '/admin/users' },

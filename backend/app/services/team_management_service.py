@@ -4,13 +4,14 @@ from __future__ import annotations
 import logging
 
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from app.core.clock import iso, utcnow
 from app.core.errors import bad_request, conflict, forbidden, not_found
 from app.game.config import LANES, MANAGEMENT_CONFIG
 from app.models import Champion, Coach, Player, PlayerPoolEntry, Team, TeamRosterSlot
 from app.schemas.management import CoachIn, PlayerIn, TeamIn
+from app.services import import_seal, playstyle_service
 
 log = logging.getLogger(__name__)
 CFG = MANAGEMENT_CONFIG
@@ -36,19 +37,24 @@ def over_budget_by(player: Player, cfg: dict = CFG) -> int:
 
 
 def player_view(p: Player) -> dict:
+    tags, earned = playstyle_service.player_tags(object_session(p), p)
     return {
         "id": p.id, "name": p.name, "role": p.role, "secondary_role": p.secondary_role, "age": p.age, "region": p.region,
         "aggr": p.aggr, "aware": p.aware, "pos": p.pos, "dmg": p.dmg, "cs": p.cs,
         "pool": p.pool, "stat_total": p.stat_total, "stat_budget": stat_budget(p.riot_rank_tier),
         "over_budget_by": over_budget_by(p),
         "is_default": p.owner_user_id is None,
+        "tags": tags,                 # playstyle tags in effect (they travel into game snapshots)
+        "earned_tags": earned,        # every tag the Riot import earned, for the editor
         "riot": None if not p.riot_puuid else {
             "game_name": p.riot_game_name, "tag_line": p.riot_tag_line, "region": p.riot_region,
             "imported_at": iso(p.riot_imported_at), "verified": False, "data_source": p.riot_data_source,
             "games_used": p.riot_games_used, "is_solo_source": p.riot_data_source in (None, "SOLO"),
             "rank": None if not p.riot_rank_tier else {
                 "queue": p.riot_rank_queue, "tier": p.riot_rank_tier, "division": p.riot_rank_division,
-                "lp": p.riot_rank_lp, "wins": p.riot_rank_wins, "losses": p.riot_rank_losses}},
+                "lp": p.riot_rank_lp, "wins": p.riot_rank_wins, "losses": p.riot_rank_losses},
+            # whether this is a genuine import and what, if anything, was changed since (spec 19.2)
+            "import_check": import_seal.check(p)},
     }
 
 
@@ -143,10 +149,11 @@ def _check_budget(player: Player) -> None:
         raise bad_request(f"Stats may total at most {stat_budget(player.riot_rank_tier)}.")
 
 
-def _apply_riot(player: Player, body: PlayerIn, user_id: int | None) -> None:
-    """Link the player to a Riot account if the body carries a valid preview token for this user."""
+def _apply_riot(player: Player, body: PlayerIn, user_id: int | None) -> bool:
+    """Link the player to a Riot account if the body carries a valid preview token for this user.
+    Returns whether it did (a new import or a refresh)."""
     if not body.riot_ref:
-        return
+        return False
     if user_id is None:
         raise bad_request("Default players cannot be linked to a Riot account.")
     from app.services.riot_import_service import decode_riot_ref
@@ -159,6 +166,23 @@ def _apply_riot(player: Player, body: PlayerIn, user_id: int | None) -> None:
     player.riot_rank_queue, player.riot_rank_tier = rank.get("queue"), rank.get("tier")
     player.riot_rank_division, player.riot_rank_lp = rank.get("division"), rank.get("lp")
     player.riot_rank_wins, player.riot_rank_losses = rank.get("wins"), rank.get("losses")
+    player.riot_earned_tags = ref.get("tags") or []
+    player.riot_seal = import_seal.make_seal(ref)
+    return True
+
+
+def _apply_tags(db: Session, player: Player, body: PlayerIn, imported: bool) -> None:
+    """Set the playstyle tags the user keeps. None keeps the current tags (still earned ones only after a
+    re-import), or starts a new import with the suggested ones."""
+    earned = player.riot_earned_tags if player.riot_puuid else None
+    if body.tags is not None:
+        player.playstyle_tags = playstyle_service.check_player_tags(db, body.tags, earned)
+        return
+    if not imported:
+        return
+    enabled = {t["key"] for t in playstyle_service.enabled_tags(db)}
+    current = [k for k in player.playstyle_tags or [] if k in {e["key"] for e in earned or []}]
+    player.playstyle_tags = current or [k for k in playstyle_service.suggest(earned or []) if k in enabled]
 
 
 def _apply_player(player: Player, body: PlayerIn) -> None:
@@ -172,7 +196,7 @@ def create_player(db: Session, user_id: int | None, body: PlayerIn) -> Player:
     _check_limit(db, Player, user_id, CFG["max_players_per_user"], "players")
     player = Player(owner_user_id=user_id)
     _apply_player(player, body)
-    _apply_riot(player, body, user_id)
+    _apply_tags(db, player, body, _apply_riot(player, body, user_id))
     _check_budget(player)
     db.add(player)
     db.commit()
@@ -190,7 +214,7 @@ def update_player(db: Session, user_id: int | None, player_id: int, body: Player
     player.pool_entries.clear()
     db.flush()
     _apply_player(player, body)
-    _apply_riot(player, body, user_id)
+    _apply_tags(db, player, body, _apply_riot(player, body, user_id))
     _check_budget(player)
     db.commit()
     return player

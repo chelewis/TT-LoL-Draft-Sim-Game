@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 from statistics import mean
 from typing import Any
 
-from .config import (APEX_TIERS, BENCHMARKS, METRIC_INFO, MIN_GAME_SECONDS, RANK_FOR_SOURCE, RANK_QUEUE_TYPES,
-                     RANK_TIERS, STAT_METRICS, TEAM_POSITION_TO_LANE)
+from .config import (APEX_TIERS, BENCHMARKS, CHALLENGE_LEVELS, METRIC_INFO, MIN_GAME_SECONDS, RANK_FOR_SOURCE,
+                     RANK_QUEUE_TYPES, RANK_TIERS, STAT_METRICS, TAG_METRIC_INFO, TEAM_POSITION_TO_LANE)
 from .errors import NotEnoughData, RiotNotFound
 
 STATS = ("aggr", "aware", "pos", "dmg", "cs")
@@ -40,6 +40,8 @@ class Analysis:
     budget: int = 0
     floor: int = 0
     raised_to_floor: bool = False
+    # metric -> the player's average over the games used, plus the champion-variety numbers (playstyle tags)
+    averages: dict[str, float] = field(default_factory=dict)
 
 
 def scale(value: float, low: float, high: float, lower_is_better: bool = False) -> float:
@@ -174,8 +176,11 @@ def analyse(matches: list[dict], puuid: str, budget: int, role: str | None = Non
     stats, fitted = fit_to_budget(raw, budget)
     stats, raised = raise_to_floor(stats, floor)
     before = sum(max(1, min(10, round(v))) for v in raw.values())
+    champions = Counter(s.champion_key for s in samples)
+    averaged["unique_champions"] = float(len(champions))
+    averaged["top_champion_share"] = champions.most_common(1)[0][1] / len(samples)
     return Analysis(len(samples), lane, dict(lane_counts), {k: round(v, 2) for k, v in raw.items()}, stats, fitted,
-                    Counter(s.champion_key for s in samples), breakdown, before, budget, floor, raised)
+                    champions, breakdown, before, budget, floor, raised, averaged)
 
 
 @dataclass
@@ -230,3 +235,76 @@ def build_pool(analysis: Analysis, mastery: list[dict[str, Any]], to_ours, size:
     for entry in sorted(mastery, key=lambda e: -e.get("championPoints", 0)):
         add(int(entry["championId"]))
     return pool, unmapped
+
+
+# ------------------------------------------------------------ playstyle tags
+def _level_index(level: str | None) -> int:
+    return CHALLENGE_LEVELS.index(level) if level in CHALLENGE_LEVELS else 0
+
+
+def _challenge_evidence(rule: dict, by_id: dict[int, dict]) -> dict | None:
+    """The best listed challenge at or above the rule's min level, or None."""
+    need = _level_index(rule.get("min_level"))
+    best = None
+    for ch in rule.get("challenges") or []:
+        progress = by_id.get(int(ch["id"]))
+        if not progress:
+            continue
+        level = progress.get("level")
+        if _level_index(level) < need or _level_index(level) == 0:
+            continue
+        key = (_level_index(level), -float(progress.get("percentile", 1.0)))
+        if best is None or key > best[0]:
+            best = (key, {"source": "challenge", "challenge_id": int(ch["id"]), "challenge_name": ch.get("name"),
+                          "level": level, "percentile": progress.get("percentile"), "value": progress.get("value")})
+    return best[1] if best else None
+
+
+def match_threshold(rule: dict, lane: str) -> float | None:
+    """The threshold a match-stat rule uses in this lane; None when the rule does not apply to the lane."""
+    lanes = rule.get("lanes") or {}
+    return lanes[lane] if lane in lanes else rule.get("value")
+
+
+def _match_evidence(rule: dict, averages: dict[str, float], lane: str) -> dict | None:
+    metric = rule.get("metric")
+    threshold = match_threshold(rule, lane)
+    if metric not in averages or threshold is None:
+        return None
+    value = averages[metric]
+    hit = value >= threshold if rule.get("op") == ">=" else value <= threshold
+    if not hit:
+        return None
+    info = METRIC_INFO.get(metric) or TAG_METRIC_INFO.get(metric) or {}
+    return {"source": "match", "metric": metric, "label": info.get("label", metric), "unit": info.get("unit"),
+            "op": rule.get("op"), "value": round(value, 3), "threshold": threshold}
+
+
+def earned_tags(tags: list[dict], player_data: dict | None, averages: dict[str, float], lane: str) -> list[dict]:
+    """The playstyle tags this account earns: [{key, polarity, evidence}].
+
+    `tags` are the enabled tag definitions (key, polarity, source, rule). Challenge tags need `player_data`
+    (lol-challenges-v1 player-data; None when it could not be fetched); match tags test `averages` in `lane`.
+    """
+    by_id = {int(c["challengeId"]): c for c in (player_data or {}).get("challenges", []) if "challengeId" in c}
+    out = []
+    for tag in tags:
+        rule = tag.get("rule") or {}
+        if tag["source"] == "challenge":
+            evidence = _challenge_evidence(rule, by_id) if player_data else None
+        else:
+            evidence = _match_evidence(rule, averages, lane)
+        if evidence:
+            out.append({"key": tag["key"], "polarity": tag["polarity"], "evidence": evidence})
+    return out
+
+
+def suggest_tags(earned: list[dict], max_tags: int) -> list[str]:
+    """Tag keys to start with: negative tags first (the honest picture; the user may remove them), then
+    positive tags by challenge level, best first, then by percentile (lower = rarer)."""
+    def order(e: dict):
+        ev = e["evidence"]
+        level = _level_index(ev.get("level"))
+        percentile = ev.get("percentile")
+        return (e["polarity"] != "negative", -level, 1.0 if percentile is None else float(percentile))
+    return [e["key"] for e in sorted(earned, key=order)][:max_tags]
