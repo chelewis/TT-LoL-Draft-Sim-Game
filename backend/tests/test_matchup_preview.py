@@ -5,7 +5,7 @@ from sqlalchemy import delete
 from app.core.database import SessionLocal
 from app.data.matchup_seed import canonical
 from app.game.config import LANES
-from app.models import ChampionMatchup
+from app.models import Champion, ChampionMatchup
 from tests.conftest import play_draft, start_draft
 from tests.test_solo_mode import choose, draft_all, solo
 
@@ -51,12 +51,17 @@ def test_solo_shows_lane_vs_lane_and_follows_swaps(no_counters, alice, default_t
 
     data = alice.get(f"/games/{gid}/matchups").json()
     assert data["counter_data"] is True
+    assert isinstance(data["notes"], list) and all(isinstance(n, str) for n in data["notes"])
     assert data["lanes"]["MID"] == {"blue": blue["MID"], "red": red["MID"], "blue_win_rate": 57.5}
     assert data["lanes"]["TOP"]["blue_win_rate"] is None
     for side, picks in (("BLUE", draft["blue_picks"]), ("RED", draft["red_picks"])):
         team = data["teams"][side]
         assert sorted(team["champions"]) == sorted(picks)
-        assert set(team["totals"]) == {"damage", "sturdiness", "cc", "mobility", "utility"}
+        assert set(team["totals"]) == {"damage", "sturdiness", "cc", "mobility", "utility", "range", "waveclear"}
+        with SessionLocal() as db:
+            members = [db.get(Champion, cid) for cid in picks]
+        assert team["totals"]["range"] == sum(c.attack_range for c in members)
+        assert team["totals"]["waveclear"] == sum(c.waveclear for c in members)
         assert team["damage_profile"]["physical"] + team["damage_profile"]["magic"] == team["totals"]["damage"]
         assert 0 <= team["damage_penalty"] <= data["settings"]["max_damage_penalty"]
 

@@ -10,6 +10,7 @@ from .comfort import comfort_modifier, comfort_tier
 from .config import LANES
 from .models import Champion, CoachSpec, MatchEvent, MatchupTable, PlayerSpec, TeamSetup
 from .playstyle import adjust_comfort, effect_totals
+from .range_waveclear import waveclear_priority
 from .structures import TeamStructures
 
 PHASE_SCALING_WEIGHT = {"lane": 0.0, "early": 0.0, "mid": 0.5, "late": 1.0, "overtime": 1.0}
@@ -218,8 +219,9 @@ class Match:
         return 1.0 + lead * obj["gold_control_scale"]
 
     def objective_control(self, team: TeamState, roll: bool = True, towers: bool = False) -> float:
-        """(sum aware + sum pos) * roll, scaled by scaling-style, gold lead and power play. Each player's share is
-        scaled by their playstyle tags (`objective`, plus `tower` when contesting towers)."""
+        """(sum aware + sum pos) * roll, scaled by scaling-style, gold lead, waveclear (lane priority) and power
+        play. Each player's share is scaled by their playstyle tags (`objective`, plus `tower` when contesting
+        towers)."""
         base = sum((p.spec.aware + p.spec.pos) * (1.0 + p.tag("objective") + (p.tag("tower") if towers else 0.0))
                    for p in team.players.values())
         lo, hi = self.config["objectives"]["control_roll_range"]
@@ -227,6 +229,7 @@ class Match:
         value = base * multiplier
         value *= 1.0 + team.style_bonus("scaling", self.config) * PHASE_SCALING_WEIGHT.get(self.phase, 0.0)
         value *= self.gold_factor(team)
+        value *= waveclear_priority({l: p.champion for l, p in team.players.items()}, self.config)
         if team.power_play:
             value += self.config["objectives"]["baron_power_play_bonus"]
         return value

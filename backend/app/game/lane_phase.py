@@ -5,6 +5,7 @@ from __future__ import annotations
 from .config import FOCUS_TO_LANE, LANES
 from .matchup import apply_coach_draft, lane_matchup
 from .models import Champion, PlayerSpec
+from .range_waveclear import range_lane_multiplier, share_multiplier, waveclear_farm_factor, waveclear_lane_cs
 from .scaling import scaling_multiplier
 from .state import Match, PlayerState, TeamState
 from .win_rates import ally_delta, counter_delta, multiplier
@@ -81,6 +82,17 @@ def win_rate_lane_multiplier(match: Match, team: TeamState, lane: str) -> float:
     return mult
 
 
+def range_lane_factor(match: Match, team: TeamState, lane: str) -> float:
+    """Lane score multiplier from range: top and mid compare their champion with the lane opponent's, bot and
+    support compare their duo's average range with the enemy duo's. The jungle has no lane opponent."""
+    if lane == "JUNGLE":
+        return 1.0
+    enemy = match.other(team)
+    lanes = BOT_LANE if lane in BOT_LANE else (lane,)
+    return range_lane_multiplier([team.players[l].champion for l in lanes],
+                                 [enemy.players[l].champion for l in lanes], match.config)
+
+
 def _assist_fraction(lane: str, other: str, lane_cfg: dict, team: TeamState | None = None) -> float:
     """Share of `other`'s base score added to `lane`'s. Given a team, its jungle/support focus boost applies."""
     assist = lane_cfg["assist"]
@@ -110,25 +122,21 @@ def role_factors(config: dict) -> dict[str, float]:
     return {l: mean / t for l, t in totals.items()}
 
 
-def _share_multiplier(mine: float, theirs: float, scale: float) -> float:
-    """1 + scale * 2 * (share - 0.5): +scale when `mine` is everything, -scale when it is nothing."""
-    total = mine + theirs
-    share = mine / total if total > 0 else 0.5
-    return 1.0 + scale * 2.0 * (share - 0.5)
-
-
 def lane_cs_multiplier(team: TeamState, enemy: TeamState, lane: str, config: dict) -> float:
     """Lane-phase CS multiplier. Bot farms more when their support wins the support matchup; top and mid farm
-    more when their jungler wins the jungle matchup and when the team focuses their lane."""
+    more when their jungler wins the jungle matchup and when the team focuses their lane. Top, mid and bot also
+    farm more when they out-clear their lane opponent."""
     cfg = config["cs"]
     if lane == "BOT":
-        return _share_multiplier(team.players["SUPPORT"].lane_score, enemy.players["SUPPORT"].lane_score,
-                                 cfg["support_scale"])
-    if lane in ("TOP", "MID"):
-        mult = _share_multiplier(team.players["JUNGLE"].lane_score, enemy.players["JUNGLE"].lane_score,
-                                 cfg["jungle_scale"])
-        return mult + cfg["focus_bonus"] * team.synergy_factor * _focus_weight(team, lane)
-    return 1.0
+        mult = share_multiplier(team.players["SUPPORT"].lane_score, enemy.players["SUPPORT"].lane_score,
+                                cfg["support_scale"])
+    elif lane in ("TOP", "MID"):
+        mult = share_multiplier(team.players["JUNGLE"].lane_score, enemy.players["JUNGLE"].lane_score,
+                                cfg["jungle_scale"])
+        mult += cfg["focus_bonus"] * team.synergy_factor * _focus_weight(team, lane)
+    else:
+        return 1.0
+    return mult * waveclear_lane_cs(team.players[lane].champion, enemy.players[lane].champion, config)
 
 
 def run_lane_phase(match: Match) -> None:
@@ -163,6 +171,7 @@ def run_lane_phase(match: Match) -> None:
             score *= p.matchup_multiplier
             score *= team_lane_multiplier(team, lane, cfg)
             score *= win_rate_lane_multiplier(match, team, lane)
+            score *= range_lane_factor(match, team, lane)
             unscaled[team.side][lane] = max(score, lane_cfg["min_score"])
             p.base_score = max(score * scaling_multiplier(p.champion, "lane", cfg), lane_cfg["min_score"])
 
@@ -183,14 +192,15 @@ def run_lane_phase(match: Match) -> None:
             p.lane_score = total * factors[lane]
             p.lane_unscaled_ratio = total_unscaled / total
 
-    # 4) CS and gold at the end of the lane phase (the lane multiplier covers these minutes only, so cs_rate
-    #    is left as the role's base rate); the lane winner also takes their lead as gold
+    # 4) CS and gold at the end of the lane phase (the lane multiplier covers these minutes only); from here on
+    #    the champion's waveclear speeds up or slows down farming. The lane winner also takes their lead as gold
     eco = cfg["economy"]
     for team in (blue, red):
         for lane in LANES:
             p = team.players[lane]
             p.cs = p.cs_rate * eco["lane_minutes"] * lane_cs_multiplier(team, match.other(team), lane, cfg)
             p.gold = p.cs * eco["gold_per_cs"]
+            p.cs_rate *= waveclear_farm_factor(p.champion, cfg)
     match.cs_minute = float(eco["lane_minutes"])
 
     # the lead is the lane score margin (brought back to base-score size) plus the CS stat difference

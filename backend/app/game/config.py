@@ -56,7 +56,7 @@ MANAGEMENT_CONFIG: dict[str, Any] = {
 }
 
 SIMULATION_CONFIG: dict[str, Any] = {
-    "version": "2.5.0",
+    "version": "2.6.0",
     # Comfort modifiers (fractions, NOT whole-number multipliers).
     "comfort": {"best": 0.40, "comfort": 0.25, "familiar": 0.10, "vulnerable": -0.10},
     # Tier by position in the player's ordered 5-champion pool.
@@ -209,6 +209,24 @@ SIMULATION_CONFIG: dict[str, Any] = {
             "3": {"lane": 0.92, "early": 0.92, "mid": 1.00, "late": 1.10, "overtime": 1.14},
         },
     },
+    # Champion waveclear (1 weak, 2 average, 3 strong).
+    "waveclear": {
+        "enabled": True,
+        "lane_cs_scale": 0.10,    # top/mid/bot lane-phase CS from own vs opponent's waveclear: 3 vs 1 = +/-5%
+        # objective control x(1 + priority_scale * (lane-weighted waveclear - 2)): lane priority for objectives
+        "priority_weights": {"TOP": 0.2, "JUNGLE": 0.1, "MID": 0.35, "BOT": 0.25, "SUPPORT": 0.1},
+        "priority_scale": 0.05,
+        "siege_scale": 0.05,      # siege hit chance per point of average waveclear over the defenders
+        "farm_scale": 0.04,       # CS per minute after the lane phase x(1 + scale * (waveclear - 2))
+    },
+    # Champion range (1 melee, 2 short range, 3 long range).
+    "range": {
+        "enabled": True,
+        "lane_scale": 0.03,       # lane score per step of range over the lane opponent (bot lane: duo averages)
+        "teamfight_scale": 0.04,  # fight power per point of average range over the enemy, fights of 4+
+        "skirmish_scale": 0.03,   # fight power per point of average range *under* the enemy, fights of 3 or fewer
+        "siege_scale": 0.05,      # siege hit chance per point of average range over the defenders
+    },
 }
 
 # Playstyle tag effects (spec "Playstyle tags"). Admins build tags out of these hooks; a new kind of effect needs
@@ -309,6 +327,36 @@ EDITABLE_SETTINGS: list[dict[str, Any]] = [
     {"path": "cs.gank_minutes", "group": "CS", "kind": "number", "min": 0, "max": 5, "step": 0.05,
      "label": "Farm lost per jungle gank",
      "help": "Minutes of farm a jungler loses for each early game fight they join."},
+    {"path": "waveclear.enabled", "group": "Waveclear", "kind": "bool", "label": "Use champion waveclear",
+     "help": "Waveclear affects farm, objective priority and sieges."},
+    {"path": "waveclear.lane_cs_scale", "group": "Waveclear", "kind": "number", "min": 0, "max": 0.5, "step": 0.01,
+     "label": "Lane CS from waveclear",
+     "help": "Most a top, mid or bot laner's lane-phase CS can rise or fall from out-clearing their opponent "
+             "(0.10 = 10%; strong vs weak waveclear is half of that)."},
+    {"path": "waveclear.farm_scale", "group": "Waveclear", "kind": "number", "min": 0, "max": 0.2, "step": 0.01,
+     "label": "Farm speed after lane",
+     "help": "CS per minute change after the lane phase per waveclear step above or below average."},
+    {"path": "waveclear.priority_scale", "group": "Waveclear", "kind": "number", "min": 0, "max": 0.3, "step": 0.01,
+     "label": "Objective priority",
+     "help": "Objective control change per point of the team's waveclear (mid and bot weighted most) above or "
+             "below average."},
+    {"path": "waveclear.siege_scale", "group": "Waveclear", "kind": "number", "min": 0, "max": 0.3, "step": 0.01,
+     "label": "Siege attack and defence",
+     "help": "Siege hit chance change per point of the attackers' average waveclear over the defenders'."},
+    {"path": "range.enabled", "group": "Range", "kind": "bool", "label": "Use champion range",
+     "help": "Range affects lane trades, teamfights vs skirmishes and sieges."},
+    {"path": "range.lane_scale", "group": "Range", "kind": "number", "min": 0, "max": 0.2, "step": 0.005,
+     "label": "Lane trades",
+     "help": "Lane score change per range step over the lane opponent (bot and support compare duo averages)."},
+    {"path": "range.teamfight_scale", "group": "Range", "kind": "number", "min": 0, "max": 0.3, "step": 0.005,
+     "label": "Teamfight bonus",
+     "help": "Fight power change in fights of 4+ per point of average range over the enemy fighters."},
+    {"path": "range.skirmish_scale", "group": "Range", "kind": "number", "min": 0, "max": 0.3, "step": 0.005,
+     "label": "Skirmish bonus for melee",
+     "help": "Fight power change in fights of 3 or fewer per point of average range under the enemy fighters."},
+    {"path": "range.siege_scale", "group": "Range", "kind": "number", "min": 0, "max": 0.3, "step": 0.01,
+     "label": "Siege poke",
+     "help": "Siege hit chance change per point of the attackers' average range over the defenders'."},
 ]
 EDITABLE_BY_PATH = {s["path"]: s for s in EDITABLE_SETTINGS}
 

@@ -16,6 +16,8 @@ const TOTALS: { key: keyof MatchupTeam['totals']; label: string }[] = [
   { key: 'cc', label: 'Crowd control' },
   { key: 'mobility', label: 'Mobility' },
   { key: 'utility', label: 'Utility' },
+  { key: 'range', label: 'Range' },
+  { key: 'waveclear', label: 'Waveclear' },
 ]
 
 /** Finalization's "Show Matchup Data" view, in place of the champion grid: lane matchups, damage mix and totals. */
@@ -81,6 +83,7 @@ export default function MatchupPanel({ game, byId }: { game: GameState; byId: Ma
             </tr>
           </tbody>
         </table>
+        {data.notes.map((note) => <p key={note} className="mp-note">{note}</p>)}
       </section>
     </div>
   )

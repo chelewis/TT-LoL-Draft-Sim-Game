@@ -513,7 +513,7 @@ export interface MatchupTeam {
   damage_profile: { physical: number; magic: number }
   /** fraction of fight damage lost to the enemy itemizing against a one-sided damage mix */
   damage_penalty: number
-  totals: { damage: number; sturdiness: number; cc: number; mobility: number; utility: number }
+  totals: { damage: number; sturdiness: number; cc: number; mobility: number; utility: number; range: number; waveclear: number }
   /** average same-team win rate of the comp minus the baseline, in points */
   ally_synergy: number | null
   /** bot + support same-team win rate; null when there is no data */
@@ -530,6 +530,8 @@ export interface MatchupPreview {
   lanes: Record<Lane, { blue: number | null; red: number | null; blue_win_rate: number | null }>
   /** false when the against-team matrix has no win rates at all */
   counter_data: boolean
+  /** callouts when one side has a clear range or waveclear edge */
+  notes: string[]
   settings: { win_rates_enabled: boolean; baseline: number; damage_balance_enabled: boolean; damage_threshold: number; max_damage_penalty: number; champion_scaling_enabled: boolean }
 }
 
