@@ -68,6 +68,10 @@ export interface Champion {
   pick_rate: number
   /** 1 early game, 2 neutral, 3 late game */
   scaling: number
+  /** 1 melee, 2 short range, 3 long range */
+  range: number
+  /** 1 weak, 2 average, 3 strong */
+  waveclear: number
   strength: string
   weakness: string
 }

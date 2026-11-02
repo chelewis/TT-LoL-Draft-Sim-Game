@@ -26,8 +26,10 @@ def test_missing_data_is_reported_not_fatal(tmp_path):
     shutil.copytree(SEED_DIR, seed_copy)
     text = (seed_copy / "Champions.csv").read_text(encoding="utf-8")
     lines = text.splitlines()
-    lines[1] = ",".join(lines[1].split(",")[:-1]) + ","            # blank Utility on the first champion
-    lines.append("999,Brandnew,Mage,5,2,M,3,1,1,1,1")             # no ChampionStatistics.csv row
+    cells = lines[1].split(",")
+    cells[lines[0].split(",").index("Utility")] = ""                # blank Utility on the first champion
+    lines[1] = ",".join(cells)
+    lines.append("999,Brandnew,Mage,5,2,M,3,1,1,1,1,2,3")         # no ChampionStatistics.csv row
     (seed_copy / "Champions.csv").write_text(chr(10).join(lines), encoding="utf-8")
     data = load_seed_data(seed_copy)
     assert any("has no Utility" in w for w in data.warnings)
@@ -36,6 +38,32 @@ def test_missing_data_is_reported_not_fatal(tmp_path):
     assert brandnew.win_rate == 50.0
     assert any("No scaling row" in w and "Brandnew" in w for w in data.warnings)
     assert brandnew.scaling == 2
+    assert (brandnew.attack_range, brandnew.waveclear) == (2, 3)
+
+
+def test_range_and_waveclear_are_loaded(seed):
+    by_name = {c.name: (c.attack_range, c.waveclear) for c in seed.champions}
+    assert by_name["Darius"][0] == 1 and by_name["Xerath"] == (3, 3)
+    assert all(c.attack_range in (1, 2, 3) and c.waveclear in (1, 2, 3) for c in seed.champions)
+
+
+def test_every_champion_has_range_and_waveclear():
+    """A blank Range or Waveclear cell would silently fall back to the default."""
+    warnings = [w for w in load_seed_data().warnings if "Range" in w or "Waveclear" in w]
+    assert not warnings, warnings
+
+
+def test_bad_range_value_is_an_error(tmp_path):
+    import shutil
+    import pytest
+    from app.data.loader import SEED_DIR, SeedDataError
+    seed_copy = tmp_path / "seed"
+    shutil.copytree(SEED_DIR, seed_copy)
+    path = seed_copy / "Champions.csv"
+    path.write_text(path.read_text(encoding="utf-8").rstrip("\n") + "\n999,Brandnew,Mage,5,2,M,3,1,1,1,1,4,2\n",
+                    encoding="utf-8")
+    with pytest.raises(SeedDataError, match="Brandnew.*Range must be 1, 2 or 3"):
+        load_seed_data(seed_copy)
 
 
 def test_bad_scaling_value_is_an_error(tmp_path):

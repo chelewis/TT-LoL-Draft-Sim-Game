@@ -71,6 +71,17 @@ def test_changed_values_are_updated_and_reported(db):
     assert (row.damage, row.win_rate, row.difficulty) == (1, 60.25, 3)
 
 
+def test_changed_range_and_waveclear_are_updated(db):
+    data = load_seed_data()
+    ahri = next(c for c in data.champions if c.name == "Ahri")
+    edited = dataclasses.replace(ahri, attack_range=1, waveclear=1)
+    report = sync_champions(db, with_champions(data, replace={ahri.id: edited}))
+    assert report.updated == {"Ahri": ["attack_range", "waveclear"]}
+    row = db.get(Champion, ahri.id)
+    assert (row.attack_range, row.waveclear) == (1, 1)
+    assert row.to_engine().to_dict()["range"] == 1
+
+
 def test_champions_missing_from_the_csv_are_kept_and_reported(db):
     data = load_seed_data()
     trimmed = dataclasses.replace(data, champions=data.champions[:-1])

@@ -816,6 +816,8 @@ function ChampionDetail({ champion: c, hints }: { champion: Champion | undefined
           <span>CC <Pips value={c.crowd_control} /></span>
           <span>Mobility <Pips value={c.mobility} /></span>
           <span>Utility <Pips value={c.utility} /></span>
+          <span>Range <Pips value={c.range} /></span>
+          <span>Waveclear <Pips value={c.waveclear} /></span>
         </div>
         <span className="small muted">
           Strong as {c.strength.toLowerCase()}, vulnerable to {c.weakness.toLowerCase()}

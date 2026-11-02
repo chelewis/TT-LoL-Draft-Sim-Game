@@ -25,6 +25,8 @@ class Champion:
     win_rate: float = 50.0
     pick_rate: float = 0.0
     scaling: int = 2  # 1 early game, 2 neutral, 3 late game
+    attack_range: int = 2  # 1 melee, 2 short range, 3 long range
+    waveclear: int = 2  # 1 weak, 2 average, 3 strong
 
     @property
     def offence(self) -> int:
@@ -60,6 +62,7 @@ class Champion:
             "damage": self.damage, "sturdiness": self.sturdiness, "crowd_control": self.cc,
             "mobility": self.mobility, "utility": self.utility,
             "win_rate": self.win_rate, "pick_rate": self.pick_rate, "scaling": self.scaling,
+            "range": self.attack_range, "waveclear": self.waveclear,
             "offence": self.offence, "defence": self.defence, "control": self.control,
             "strength": self.strength, "weakness": self.weakness,
         }
