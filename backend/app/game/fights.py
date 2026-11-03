@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .objectives import siege
+from .range_waveclear import range_fight_multiplier
 from .scaling import scaling_multiplier
 from .state import PHASE_SCALING_WEIGHT, Match, PlayerState, TeamState
 from .win_rates import ally_delta, counter_delta, multiplier
@@ -88,8 +89,10 @@ def _side_power(match: Match, team: TeamState, members: list[PlayerState], perf:
     control_mod = 1.0 + f["control_scale"] * (control - f["control_average"]) / f["control_average"]
     control_mod, style, rates = (max(control_mod, 0.1), fight_multiplier(match, team, n),
                                  win_rate_fight_multiplier(match, members, enemies))
-    power = weighted * control_mod * style * rates
-    side = control_mod * style * rates
+    # range wins teamfights (poke, kiting) and melee wins skirmishes (dive)
+    ranged = range_fight_multiplier([p.champion for p in members], [p.champion for p in enemies], n, match.config)
+    power = weighted * control_mod * style * rates * ranged
+    side = control_mod * style * rates * ranged
     offence = {p.lane: perf[p.lane] * damage_weight * p.champion.damage * side for p in members}
     return power, offence
 

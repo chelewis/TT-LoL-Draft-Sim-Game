@@ -6,6 +6,7 @@ import pytest
 from app.game.config import LANES, simulation_config
 from app.game.fights import run_fight
 from app.game.lane_phase import lane_cs_multiplier, run_lane_phase
+from app.game.range_waveclear import waveclear_farm_factor
 from app.game.simulation_engine import simulate_match
 from app.game.state import Match
 
@@ -13,6 +14,11 @@ from app.game.state import Match
 def match_for(make_teams, champions, team_seed=1, cfg=None):
     blue, red = make_teams(team_seed)
     return Match(blue, red, champions, 1, cfg or simulation_config())
+
+
+def no_waveclear():
+    """Waveclear also changes lane CS; switched off so one other effect can be checked on its own."""
+    return simulation_config({"waveclear": {"enabled": False}})
 
 
 def set_scores(match, lane, blue, red):
@@ -48,7 +54,7 @@ def test_lane_modifiers_only_cover_the_lane_phase(make_teams, champions):
 
 # ------------------------------------------------------------- lane-phase multipliers
 def test_support_performance_drives_bot_cs(make_teams, champions):
-    match = match_for(make_teams, champions)
+    match = match_for(make_teams, champions, cfg=no_waveclear())
     scale = match.config["cs"]["support_scale"]
     set_scores(match, "SUPPORT", 100, 100)
     assert bot_and_top(match)[0] == pytest.approx(1.0)
@@ -59,7 +65,7 @@ def test_support_performance_drives_bot_cs(make_teams, champions):
 
 
 def test_jungle_performance_drives_solo_lane_cs(make_teams, champions):
-    match = match_for(make_teams, champions)
+    match = match_for(make_teams, champions, cfg=no_waveclear())
     match.teams["BLUE"].setup = dataclasses.replace(match.teams["BLUE"].setup, focus=[])
     set_scores(match, "JUNGLE", 100, 100)
     assert bot_and_top(match)[1] == pytest.approx(1.0)
@@ -72,7 +78,7 @@ def test_jungle_performance_drives_solo_lane_cs(make_teams, champions):
 
 
 def test_lane_focus_raises_solo_lane_cs(make_teams, champions):
-    match = match_for(make_teams, champions)
+    match = match_for(make_teams, champions, cfg=no_waveclear())
     blue = match.teams["BLUE"]
     set_scores(match, "JUNGLE", 100, 100)
     bonus = match.config["cs"]["focus_bonus"] * blue.synergy_factor
@@ -83,13 +89,17 @@ def test_lane_focus_raises_solo_lane_cs(make_teams, champions):
 
 def test_lane_phase_pays_cs_with_the_multiplier(make_teams, champions):
     match = match_for(make_teams, champions)
+    base_rates = {(p.team, p.lane): p.cs_rate for t in match.sides for p in t.players.values()}
     run_lane_phase(match)
     minutes = match.config["economy"]["lane_minutes"]
     for team in match.sides:
         for lane in LANES:
             p = team.players[lane]
+            base = base_rates[(p.team, lane)]
             mult = lane_cs_multiplier(team, match.other(team), lane, match.config)
-            assert p.cs == pytest.approx(p.cs_rate * minutes * mult)
+            assert p.cs == pytest.approx(base * minutes * mult)
+            # from the end of the lane phase on, waveclear sets the farm speed
+            assert p.cs_rate == pytest.approx(base * waveclear_farm_factor(p.champion, match.config))
 
 
 # ------------------------------------------------------------- farm lost in fights

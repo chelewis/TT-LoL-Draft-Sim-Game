@@ -117,7 +117,8 @@ def test_simulation_settings_start_at_defaults(admin):
     fields = {f["path"]: f for f in body["fields"]}
     assert fields["win_rates.lane_counter_scale"]["value"] == fields["win_rates.lane_counter_scale"]["default"]
     assert fields["damage_balance.enabled"]["kind"] == "bool"
-    assert {f["group"] for f in body["fields"]} == {"Champion win rates", "Damage balance", "Champion scaling", "CS"}
+    assert {f["group"] for f in body["fields"]} == {"Champion win rates", "Damage balance", "Champion scaling", "CS",
+                                                    "Waveclear", "Range"}
 
 
 def test_simulation_settings_save_validate_and_reset(admin):

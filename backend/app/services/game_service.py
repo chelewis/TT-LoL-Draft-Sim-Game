@@ -21,6 +21,7 @@ from app.game.comfort import comfort_modifier, comfort_tier
 from app.game.config import DRAFT_CONFIG, GAME_CONFIG, LANES, SIMULATION_CONFIG, simulation_config
 from app.game.draft_engine import DraftError, DraftState, new_draft, rebuild_draft
 from app.game.models import CoachSpec, PlayerSpec, TeamSetup
+from app.game.range_waveclear import matchup_callouts
 from app.game.simulation_engine import simulate_match
 from app.game.scaling import comp_scaling
 from app.game.state import damage_balance_penalty, damage_profile
@@ -562,7 +563,9 @@ def comfort_preview(db: Session, game: Game, user: User, requested_side: str | N
     return out
 
 
-ATTRIBUTES = ("damage", "sturdiness", "cc", "mobility", "utility")
+# matchup panel total -> champion field
+ATTRIBUTES = {"damage": "damage", "sturdiness": "sturdiness", "cc": "cc", "mobility": "mobility",
+              "utility": "utility", "range": "attack_range", "waveclear": "waveclear"}
 
 
 def matchup_preview(db: Session, game: Game, user: User) -> dict:
@@ -595,7 +598,7 @@ def matchup_preview(db: Session, game: Game, user: User) -> dict:
             "champions": team_ids,
             "damage_profile": profile,
             "damage_penalty": round(damage_balance_penalty(profile, cfg), 3),
-            "totals": {a: sum(getattr(c, a) for c in members) for a in ATTRIBUTES},
+            "totals": {key: sum(getattr(c, field) for c in members) for key, field in ATTRIBUTES.items()},
             "ally_synergy": rate(ally_delta(team_ids, table, cfg)),
             "duo_win_rate": duo,
             "scaling": comp_scaling(members),
@@ -613,6 +616,8 @@ def matchup_preview(db: Session, game: Game, user: User) -> dict:
         "lanes": lanes,
         # false when the against-team matrix has no win rates at all, so the panel can say why lanes are blank
         "counter_data": matchup_service.has_rates(db, "enemy"),
+        # callouts for a clear range or waveclear edge (only effects switched on in the settings)
+        "notes": matchup_callouts(lineups, champs, cfg),
         "settings": {"win_rates_enabled": wr["enabled"], "baseline": wr["baseline"],
                      "damage_balance_enabled": db_cfg["enabled"], "damage_threshold": db_cfg["threshold"],
                      "max_damage_penalty": db_cfg["max_penalty"],

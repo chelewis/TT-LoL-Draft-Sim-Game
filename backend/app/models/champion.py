@@ -27,6 +27,8 @@ class Champion(Base):
     win_rate: Mapped[float] = mapped_column(Float, default=50.0)
     pick_rate: Mapped[float] = mapped_column(Float, default=0.0)
     scaling: Mapped[int] = mapped_column(Integer, default=2)
+    attack_range: Mapped[int] = mapped_column(Integer, default=2)
+    waveclear: Mapped[int] = mapped_column(Integer, default=2)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
@@ -34,4 +36,5 @@ class Champion(Base):
     def to_engine(self) -> EngineChampion:
         return EngineChampion(self.id, self.name, self.champ_class, self.style, self.difficulty,
                               self.damage_type, self.damage, self.sturdiness, self.crowd_control,
-                              self.mobility, self.utility, self.win_rate, self.pick_rate, self.scaling)
+                              self.mobility, self.utility, self.win_rate, self.pick_rate, self.scaling,
+                              self.attack_range, self.waveclear)

@@ -12,6 +12,7 @@ SEED_DIR = Path(__file__).parent / "seed"
 DEFAULT_WIN_RATE = 50.0
 DEFAULT_SCALING = 2
 SCALING_VALUES = (1, 2, 3)
+RANGE_WAVECLEAR_VALUES = (1, 2, 3)   # Range: 1 melee, 2 short, 3 long. Waveclear: 1 weak, 2 average, 3 strong
 CLASS_FIXES = {"Assasin": "Assassin"}
 
 
@@ -121,6 +122,11 @@ def load_seed_data(seed_dir: Path = SEED_DIR) -> SeedData:
                 raise ValueError("Name is empty")
             if r.get("DamageType") not in ("P", "M", "PM"):
                 raise ValueError(f"DamageType must be P, M or PM, not {r.get('DamageType')!r}")
+            attack_range = _attr(r, "Range", warnings)
+            waveclear = _attr(r, "Waveclear", warnings)
+            for column, value in (("Range", attack_range), ("Waveclear", waveclear)):
+                if value not in RANGE_WAVECLEAR_VALUES:
+                    raise ValueError(f"{column} must be 1, 2 or 3, not {value}")
             champions.append(Champion(
                 id=int(r["Id"]), name=r["Name"], champ_class=_fix_class(r["Class"]), style=int(r["Style"]),
                 difficulty=int(r["Difficulty"]), damage_type=r["DamageType"], damage=_attr(r, "Damage", warnings),
@@ -128,7 +134,7 @@ def load_seed_data(seed_dir: Path = SEED_DIR) -> SeedData:
                 mobility=_attr(r, "Mobility", warnings), utility=_attr(r, "Utility", warnings),
                 win_rate=float(stat["WinRate"]) if stat else DEFAULT_WIN_RATE,
                 pick_rate=float(stat["PickRate"]) if stat else 0.0,
-                scaling=champ_scaling,
+                scaling=champ_scaling, attack_range=attack_range, waveclear=waveclear,
             ))
         except KeyError as exc:
             raise SeedDataError(f"{label}: missing column {exc}") from exc

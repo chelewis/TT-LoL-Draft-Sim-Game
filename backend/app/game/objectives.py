@@ -1,6 +1,7 @@
 """Dragons, barons, towers and sieges (spec 9.10, 9.11)."""
 from __future__ import annotations
 
+from .range_waveclear import siege_chance_delta
 from .state import Match, TeamState
 from .structures import STRUCTURE_LANES
 
@@ -96,6 +97,9 @@ def siege(match: Match, attacker: TeamState, kills: int, reason: str) -> None:
         attacker.power_play = False
     ratio = match.control_ratio(attacker, roll=False)
     chance = cfg["siege_base_chance"] + cfg["siege_control_scale"] * (ratio - 0.5)
+    # waveclear pushes the waves in and range pokes defenders off the tower (or, for the defender, holds it)
+    chance += siege_chance_delta([p.champion for p in attacker.players.values()],
+                                 [p.champion for p in defender.players.values()], match.config)
     chance = max(0.15, min(0.95, chance))
 
     landed = 0

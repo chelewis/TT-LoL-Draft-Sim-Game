@@ -92,6 +92,8 @@ The CSVs are the **seed data**. They are imported into PostgreSQL by a seed/migr
 | `Difficulty` | 1–3. Higher = bigger skill swing (see §9.3) |
 | `DamageType` | `P`, `M`, or `PM` |
 | `Damage`, `Sturdiness`, `Crowd-Control`, `Mobility`, `Utility` | Core combat attributes (roughly 1–3 each) |
+| `Range` | 1 melee, 2 short range, 3 long range (see §9.5b) |
+| `Waveclear` | 1 weak, 2 average, 3 strong (see §9.5b) |
 
 \* `Assasin` is misspelled in the data. Normalize to `Assassin` during import.
 
@@ -502,6 +504,23 @@ The admin-edited same-team (`ally`) and against-team (`enemy`) matrices feed the
 - **Fight counter** (`fight_counter_scale`): fight power, from the fighters' average win rate against the enemy fighters.
 
 The `win_rates` and `damage_balance` constants can be edited on the admin Simulation Settings page. They are stored as overrides of `SIMULATION_CONFIG`, and each result records the overrides it was simulated with.
+
+### 9.5b Range and waveclear
+
+Pure multipliers and chance offsets (no rolls); most compare one side with the other, so equal comps are unaffected. Each section (`range`, `waveclear`) has an `enabled` switch and can be tuned on the admin Simulation Settings page. Code: `backend/app/game/range_waveclear.py`.
+
+**Waveclear**
+- **Lane CS** (`lane_cs_scale` 0.10): top, mid and bot lane-phase CS × `1 + scale * 2 * (share - 0.5)`, share = own waveclear / (own + lane opponent's). Strong vs weak = ±5%.
+- **Farm speed** (`farm_scale` 0.04): from the end of the lane phase, CS per minute × `1 + scale * (waveclear - 2)`.
+- **Objective priority** (`priority_scale` 0.05): objective control (dragons, barons, tower trades) × `1 + scale * (weighted waveclear - 2)`, lane weights `priority_weights` (mid 0.35, bot 0.25, top 0.2, jungle and support 0.1).
+- **Sieges** (`siege_scale` 0.05): siege hit chance + `scale * (attackers' average waveclear - defenders')`.
+
+**Range**
+- **Lane trades** (`lane_scale` 0.03): lane score × `1 + scale * (own range - opponent's)`. Bot and support compare duo averages; the jungle is unaffected.
+- **Teamfights vs skirmishes**: fight power × `1 + teamfight_scale * diff` (0.04, sides of 4+) or `1 - skirmish_scale * diff` (0.03, sides of 3 or fewer), diff = fighters' average range - enemy fighters'.
+- **Siege poke** (`siege_scale` 0.05): siege hit chance + `scale * (attackers' average range - defenders')`.
+
+The matchup panel shows both team totals and adds a callout when one team's total leads by 2+, when a top or mid laner out-ranges their opponent by 2 steps, or when a bot duo's average range leads by 1+. Callouts only mention effects that are switched on.
 
 ### 9.6 Team style and focus (enabled in V1)
 
