@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import Any
 
 # Matchup wheel: key beats value.
@@ -27,6 +28,12 @@ class Champion:
     scaling: int = 2  # 1 early game, 2 neutral, 3 late game
     attack_range: int = 2  # 1 melee, 2 short range, 3 long range
     waveclear: int = 2  # 1 weak, 2 average, 3 strong
+    roles: tuple[str, ...] = ()  # its usual lanes, most played first (e.g. ("JUNGLE", "TOP")); () = no data
+
+    @property
+    def roles_text(self) -> str:
+        """The roles as stored in the database: "JUNGLE|TOP"."""
+        return "|".join(self.roles)
 
     @property
     def offence(self) -> int:
@@ -43,13 +50,13 @@ class Champion:
     def attribute(self, kind: str) -> int:
         return {"Offence": self.offence, "Defence": self.defence, "Control": self.control}[kind]
 
-    @property
+    @cached_property     # fixed per champion (frozen), and read thousands of times by lane previews
     def strength(self) -> str:
         """Highest of Offence / Defence / Control (ties: Offence > Defence > Control)."""
         best = max(ATTRIBUTE_ORDER, key=lambda k: (self.attribute(k), -ATTRIBUTE_ORDER.index(k)))
         return best
 
-    @property
+    @cached_property
     def weakness(self) -> str:
         """The type that beats this champion's strength."""
         s = self.strength
@@ -62,7 +69,7 @@ class Champion:
             "damage": self.damage, "sturdiness": self.sturdiness, "crowd_control": self.cc,
             "mobility": self.mobility, "utility": self.utility,
             "win_rate": self.win_rate, "pick_rate": self.pick_rate, "scaling": self.scaling,
-            "range": self.attack_range, "waveclear": self.waveclear,
+            "range": self.attack_range, "waveclear": self.waveclear, "roles": list(self.roles),
             "offence": self.offence, "defence": self.defence, "control": self.control,
             "strength": self.strength, "weakness": self.weakness,
         }

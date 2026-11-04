@@ -118,7 +118,15 @@ def test_simulation_settings_start_at_defaults(admin):
     assert fields["win_rates.lane_counter_scale"]["value"] == fields["win_rates.lane_counter_scale"]["default"]
     assert fields["damage_balance.enabled"]["kind"] == "bool"
     assert {f["group"] for f in body["fields"]} == {"Champion win rates", "Damage balance", "Champion scaling", "CS",
-                                                    "Waveclear", "Range"}
+                                                    "Waveclear", "Range", "Off-role champions"}
+    assert fields["off_role.lane_penalty"]["value"] == 0.15 and fields["off_role.enabled"]["value"] is True
+
+
+def test_off_role_settings_save(admin):
+    res = admin.put("/admin/simulation", {"values": {"off_role.lane_penalty": 0.25, "off_role.enabled": False}})
+    assert res.status_code == 200, res.text
+    values = settings_values(admin)
+    assert values["off_role.lane_penalty"] == 0.25 and values["off_role.enabled"] is False
 
 
 def test_simulation_settings_save_validate_and_reset(admin):

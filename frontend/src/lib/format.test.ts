@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { comfortTier, editedFieldsText, importCheckBadge, draftRules, isSolo, formatDuration, formatMetric, isSoloSource, matchupText, overBudgetNotice, rankLabel, remainingSeconds, riotSourceLabel, riotSourceTag, roleLabel, scalingLabel } from './format'
+import { championRoles, comfortTier, isOffRole, editedFieldsText, importCheckBadge, draftRules, isSolo, formatDuration, formatMetric, isSoloSource, matchupText, overBudgetNotice, rankLabel, remainingSeconds, riotSourceLabel, riotSourceTag, roleLabel, scalingLabel } from './format'
+import type { Lane } from '../api/types'
 
 describe('scalingLabel', () => {
   it('names champion scaling scores', () => {
@@ -143,5 +144,22 @@ describe('importCheckBadge', () => {
   })
   it('words edited fields', () => {
     expect(editedFieldsText(['role', 'cs'])).toBe('role, farming')
+  })
+})
+
+describe('isOffRole', () => {
+  const jungler = { id: 50, roles: ['JUNGLE', 'TOP'] as Lane[] }
+  it('is false in either usual role', () => {
+    expect(isOffRole(jungler, 'JUNGLE', [])).toBe(false)
+    expect(isOffRole(jungler, 'TOP', [])).toBe(false)
+  })
+  it('is true elsewhere, unless it is a top 3 pool pick', () => {
+    expect(isOffRole(jungler, 'BOT', [1, 2, 3, 50, 5])).toBe(true)
+    expect(isOffRole(jungler, 'BOT', [1, 2, 50, 4, 5])).toBe(false)
+  })
+  it('is false without role data', () => {
+    expect(isOffRole({ id: 50, roles: [] }, 'BOT', [])).toBe(false)
+    expect(championRoles({ roles: [] })).toBeNull()
+    expect(championRoles(jungler)).toBe('Jungle / Top')
   })
 })

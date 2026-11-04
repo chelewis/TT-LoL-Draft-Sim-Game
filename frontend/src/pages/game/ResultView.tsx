@@ -8,7 +8,7 @@ import { ChampionTag, ErrorNotice, Loading } from '../../components/common'
 import MatchMap from '../../components/MatchMap'
 import { OverBudgetBadge } from '../../components/TeamCard'
 import { useChampionMap } from '../../hooks/useData'
-import { LANE_LABEL, TIER_LABEL, formatDuration, isSolo, matchupText, seriesLabel, titleCase } from '../../lib/format'
+import { LANE_LABEL, TIER_LABEL, formatDuration, isCpu, isSolo, matchupText, seriesLabel, titleCase } from '../../lib/format'
 import GoldGraph from '../../components/GoldGraph'
 import { formatThousands, goldTimeline } from '../../lib/scoreboard'
 import { describeEvent, summarize } from '../../lib/summary'
@@ -215,6 +215,7 @@ function SeriesNext({ game, names }: { game: GameState; names: Record<Side, stri
   const qc = useQueryClient()
   const s = game.series!
   const solo = isSolo(game)
+  const cpu = isCpu(game)        // the CPU is always ready and keeps its side when it loses
   const me = game.you.team
   const loser = s.loser_side
   const choosing = !!loser && (solo || me === loser)
@@ -254,7 +255,7 @@ function SeriesNext({ game, names }: { game: GameState; names: Record<Side, stri
         Series {names.BLUE} {s.score.BLUE}–{s.score.RED} {names.RED} · first to {s.wins_needed} wins
         {s.fearless && ' · Fearless: every champion picked so far stays locked for the rest of the series'}
       </p>
-      {!solo && (
+      {!solo && !cpu && (
         <div className="row wrap">
           {(['BLUE', 'RED'] as Side[]).map((x) => (
             <span key={x}>
@@ -286,7 +287,11 @@ function SeriesNext({ game, names }: { game: GameState; names: Record<Side, stri
         </div>
       )}
       {!choosing && loser && !solo && (
-        <p className="muted small">{names[loser]} lost this game, so they choose the sides for Game {next}.</p>
+        <p className="muted small">
+          {cpu
+            ? `${names[loser]} (CPU) lost this game and keeps its side for Game ${next}.`
+            : `${names[loser]} lost this game, so they choose the sides for Game ${next}.`}
+        </p>
       )}
       <ErrorNotice error={ready.error} />
       <div className="row wrap">
@@ -295,9 +300,9 @@ function SeriesNext({ game, names }: { game: GameState; names: Record<Side, stri
           disabled={ready.isPending || (!mineReady && choosing && !side)}
           onClick={() => ready.mutate(!mineReady)}
         >
-          {mineReady ? 'Not ready' : solo ? `Start Game ${next}` : `Ready for Game ${next}`}
+          {mineReady ? 'Not ready' : solo || cpu ? `Start Game ${next}` : `Ready for Game ${next}`}
         </button>
-        {mineReady && !solo && <span className="muted">Waiting for the other player…</span>}
+        {mineReady && !solo && !cpu && <span className="muted">Waiting for the other player…</span>}
       </div>
     </div>
   )
@@ -319,7 +324,10 @@ function Scoreboard({ side, name, players, mvp, ace }: { side: Side; name: strin
                   {p.name} {p.player_id === mvp && <span className="badge gold">MVP</span>} {p.player_id === ace && <span className="badge gold">ACE</span>}
                 </td>
                 <td>{p.champion}</td>
-                <td><span className={`badge tier-${p.comfort_tier.toLowerCase()}`}>{TIER_LABEL[p.comfort_tier]}</span></td>
+                <td>
+                  <span className={`badge tier-${p.comfort_tier.toLowerCase()}`}>{TIER_LABEL[p.comfort_tier]}</span>
+                  {p.off_role && <> <span className="badge tier-vulnerable" title="Played outside the champion's usual roles">Off-role</span></>}
+                </td>
                 <td>{p.kills}/{p.deaths}/{p.assists}</td>
                 <td>{p.cs}</td>
                 <td>{p.gold.toLocaleString()}</td>

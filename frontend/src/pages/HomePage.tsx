@@ -17,6 +17,18 @@ function savedMode(): Mode {
   }
 }
 
+/** Single player opponent: yourself (you play both sides) or the CPU. */
+type Opponent = 'SELF' | 'CPU'
+const OPPONENT_KEY = 'ldm_solo_opponent'
+
+function savedOpponent(): Opponent {
+  try {
+    return localStorage.getItem(OPPONENT_KEY) === 'CPU' ? 'CPU' : 'SELF'
+  } catch {
+    return 'SELF'
+  }
+}
+
 interface DraftOptions {
   bans: boolean
   timers: boolean
@@ -81,10 +93,20 @@ export default function HomePage() {
   const qc = useQueryClient()
   const [code, setCode] = useState('')
   const [mode, setModeState] = useState<Mode>(savedMode)
+  const [opponent, setOpponentState] = useState<Opponent>(savedOpponent)
   const [hide, setHide] = useState(false)
   // each tab keeps its own draft options: a single player sandbox defaults to no timers
   const [multi, setMulti] = useState<DraftOptions>({ bans: true, timers: true, pickSeconds: 30, banSeconds: 30, format: 'BO1', fearless: false })
   const [solo, setSolo] = useState<DraftOptions>({ bans: true, timers: false, pickSeconds: 30, banSeconds: 30, format: 'BO1', fearless: false })
+
+  function setOpponent(next: Opponent) {
+    setOpponentState(next)
+    try {
+      localStorage.setItem(OPPONENT_KEY, next)
+    } catch {
+      /* the choice just will not be remembered */
+    }
+  }
 
   function setMode(next: Mode) {
     setModeState(next)
@@ -101,7 +123,7 @@ export default function HomePage() {
       const o = mode === 'SOLO' ? solo : multi
       return api<LobbySummary>('/lobbies', {
         body: {
-          mode,
+          mode: mode === 'SOLO' && opponent === 'CPU' ? 'CPU' : mode,
           settings: {
             hide_player_data: mode === 'MULTI' && hide,
             bans_enabled: o.bans,
@@ -136,7 +158,9 @@ export default function HomePage() {
   const past = (games.data ?? []).filter((g) => ['COMPLETED', 'CANCELLED'].includes(g.status)).slice(0, 8)
   const gameLabel = (g: LobbySummary) => (
     <>
-      {g.settings.mode === 'SOLO' ? <strong>Single player</strong> : <>Lobby <strong>{g.code}</strong></>}
+      {g.settings.mode === 'SOLO' ? <strong>Single player</strong>
+        : g.settings.mode === 'CPU' ? <strong>vs CPU</strong>
+        : <>Lobby <strong>{g.code}</strong></>}
       {g.series && (
         <span className="badge series-badge">
           {seriesShort(g.series.format)} · Game {g.series.game_number}{g.series.fearless ? ' · Fearless' : ''}
@@ -161,9 +185,17 @@ export default function HomePage() {
 
           {mode === 'SOLO' ? (
             <>
+              <label>
+                Opponent
+                <select value={opponent} onChange={(e) => setOpponent(e.target.value as Opponent)}>
+                  <option value="SELF">Yourself (you control both sides)</option>
+                  <option value="CPU">CPU</option>
+                </select>
+              </label>
               <p className="muted">
-                Play both sides yourself: choose a team for Blue and for Red, make every pick and ban, then watch the
-                simulated match. No second player needed.
+                {opponent === 'CPU'
+                  ? "Draft against the CPU: choose your team and the CPU's team, then take turns picking and banning. The CPU drafts from the same stats, pools and matchups the simulation uses."
+                  : 'Play both sides yourself: choose a team for Blue and for Red, make every pick and ban, then watch the simulated match. No second player needed.'}
               </p>
               <DraftOptionsForm value={solo} onChange={setSolo} />
             </>
@@ -180,7 +212,7 @@ export default function HomePage() {
 
           <ErrorNotice error={create.error} />
           <button className="primary" onClick={() => create.mutate()} disabled={create.isPending}>
-            {mode === 'SOLO' ? 'Start single player game' : 'Create lobby'}
+            {mode === 'SOLO' ? (opponent === 'CPU' ? 'Start game vs CPU' : 'Start single player game') : 'Create lobby'}
           </button>
         </div>
         <form className="card stack" onSubmit={submitJoin}>

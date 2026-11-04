@@ -123,4 +123,42 @@ def test_statistics_rows_are_unique():
 def test_no_champion_attribute_is_blank():
     """A blank cell is silently replaced by a default at load time; make the data fix it instead."""
     warnings = [w for w in load_seed_data().warnings if w.startswith("Champion ") or w.startswith("No statistics row")]
+    warnings = [w for w in warnings if "no Roles" not in w]      # blank Roles is allowed: no role data, never off-role
     assert not warnings, warnings
+
+
+def test_roles_are_loaded_in_pick_rate_order(seed):
+    by_name = {c.name: c.roles for c in seed.champions}
+    assert by_name["Gragas"] == ("JUNGLE", "TOP") and by_name["Ashe"] == ("BOT", "SUPPORT")
+    lanes = {"TOP", "JUNGLE", "MID", "BOT", "SUPPORT"}
+    assert all(len(set(c.roles)) == len(c.roles) and set(c.roles) <= lanes for c in seed.champions)
+
+
+def _with_row(tmp_path, row):
+    import shutil
+    from app.data.loader import SEED_DIR
+    seed_copy = tmp_path / "seed"
+    shutil.copytree(SEED_DIR, seed_copy)
+    path = seed_copy / "Champions.csv"
+    path.write_text(path.read_text(encoding="utf-8").rstrip("\n") + "\n" + row + "\n", encoding="utf-8")
+    return seed_copy
+
+
+def test_blank_roles_load_with_a_warning(tmp_path):
+    data = load_seed_data(_with_row(tmp_path, "999,Brandnew,Mage,5,2,M,3,1,1,1,1,2,2,"))
+    assert next(c for c in data.champions if c.name == "Brandnew").roles == ()
+    assert any("Brandnew" in w and "no Roles" in w for w in data.warnings)
+
+
+def test_bad_roles_are_an_error(tmp_path):
+    import pytest
+    from app.data.loader import SeedDataError
+    with pytest.raises(SeedDataError, match="Brandnew.*unknown role 'adc'"):
+        load_seed_data(_with_row(tmp_path / "a", "999,Brandnew,Mage,5,2,M,3,1,1,1,1,2,2,bot|adc"))
+    with pytest.raises(SeedDataError, match="Brandnew.*up to 5 different roles"):
+        load_seed_data(_with_row(tmp_path / "b", "999,Brandnew,Mage,5,2,M,3,1,1,1,1,2,2,top|mid|top"))
+
+
+def test_a_champion_can_have_more_than_two_roles(tmp_path):
+    data = load_seed_data(_with_row(tmp_path, "999,Brandnew,Mage,5,2,M,3,1,1,1,1,2,2,mid|top|sup"))
+    assert next(c for c in data.champions if c.name == "Brandnew").roles == ("MID", "TOP", "SUPPORT")

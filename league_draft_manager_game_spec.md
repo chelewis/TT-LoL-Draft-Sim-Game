@@ -94,6 +94,7 @@ The CSVs are the **seed data**. They are imported into PostgreSQL by a seed/migr
 | `Damage`, `Sturdiness`, `Crowd-Control`, `Mobility`, `Utility` | Core combat attributes (roughly 1–3 each) |
 | `Range` | 1 melee, 2 short range, 3 long range (see §9.5b) |
 | `Waveclear` | 1 weak, 2 average, 3 strong (see §9.5b) |
+| `Roles` | The champion's usual roles, most played first (typically its top 2 by pick rate; up to all 5): `top`, `jg`, `mid`, `bot`, `sup` separated by `\|` (e.g. `jg\|top`). Blank = no role data (see §9.5c) |
 
 \* `Assasin` is misspelled in the data. Normalize to `Assassin` during import.
 
@@ -521,6 +522,12 @@ Pure multipliers and chance offsets (no rolls); most compare one side with the o
 - **Siege poke** (`siege_scale` 0.05): siege hit chance + `scale * (attackers' average range - defenders')`.
 
 The matchup panel shows both team totals and adds a callout when one team's total leads by 2+, when a top or mid laner out-ranges their opponent by 2 steps, or when a bot duo's average range leads by 1+. Callouts only mention effects that are switched on.
+
+### 9.5c Off-role champions
+
+Any champion can be played in any lane, but a champion played outside its `Roles` (typically its top 2 roles by pick rate) is discouraged: that player's lane score × `1 - lane_penalty` (0.15). The lane score carries into lane gold and fight performance, so the cost is felt over the whole game. **Exception:** no penalty when the champion is in the first `pool_exempt` (3) slots of the player's pool — a pocket pick they have mastered. A champion with no role data is never off-role. The `off_role` section (`enabled`, `lane_penalty`) can be edited on the admin Simulation Settings page; the CPU drafter reads the same rule. Code: `backend/app/game/comfort.py` (`off_role`, `off_role_multiplier`), applied in the lane phase.
+
+The champion card in the draft shows its roles, the lineup step marks an off-role pick, and each result player has an `off_role` flag (shown as a badge).
 
 ### 9.6 Team style and focus (enabled in V1)
 

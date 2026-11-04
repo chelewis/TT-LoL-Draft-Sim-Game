@@ -1,5 +1,5 @@
 import type { GameState } from '../api/types'
-import { isSolo, seriesShort } from '../lib/format'
+import { isCpu, isSolo, seriesShort } from '../lib/format'
 
 /** "Game 2 · Bo3 (1–0)" for a game in a series, from this game's Blue side first. `hideResult` leaves this
  * game's win out of the score, so the banner doesn't give the result away while the replay plays. */
@@ -31,7 +31,7 @@ export default function SideBanner({ game, hideResult = false }: { game: GameSta
     <div className={`side-banner ${side.toLowerCase()}`} role="status" aria-label={`You are playing on the ${label} side`}>
       <span>You are playing {label} side</span>
       {name && <span className="sub">· {name}</span>}
-      {game.you.is_owner && <span className="sub">· lobby owner</span>}
+      {isCpu(game) ? <span className="sub">· vs CPU</span> : game.you.is_owner && <span className="sub">· lobby owner</span>}
       {tag && <span className="sub">· {tag}</span>}
     </div>
   )

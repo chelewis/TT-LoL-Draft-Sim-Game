@@ -1,18 +1,20 @@
 import { useMutation } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../api/client'
-import type { Champion, GameState, HiddenPlayer, Lane, Player, Side } from '../../api/types'
+import type { Champion, GameState, HiddenPlayer, Lane, MatchupPreview, Player, Side } from '../../api/types'
 import { LANES } from '../../api/types'
 import { ChampionIcon, LaneIcon, championArt } from '../../components/ChampionArt'
 import { ErrorNotice, Pips } from '../../components/common'
 import ChatPanel from '../../components/ChatPanel'
 import TeamCard from '../../components/TeamCard'
 import MatchupPanel from './MatchupPanel'
+import { CounterChip, GradeChip, RoleTag } from './LaneInsights'
+import { useMatchupPreview } from '../../hooks/useMatchupPreview'
 import { useCountdownTick } from '../../hooks/useCountdownTick'
 import { useChampions, useCountdown, usePlayers } from '../../hooks/useData'
 import { useTurnAlert } from '../../hooks/useTurnAlert'
 import { alertsState, disableAlerts, disablePullBack, enableAlerts, enablePullBack, pullBackState, turnAlertKey } from '../../lib/alerts'
-import { LANE_LABEL, TIER_LABEL, TIER_MODIFIER, comfortTier, isHidden, isSolo, rankLabel, roleLabel, scalingLabel } from '../../lib/format'
+import { LANE_LABEL, TIER_LABEL, TIER_MODIFIER, championRoles, comfortTier, isCpu, isOffRole, isHidden, isSolo, rankLabel, roleLabel, scalingLabel } from '../../lib/format'
 import RiotBadge from '../../components/RiotBadge'
 import TagChips from '../../components/TagChips'
 import { lineupAssignments, swapLanes, type Lineup, type SwapKind } from '../../lib/lineup'
@@ -46,12 +48,14 @@ const sideName = (s: Side) => (s === 'BLUE' ? 'Blue' : 'Red')
 export default function DraftView({ game, onChange }: { game: GameState; onChange: () => void }) {
   const draft = game.draft!
   const solo = isSolo(game)
+  const cpu = isCpu(game)      // vs CPU: the opponent's seat is played by the CPU (no chat, no turn alerts)
   // single player: "me" is whichever side is up, so the hints and highlights follow the turn
   const me = solo ? (draft.current_team ?? 'BLUE') : game.you.team
   const champions = useChampions()
   const [selected, setSelected] = useState<number | null>(null)
   const [query, setQuery] = useState('')
   const [classFilter, setClassFilter] = useState('')
+  const [poolOnly, setPoolOnly] = useState(false)
   const seconds = useCountdown(draft.expires_at)
 
   const myTurn = draft.current_team === me
@@ -115,6 +119,13 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
   const [showMatchups, setShowMatchups] = useState(false)
   const matchupsOpen = finalizing && showMatchups
   const lineups = useMemo(() => ({ BLUE: lineupOf(game, 'BLUE'), RED: lineupOf(game, 'RED') }), [game])
+  // grades, counters and role badges for the pick rows; also gives the opponent's current lanes
+  const matchups = useMatchupPreview(game, finalizing)
+  const insights = finalizing ? matchups.data : undefined
+  const shown = useMemo(
+    () => ({ BLUE: lineups.BLUE ?? previewLineup(insights, 'BLUE'), RED: lineups.RED ?? previewLineup(insights, 'RED') }),
+    [lineups, insights],
+  )
   const isReady = (side: Side) => !!(side === 'BLUE' ? game.players.blue : game.players.red)?.lineup_ready
   const canEdit = (side: Side) => finalizing && editing && (solo || side === game.you.team) && !!lineups[side] && !isReady(side)
 
@@ -171,9 +182,14 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
     return (champions.data ?? [])
-      .filter((c) => (!q || c.name.toLowerCase().includes(q)) && (!classFilter || normalizeClass(c.class).includes(classFilter)))
+      .filter(
+        (c) =>
+          (!q || c.name.toLowerCase().includes(q)) &&
+          (!classFilter || normalizeClass(c.class).includes(classFilter)) &&
+          (!poolOnly || hints.has(c.id)),
+      )
       .sort((a, b) => a.name.localeCompare(b.name))
-  }, [champions.data, query, classFilter])
+  }, [champions.data, query, classFilter, poolOnly, hints])
 
   const selectedChampion = selected ? byId.get(selected) : undefined
   // the champion I'm hovering shows in my active slot, like the client's pre-lock preview
@@ -190,12 +206,12 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
       ? 'Both lineups are locked in.'
       : editableSides.some(canEdit)
         ? 'Swap champions or positions with the ⇅ buttons, then lock in your lineup.'
-        : 'Waiting for your opponent to lock in…'
+        : cpu ? 'The CPU is locking in…' : 'Waiting for your opponent to lock in…'
     : myTurn
       ? solo
         ? `${sideName(me)}: choose a champion to ${action === 'PICK' ? 'pick' : 'ban'}`
         : `Your turn: choose a champion to ${action === 'PICK' ? 'pick' : 'ban'}`
-      : 'Waiting for your opponent…'
+      : cpu ? 'The CPU is thinking…' : 'Waiting for your opponent…'
 
   return (
     <div className="stack">
@@ -231,7 +247,7 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
               <button className="cs-alert-toggle" aria-pressed={soundOn} onClick={toggleSound}>
                 {soundOn ? '🔊 Sound on' : '🔇 Sound off'}
               </button>
-              {!solo && alerts !== 'unsupported' && (
+              {!solo && !cpu && alerts !== 'unsupported' && (
                 <button
                   className="cs-alert-toggle"
                   aria-pressed={alerts === 'on'}
@@ -246,7 +262,7 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
                   {alerts === 'on' ? '🔔 Turn alerts on' : alerts === 'blocked' ? '🔕 Turn alerts blocked' : '🔕 Turn alerts off'}
                 </button>
               )}
-              {!solo && pullBack !== 'unsupported' && (
+              {!solo && !cpu && pullBack !== 'unsupported' && (
                 <button
                   className="cs-alert-toggle"
                   aria-pressed={pullBack === 'on'}
@@ -267,7 +283,7 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
           {fearless.size > 0 && <SeriesLocks ids={fearless} byId={byId} />}
         </header>
 
-        <div className={`cs-body ${solo ? '' : 'with-chat'}`}>
+        <div className={`cs-body ${solo || cpu ? '' : 'with-chat'}`}>
           <PickColumn
             side="BLUE"
             game={game}
@@ -276,7 +292,8 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
             me={me}
             solo={solo}
             seconds={draft.timers_enabled ? seconds : null}
-            lineup={finalizing ? lineups.BLUE : null}
+            lineup={finalizing ? shown.BLUE : null}
+            insights={insights}
             editable={canEdit('BLUE')}
             menuLane={swapMenu?.side === 'BLUE' ? swapMenu.lane : null}
             onOpenMenu={(lane) => setSwapMenu(lane ? { side: 'BLUE', lane } : null)}
@@ -303,19 +320,42 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
                         role="tab"
                         aria-selected={classFilter === f.match}
                         className={`cs-tab ${classFilter === f.match ? 'active' : ''}`}
-                        onClick={() => setClassFilter(f.match)}
+                        // clicking the active tab again clears it back to "All"
+                        onClick={() => setClassFilter(classFilter === f.match ? '' : f.match)}
                       >
                         {f.label}
                       </button>
                     ))}
                   </div>
-                  <input
-                    className="cs-search"
-                    placeholder="Search"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    aria-label="Search champions"
-                  />
+                  <div className="cs-filter-tools">
+                    <button
+                      className="cs-alert-toggle"
+                      aria-pressed={poolOnly}
+                      onClick={() => setPoolOnly(!poolOnly)}
+                      title={
+                        solo
+                          ? `Only show champions in the ${sideName(me)} team's champion pools`
+                          : "Only show champions in your team's champion pools"
+                      }
+                    >
+                      ★ Team pool
+                    </button>
+                    <div className="cs-search-wrap">
+                      <input
+                        className="cs-search"
+                        placeholder="Search"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Escape' && setQuery('')}
+                        aria-label="Search champions"
+                      />
+                      {query && (
+                        <button className="cs-search-clear" onClick={() => setQuery('')} aria-label="Clear search" title="Clear search">
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
                 <div className="cs-grid-scroll">
                   <div className="cs-grid">
@@ -347,14 +387,16 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
                         </button>
                       )
                     })}
-                    {visible.length === 0 && <p className="muted">No champions match.</p>}
+                    {visible.length === 0 && (
+                      <p className="muted">{poolOnly && hints.size === 0 ? 'No champions in your team’s pools.' : 'No champions match.'}</p>
+                    )}
                   </div>
                 </div>
               </>
             )}
           </section>
 
-          {!solo && <ChatPanel gameId={game.game_id} myUserId={game.you.user_id} />}
+          {!solo && !cpu && <ChatPanel gameId={game.game_id} myUserId={game.you.user_id} />}
 
           <PickColumn
             side="RED"
@@ -364,7 +406,8 @@ export default function DraftView({ game, onChange }: { game: GameState; onChang
             me={me}
             solo={solo}
             seconds={draft.timers_enabled ? seconds : null}
-            lineup={finalizing ? lineups.RED : null}
+            lineup={finalizing ? shown.RED : null}
+            insights={insights}
             editable={canEdit('RED')}
             menuLane={swapMenu?.side === 'RED' ? swapMenu.lane : null}
             onOpenMenu={(lane) => setSwapMenu(lane ? { side: 'RED', lane } : null)}
@@ -456,10 +499,12 @@ function SideHeader({ side, game, byId, preview, me }: SideProps) {
         {draft.complete ? (
           <>
             {!isSolo(game) && me === side && <span className="cs-you">you</span>}
+            {isCpu(game) && me !== side && <span className="cs-you">CPU</span>}
             {(side === 'BLUE' ? game.players.blue : game.players.red)?.lineup_ready && <span className="cs-you">locked in</span>}
           </>
         ) : (
-          me === side && <span className="cs-you">{isSolo(game) ? 'up now' : 'you'}</span>
+          me === side ? <span className="cs-you">{isSolo(game) ? 'up now' : 'you'}</span>
+            : isCpu(game) && <span className="cs-you">CPU</span>
         )}
       </div>
       {banSlots > 0 && (
@@ -500,6 +545,17 @@ function SeriesLocks({ ids, byId }: { ids: Set<number>; byId: Map<number, Champi
 const ROW_LANE_LABEL: Record<Lane, string> = { TOP: 'Top', JUNGLE: 'Jungle', MID: 'Mid', BOT: 'Bottom', SUPPORT: 'Support' }
 
 /** The saved lineup of a side, if this viewer may see it (own side; both in single player; both when the game is over). */
+/** A side's current lineup as the matchup data shows it (the opponent's lanes, which the game state keeps hidden). */
+function previewLineup(data: MatchupPreview | undefined, side: Side): Lineup | null {
+  if (!data) return null
+  const players: Partial<Record<Lane, number>> = {}
+  for (const lane of LANES) {
+    const id = data.lanes[lane].players?.[side]?.player_id
+    if (id != null) players[lane] = id
+  }
+  return { champions: data.lineups[side] as Lineup['champions'], players: players as Lineup['players'] }
+}
+
 function lineupOf(game: GameState, side: Side): Lineup | null {
   const l = game.lineup
   if (!l) return null
@@ -548,8 +604,10 @@ function InfoIcon({ size = 12 }: { size?: number }) {
 interface ColumnProps extends SideProps {
   solo: boolean
   seconds: number | null
-  /** The side's lineup once the draft is over (null while drafting, or when it is the opponent's hidden lineup). */
+  /** The side's lineup once the draft is over (null while drafting, or while the opponent's lanes are loading). */
   lineup: Lineup | null
+  /** Matchup data for the lane grades, counters and role badges (finalization only). */
+  insights?: MatchupPreview
   editable: boolean
   menuLane: Lane | null
   onOpenMenu: (lane: Lane | null) => void
@@ -560,7 +618,7 @@ interface ColumnProps extends SideProps {
  * One row per lane (lane icon, lane, player), like the client's team list. While drafting, picks fill
  * the rows in pick order. Afterwards the rows show the side's lineup, and its own rows get a swap menu.
  */
-function PickColumn({ side, game, byId, preview, me, solo, seconds, lineup, editable, menuLane, onOpenMenu, onSwap }: ColumnProps) {
+function PickColumn({ side, game, byId, preview, me, solo, seconds, lineup, insights, editable, menuLane, onOpenMenu, onSwap }: ColumnProps) {
   const draft = game.draft!
   const picks = side === 'BLUE' ? draft.blue_picks : draft.red_picks
   const now = activeSlot(game, side, 'PICK')
@@ -573,12 +631,19 @@ function PickColumn({ side, game, byId, preview, me, solo, seconds, lineup, edit
     const locked = championId !== undefined ? byId.get(championId) : undefined
     const hovering = !locked && i === now && side === me ? preview : undefined
     const tier = lineup && locked && player && !isHidden(player) ? comfortTier((player as Player).pool, locked.id) : null
-    return { lane, i, player, locked, hovering, champ: locked ?? hovering, tier }
+    const offRole = !!tier && !!locked && isOffRole(locked, lane, (player as Player).pool)
+    // only while the matchup data matches what this row shows (a refetch after a swap may still be on its way)
+    const laneData = insights?.lanes[lane]
+    const fresh = !!laneData && !!locked && laneData[side === 'BLUE' ? 'blue' : 'red'] === locked.id &&
+      laneData.players?.[side]?.player_id === (player?.id ?? null)
+    const analysis = fresh ? laneData.players[side] : null
+    return { lane, i, player, locked, hovering, champ: locked ?? hovering, tier, offRole, analysis, wheel: laneData?.wheel ?? null }
   })
+  const baseline = insights?.settings.baseline ?? 50
 
   return (
     <aside className={`cs-picks ${side.toLowerCase()}`} aria-label={`${sideName(side)} team`}>
-      {rows.map(({ lane, i, player, locked, hovering, champ, tier }) => {
+      {rows.map(({ lane, i, player, locked, hovering, champ, tier, offRole, analysis, wheel }) => {
         const active = i === now
         const open = menuLane === lane
         const cardOpen = cardLane === lane && !!player
@@ -611,7 +676,7 @@ function PickColumn({ side, game, byId, preview, me, solo, seconds, lineup, edit
                 )}
               </div>
               <div className="cs-row-text">
-                {active && <span className="cs-row-status">{solo || side === me ? 'Picking…' : 'Opponent picking…'}</span>}
+                {active && <span className="cs-row-status">{solo || side === me ? 'Picking…' : isCpu(game) ? 'CPU picking…' : 'Opponent picking…'}</span>}
                 <span className="cs-row-lane">{ROW_LANE_LABEL[lane]}</span>
                 {player ? (
                   <button
@@ -633,6 +698,18 @@ function PickColumn({ side, game, byId, preview, me, solo, seconds, lineup, edit
                   <span className="cs-row-champ">
                     {champ.name}
                     {tier && <span className={`cs-row-tier tier-${tier.toLowerCase()}`}> · {TIER_LABEL[tier]}</span>}
+                    {offRole && !analysis && (
+                      <span className="cs-row-tier tier-vulnerable" title={`${LANE_LABEL[lane]} isn't one of this champion's usual roles: lower lane score`}>
+                        {' '}· Off-role
+                      </span>
+                    )}
+                  </span>
+                )}
+                {analysis && (
+                  <span className="cs-row-insights">
+                    <GradeChip analysis={analysis} />
+                    <CounterChip wheel={wheel} side={side} rate={analysis.counter_rate} baseline={baseline} botLane={lane === 'BOT' || lane === 'SUPPORT'} />
+                    <RoleTag analysis={analysis} />
                   </span>
                 )}
               </div>
@@ -808,6 +885,7 @@ function ChampionDetail({ champion: c, hints }: { champion: Champion | undefined
           <span className="muted small">
             {normalizeClass(c.class)} · difficulty {c.difficulty} ·{' '}
             {c.damage_type === 'P' ? 'physical' : c.damage_type === 'M' ? 'magic' : 'mixed'} damage · WR {c.win_rate}% · PR {c.pick_rate}% · {scalingLabel(c.scaling)}
+            {championRoles(c) && <> · {championRoles(c)}</>}
           </span>
         </div>
         <div className="cs-detail-stats small">

@@ -14,6 +14,7 @@ DEFAULT_SCALING = 2
 SCALING_VALUES = (1, 2, 3)
 RANGE_WAVECLEAR_VALUES = (1, 2, 3)   # Range: 1 melee, 2 short, 3 long. Waveclear: 1 weak, 2 average, 3 strong
 CLASS_FIXES = {"Assasin": "Assassin"}
+MAX_ROLES = 5                        # any of the 5 lanes; usually its top 2 by pick rate. Anywhere else is off-role
 
 
 class SeedDataError(ValueError):
@@ -44,6 +45,22 @@ def _attr(row: dict[str, str], column: str, warnings: list[str]) -> int:
         warnings.append(f"Champion {row['Name']!r} has no {column}; using {MISSING_ATTRIBUTE_DEFAULT}")
         return MISSING_ATTRIBUTE_DEFAULT
     return int(row[column])
+
+
+def _roles(row: dict[str, str], warnings: list[str]) -> tuple[str, ...]:
+    """The champion's usual lanes from the Roles column ("jg|top", most played first). A blank cell (or no
+    column) means no role data: the champion is never off-role."""
+    cell = row.get("Roles", "")
+    if not cell:
+        warnings.append(f"Champion {row['Name']!r} has no Roles; it is never treated as off-role")
+        return ()
+    codes = [code.strip().lower() for code in cell.split("|") if code.strip()]
+    unknown = [code for code in codes if code not in ROLE_TO_LANE]
+    if unknown:
+        raise ValueError(f"Roles has unknown role {unknown[0]!r} (use {', '.join(ROLE_TO_LANE)}, separated by |)")
+    if len(codes) > MAX_ROLES or len(set(codes)) != len(codes):
+        raise ValueError(f"Roles lists up to {MAX_ROLES} different roles, not {cell!r}")
+    return tuple(ROLE_TO_LANE[code] for code in codes)
 
 
 def _norm(name: str) -> str:
@@ -135,6 +152,7 @@ def load_seed_data(seed_dir: Path = SEED_DIR) -> SeedData:
                 win_rate=float(stat["WinRate"]) if stat else DEFAULT_WIN_RATE,
                 pick_rate=float(stat["PickRate"]) if stat else 0.0,
                 scaling=champ_scaling, attack_range=attack_range, waveclear=waveclear,
+                roles=_roles(r, warnings),
             ))
         except KeyError as exc:
             raise SeedDataError(f"{label}: missing column {exc}") from exc

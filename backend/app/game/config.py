@@ -18,6 +18,7 @@ ROLE_TO_LANE = FOCUS_TO_LANE
 DRAFT_CONFIG: dict[str, Any] = {
     "draft_type": "STANDARD",
     "timer_seconds": 30,
+    "cpu_delay_seconds": 2.5,   # how long the CPU "thinks" before locking in a pick or ban
     "actions": [
         "BLUE_BAN", "RED_BAN", "BLUE_BAN", "RED_BAN", "BLUE_BAN", "RED_BAN",
         "BLUE_PICK", "RED_PICK", "RED_PICK", "BLUE_PICK", "BLUE_PICK", "RED_PICK",
@@ -56,7 +57,7 @@ MANAGEMENT_CONFIG: dict[str, Any] = {
 }
 
 SIMULATION_CONFIG: dict[str, Any] = {
-    "version": "2.6.0",
+    "version": "2.7.0",
     # Comfort modifiers (fractions, NOT whole-number multipliers).
     "comfort": {"best": 0.40, "comfort": 0.25, "familiar": 0.10, "vulnerable": -0.10},
     # Tier by position in the player's ordered 5-champion pool.
@@ -227,6 +228,18 @@ SIMULATION_CONFIG: dict[str, Any] = {
         "skirmish_scale": 0.03,   # fight power per point of average range *under* the enemy, fights of 3 or fewer
         "siege_scale": 0.05,      # siege hit chance per point of average range over the defenders
     },
+    # A champion played outside its usual roles (Champions.csv Roles, its top 2 by pick rate) costs lane score,
+    # which carries into lane gold and fights. Not for a champion in the first `pool_exempt` slots of the
+    # player's pool: a pocket pick they've mastered.
+    "off_role": {
+        "enabled": True,
+        "lane_penalty": 0.15,     # lane score x(1 - penalty)
+        "pool_exempt": 3,
+    },
+    # Lineup-stage lane grades (preview only, no effect on the simulation): the lowest percentile for each letter,
+    # ranking the player's expected lane score on their champion against every champion they could play there.
+    # Anything under D is F.
+    "lane_grade": {"S": 0.95, "A": 0.85, "B": 0.65, "C": 0.40, "D": 0.15},
 }
 
 # Playstyle tag effects (spec "Playstyle tags"). Admins build tags out of these hooks; a new kind of effect needs
@@ -357,6 +370,12 @@ EDITABLE_SETTINGS: list[dict[str, Any]] = [
     {"path": "range.siege_scale", "group": "Range", "kind": "number", "min": 0, "max": 0.3, "step": 0.01,
      "label": "Siege poke",
      "help": "Siege hit chance change per point of the attackers' average range over the defenders'."},
+    {"path": "off_role.enabled", "group": "Off-role champions", "kind": "bool", "label": "Penalise off-role champions",
+     "help": "A champion played outside its usual two roles loses lane score, unless it is in the top 3 of the "
+             "player's pool."},
+    {"path": "off_role.lane_penalty", "group": "Off-role champions", "kind": "number", "min": 0, "max": 0.5,
+     "step": 0.01, "label": "Lane score penalty",
+     "help": "Share of lane score lost off-role (0.15 = 15%). It carries into lane gold and fights."},
 ]
 EDITABLE_BY_PATH = {s["path"]: s for s in EDITABLE_SETTINGS}
 

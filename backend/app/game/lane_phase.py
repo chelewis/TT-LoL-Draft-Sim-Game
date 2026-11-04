@@ -2,6 +2,7 @@
 (spec 9.1, 9.4, 9.8, 9.9)."""
 from __future__ import annotations
 
+from .comfort import off_role_multiplier
 from .config import FOCUS_TO_LANE, LANES
 from .matchup import apply_coach_draft, lane_matchup
 from .models import Champion, PlayerSpec
@@ -168,6 +169,7 @@ def run_lane_phase(match: Match) -> None:
             score *= 1.0 + p.comfort
             score *= 1.0 + p.tag("lane_score")
             score *= strength_fit(p.spec, p.champion, cfg)
+            score *= off_role_multiplier(p.champion, lane, p.spec, cfg)
             score *= p.matchup_multiplier
             score *= team_lane_multiplier(team, lane, cfg)
             score *= win_rate_lane_multiplier(match, team, lane)

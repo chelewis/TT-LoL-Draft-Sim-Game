@@ -1,11 +1,11 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { api } from '../../api/client'
-import type { Champion, GameState, Lane, MatchupPreview, MatchupTeam, Side } from '../../api/types'
+import type { Champion, GameState, Lane, MatchupLane, MatchupTeam, Side } from '../../api/types'
 import { LANES } from '../../api/types'
 import { ChampionIcon, LaneIcon } from '../../components/ChampionArt'
 import { ErrorNotice, Loading } from '../../components/common'
 import { LANE_LABEL, scalingLabel } from '../../lib/format'
-import { formatPoints, formatRate, physicalShare, rateTone } from '../../lib/matchupPanel'
+import { formatPoints, formatRate, physicalShare, rateTone, wheelEdge } from '../../lib/matchupPanel'
+import { useMatchupPreview } from '../../hooks/useMatchupPreview'
+import { CounterChip, FactorList, GradeChip, RoleTag } from './LaneInsights'
 
 const SIDES: Side[] = ['BLUE', 'RED']
 const sideName = (s: Side) => (s === 'BLUE' ? 'Blue' : 'Red')
@@ -22,12 +22,7 @@ const TOTALS: { key: keyof MatchupTeam['totals']; label: string }[] = [
 
 /** Finalization's "Show Matchup Data" view, in place of the champion grid: lane matchups, damage mix and totals. */
 export default function MatchupPanel({ game, byId }: { game: GameState; byId: Map<number, Champion> }) {
-  const query = useQuery({
-    // my own swaps change the key; the opponent's arrive as LINEUP_UPDATED, which GamePage turns into a refetch
-    queryKey: ['matchups', game.game_id, game.lineup],
-    queryFn: () => api<MatchupPreview>(`/games/${game.game_id}/matchups`),
-    placeholderData: keepPreviousData,
-  })
+  const query = useMatchupPreview(game)
   if (query.isLoading) return <Loading label="Loading matchup data…" />
   if (query.error) return <ErrorNotice error={query.error} />
   const data = query.data!
@@ -40,9 +35,13 @@ export default function MatchupPanel({ game, byId }: { game: GameState; byId: Ma
         <div className="mp-lanes">
           {LANES.map((lane) => {
             const l = data.lanes[lane]
-            return <LaneRow key={lane} lane={lane} blue={byId.get(l.blue ?? -1)} red={byId.get(l.red ?? -1)} rate={l.blue_win_rate} baseline={baseline} />
+            return <LaneRow key={lane} lane={lane} data={l} blue={byId.get(l.blue ?? -1)} red={byId.get(l.red ?? -1)} baseline={baseline} />
           })}
         </div>
+        <p className="mp-note">
+          Grades (S best … F worst) rank each player's expected lane score on their champion against every champion they could play there,
+          counting comfort, stats, role, the matchup wheel, win rates, range and scaling. ▲/▼ is the matchup wheel (Offence beats Defence beats Control beats Offence).
+        </p>
         {!data.counter_data && (
           <p className="mp-note">No lane win rates yet: the against-team win rate matrix is empty. An admin can fill it in under Admin → Champions → Winrates → Against team.</p>
         )}
@@ -91,29 +90,66 @@ export default function MatchupPanel({ game, byId }: { game: GameState; byId: Ma
 
 const toneOfPoints = (points: number | null) => rateTone(points === null ? null : 50 + points)
 
-function LaneRow({ lane, blue, red, rate, baseline }: { lane: Lane; blue?: Champion; red?: Champion; rate: number | null; baseline: number }) {
+function LaneRow({ lane, data, blue, red, baseline }: { lane: Lane; data: MatchupLane; blue?: Champion; red?: Champion; baseline: number }) {
+  const rate = data.blue_win_rate
   const blueShare = rate ?? 50
+  const bot = lane === 'BOT' || lane === 'SUPPORT'
+  const edge = wheelEdge(data.wheel, 'BLUE')
   return (
-    <div className="mp-lane">
-      <span className="mp-champ blue">
-        <ChampionIcon champion={blue} size={34} />
-        <span>{blue?.name ?? '—'}</span>
-      </span>
-      <span className="mp-lane-mid">
-        <span className="mp-lane-label"><LaneIcon lane={lane} size={14} /> {LANE_LABEL[lane]}</span>
-        <span className={`mp-rate-bar ${rate === null ? 'none' : ''}`} role="img" aria-label={rate === null ? 'No win rate data' : `Blue ${formatRate(rate)}, Red ${formatRate(100 - rate)}`}>
-          <span className="mp-rate-fill" style={{ width: `${blueShare}%` }} />
+    <div className="mp-lane-wrap">
+      <div className="mp-lane">
+        <LaneSide side="BLUE" champion={blue} data={data} baseline={baseline} bot={bot} />
+        <span className="mp-lane-mid">
+          <span className="mp-lane-label"><LaneIcon lane={lane} size={14} /> {LANE_LABEL[lane]}</span>
+          <span className={`mp-rate-bar ${rate === null ? 'none' : ''}`} role="img" aria-label={rate === null ? 'No win rate data' : `Blue ${formatRate(rate)}, Red ${formatRate(100 - rate)}`}>
+            <span className="mp-rate-fill" style={{ width: `${blueShare}%` }} />
+          </span>
+          <span className="mp-rate-nums">
+            <span className={`tone-${rateTone(rate, baseline)}`}>{formatRate(rate)}</span>
+            <span className={`tone-${rateTone(rate === null ? null : 100 - rate, baseline)}`}>{formatRate(rate === null ? null : 100 - rate)}</span>
+          </span>
+          {data.wheel && (
+            <span className={`mp-wheel ${edge}`} title="The matchup wheel: Offence beats Defence, Defence beats Control, Control beats Offence">
+              <span className="blue">{data.wheel.blue.strength}</span>
+              <span className="mp-wheel-arrow">{data.wheel.winner === 'BLUE' ? '▶' : data.wheel.winner === 'RED' ? '◀' : '='}</span>
+              <span className="red">{data.wheel.red.strength}</span>
+              {data.wheel.kind && <span className="mp-wheel-kind">{data.wheel.kind === 'STRONG' ? 'strong' : 'slight'}</span>}
+            </span>
+          )}
         </span>
-        <span className="mp-rate-nums">
-          <span className={`tone-${rateTone(rate, baseline)}`}>{formatRate(rate)}</span>
-          <span className={`tone-${rateTone(rate === null ? null : 100 - rate, baseline)}`}>{formatRate(rate === null ? null : 100 - rate)}</span>
-        </span>
-      </span>
-      <span className="mp-champ red">
-        <span>{red?.name ?? '—'}</span>
-        <ChampionIcon champion={red} size={34} />
-      </span>
+        <LaneSide side="RED" champion={red} data={data} baseline={baseline} bot={bot} />
+      </div>
+      {(data.players.BLUE || data.players.RED) && (
+        <details className="mp-lane-details">
+          <summary>Why these grades</summary>
+          <div className="mp-factor-pair">
+            {data.players.BLUE ? <FactorList analysis={data.players.BLUE} /> : <span />}
+            {data.players.RED ? <FactorList analysis={data.players.RED} /> : <span />}
+          </div>
+        </details>
+      )}
     </div>
+  )
+}
+
+function LaneSide({ side, champion, data, baseline, bot }: { side: Side; champion?: Champion; data: MatchupLane; baseline: number; bot: boolean }) {
+  const analysis = data.players[side]
+  const cls = side.toLowerCase()
+  return (
+    <span className={`mp-champ ${cls}`}>
+      {side === 'BLUE' && <ChampionIcon champion={champion} size={34} />}
+      <span className="mp-champ-text">
+        <span className="mp-champ-name">{champion?.name ?? '—'}</span>
+        {analysis && (
+          <span className="mp-champ-insights">
+            <GradeChip analysis={analysis} />
+            <CounterChip wheel={data.wheel} side={side} rate={analysis.counter_rate} baseline={baseline} botLane={bot} />
+            <RoleTag analysis={analysis} />
+          </span>
+        )}
+      </span>
+      {side === 'RED' && <ChampionIcon champion={champion} size={34} />}
+    </span>
   )
 }
 
