@@ -19,8 +19,10 @@ from app.core.clock import iso, utcnow
 from app.core.errors import bad_request, conflict, forbidden, not_found
 from app.game.comfort import comfort_modifier, comfort_tier
 from app.game.config import DRAFT_CONFIG, GAME_CONFIG, LANES, SIMULATION_CONFIG, simulation_config
+from app.game import draft_ai, lane_preview
+from app.game.lane_phase import BOT_LANE
 from app.game.draft_engine import DraftError, DraftState, new_draft, rebuild_draft
-from app.game.models import CoachSpec, PlayerSpec, TeamSetup
+from app.game.models import Champion as EngineChampion, CoachSpec, MatchupTable, PlayerSpec, TeamSetup
 from app.game.range_waveclear import matchup_callouts
 from app.game.simulation_engine import simulate_match
 from app.game.scaling import comp_scaling
@@ -71,6 +73,13 @@ def side_of(game: Game, user_id: int) -> str | None:
     if game.red_player_id == user_id:
         return "RED"
     return None
+
+
+def cpu_side(game: Game) -> str | None:
+    """The side the CPU plays in a vs CPU game: the seat with no user. None otherwise."""
+    if not game.vs_cpu:
+        return None
+    return "BLUE" if game.blue_player_id is None else "RED"
 
 
 def acting_side(game: Game, user: User, requested: str | None = None) -> str:
@@ -142,10 +151,14 @@ def create_lobby(db: Session, user: User, settings: dict | None = None, mode: st
     """Create a lobby and its game. `settings` are the creator's lobby options (see DEFAULT_SETTINGS).
 
     mode "SOLO" makes a single player game: the creator holds both seats, so nobody needs to join, and
-    hiding player data from "the opponent" makes no sense."""
+    hiding player data from "the opponent" makes no sense.
+
+    mode "CPU" makes a game against the CPU: the creator plays Blue (they can switch sides before the draft) and
+    the empty Red seat is played by the CPU. The creator chooses both teams, as in single player."""
     opts = {**DEFAULT_SETTINGS, **(settings or {})}
     solo = mode == "SOLO"
-    if solo:
+    cpu = mode == "CPU"
+    if solo or cpu:
         opts["hide_player_data"] = False
     if opts["series_format"] not in SERIES_WINS:
         opts["series_format"], opts["fearless"] = "BO1", False     # fearless only means something across games
@@ -154,8 +167,8 @@ def create_lobby(db: Session, user: User, settings: dict | None = None, mode: st
                   created_at=now, expires_at=now + timedelta(minutes=GAME_CONFIG["lobby_expiration_minutes"]))
     db.add(lobby)
     db.flush()
-    game = Game(lobby_id=lobby.id, status="TEAM_SELECTION" if solo else "WAITING_FOR_PLAYERS",
-                blue_player_id=user.id, red_player_id=user.id if solo else None, is_solo=solo,
+    game = Game(lobby_id=lobby.id, status="TEAM_SELECTION" if solo or cpu else "WAITING_FOR_PLAYERS",
+                blue_player_id=user.id, red_player_id=user.id if solo else None, is_solo=solo, vs_cpu=cpu,
                 hide_player_data=bool(opts["hide_player_data"]), bans_enabled=bool(opts["bans_enabled"]),
                 timers_enabled=bool(opts["timers_enabled"]), pick_seconds=int(opts["pick_seconds"]),
                 ban_seconds=int(opts["ban_seconds"]))
@@ -182,7 +195,7 @@ def join_lobby(db: Session, user: User, code: str) -> tuple[Lobby, Game, Events]
         raise conflict("That lobby has expired or was cancelled.")
     if side_of(game, user.id):
         return lobby, game, []  # already in: joining again is a no-op (reconnect)
-    if game.is_solo:
+    if game.is_solo or game.vs_cpu:
         raise conflict("That is a single player game; it cannot be joined.")
     if game.status != "WAITING_FOR_PLAYERS" or (game.blue_player_id is not None and game.red_player_id is not None):
         raise conflict("That lobby is full.")
@@ -242,7 +255,12 @@ def set_side(db: Session, game: Game, user: User, side: str) -> Events:
 
 # --------------------------------------------------------- team selection
 def select_team(db: Session, game: Game, user: User, team_id: int, requested_side: str | None = None) -> Events:
-    side = acting_side(game, user, requested_side)
+    if game.vs_cpu and requested_side is not None:     # vs CPU: the user also chooses the CPU's team
+        if requested_side not in ("BLUE", "RED"):
+            raise bad_request("Say which side this is for (BLUE or RED).")
+        side = requested_side
+    else:
+        side = acting_side(game, user, requested_side)
     if game.status not in ("WAITING_FOR_PLAYERS", "TEAM_SELECTION", "READY_CHECK"):
         raise conflict("Teams can no longer be changed.")
     team = teams.get_visible(db, Team, team_id, user.id)
@@ -264,9 +282,9 @@ def select_team(db: Session, game: Game, user: User, team_id: int, requested_sid
 def set_ready(db: Session, game: Game, user: User, ready: bool = True) -> Events:
     side = side_of(game, user.id)
     if game.status != "READY_CHECK":
-        raise conflict("Both players must choose a team before readying up." if not game.is_solo
+        raise conflict("Both players must choose a team before readying up." if not (game.is_solo or game.vs_cpu)
                        else "Choose a team for both sides before starting.")
-    if game.is_solo:       # one person, two seats: starting means both sides are ready
+    if game.is_solo or game.vs_cpu:   # one person (and maybe the CPU): starting means both sides are ready
         game.blue_ready = game.red_ready = ready
         events = [_event(game, "PLAYER_READY", team="BLUE", ready=ready), _event(game, "PLAYER_READY", team="RED", ready=ready)]
         if ready:
@@ -359,10 +377,15 @@ def _begin_action(game: Game, started_at) -> None:
     """Start the timer for the game's current action (no expiry when timers are disabled)."""
     game.action_started_at = started_at
     game.hovered_champion_id = None
+    action = draft_actions(game)[game.current_action]
+    if cpu_side(game) and action.startswith(cpu_side(game)):
+        # the CPU "thinks" for a moment; advance_timeouts plays its choice when this expires (timers on or off)
+        game.action_expires_at = started_at + timedelta(seconds=DRAFT_CONFIG["cpu_delay_seconds"])
+        return
     if not game.timers_enabled:
         game.action_expires_at = None
         return
-    seconds = game.ban_seconds if draft_actions(game)[game.current_action].endswith("_BAN") else game.pick_seconds
+    seconds = game.ban_seconds if action.endswith("_BAN") else game.pick_seconds
     game.action_expires_at = started_at + timedelta(seconds=seconds)
 
 
@@ -405,22 +428,46 @@ def _record_action(db: Session, game: Game, draft: DraftState, team: str, action
     return events
 
 
+class _CpuContext:
+    """What the CPU reads to make its decisions: both frozen teams, the enabled champions, the win rate
+    matrices and the live simulation settings."""
+
+    def __init__(self, db: Session, game: Game):
+        side = cpu_side(game)
+        self.config = simulation_settings_service.current_config(db)
+        self.champions = {c.id: c.to_engine() for c in db.scalars(select(Champion).where(Champion.enabled.is_(True)))}
+        self.table = matchup_service.engine_table(db, self.champions)
+        self.own = _snapshot_to_setup(snapshot_of(db, game, side), {})
+        self.enemy = _snapshot_to_setup(snapshot_of(db, game, _other(side)), {})
+
+    def choose(self, draft: DraftState, rng: random.Random) -> int:
+        return draft_ai.choose(draft, self.own, self.enemy, self.champions, self.table, self.config, rng)
+
+    def lineup(self, picks: list[int]) -> dict[str, int]:
+        return draft_ai.assign_lanes(picks, self.own.roster, self.champions, self.config)
+
+
 def advance_timeouts(db: Session, game: Game, now=None) -> Events:
     """Apply an automatic action for every draft timer that has expired: the hovered champion if it is
-    still legal, otherwise a random legal one."""
+    still legal, otherwise a random legal one. In a vs CPU game, an expired CPU turn plays the CPU's choice."""
     events: Events = []
     now = now or utcnow()
     if game.status != "DRAFTING":
         return events
     draft = load_draft(db, game)
     rng = random.Random(secrets.randbits(64))
+    cpu = None
     while game.status == "DRAFTING" and game.action_expires_at and game.action_expires_at <= now:
         action = draft.current
-        pool = draft.available()
-        hovered = game.hovered_champion_id
-        champion_id = hovered if hovered in pool else rng.choice(pool)
+        if action.team == cpu_side(game):
+            cpu = cpu or _CpuContext(db, game)
+            champion_id, auto = cpu.choose(draft, rng), False      # a decision, not a timeout
+        else:
+            pool = draft.available()
+            hovered = game.hovered_champion_id
+            champion_id, auto = (hovered if hovered in pool else rng.choice(pool)), True
         events += _record_action(db, game, draft, action.team, action.action_type, champion_id,
-                                 True, game.action_expires_at)
+                                 auto, game.action_expires_at)
     if events:
         db.commit()
     return events
@@ -479,15 +526,24 @@ def _own_players(db: Session, game: Game, side: str) -> dict[str, int]:
 
 def _default_lineups(db: Session, game: Game, draft: DraftState) -> None:
     """When the draft ends, each side starts with its picks in pick order (top, jungle, mid, bot, support),
-    matching the champ select rows. Players then swap champions or positions before confirming."""
+    matching the champ select rows. Players then swap champions or positions before confirming.
+    The CPU puts each pick in its best lane and confirms its lineup straight away."""
+    cpu = cpu_side(game)
     for side in ("BLUE", "RED"):
         snap = snapshot_of(db, game, side)
         if snap is None:
             continue
-        for lane, cid in zip(LANES, draft.picks[side]):
+        lanes = dict(zip(LANES, draft.picks[side]))
+        if side == cpu:
+            lanes = _CpuContext(db, game).lineup(draft.picks[side]) or lanes
+        for lane, cid in lanes.items():
             p = snap["roster"].get(lane)
             if p:
                 db.add(TeamLineup(game_id=game.id, team=side, lane=lane, champion_id=cid, player_id=p["id"]))
+    if cpu == "BLUE":
+        game.blue_lineup_ready = True
+    elif cpu == "RED":
+        game.red_lineup_ready = True
 
 
 def set_lineup(db: Session, game: Game, user: User, assignments: list[dict], requested_side: str | None = None) -> Events:
@@ -580,8 +636,12 @@ def matchup_preview(db: Session, game: Game, user: User) -> dict:
 
     cfg = simulation_settings_service.current_config(db)
     ids = picks["BLUE"] + picks["RED"]
-    champs = {c.id: c.to_engine() for c in db.scalars(select(Champion).where(Champion.id.in_(ids)))}
-    table = matchup_service.engine_table(db, ids)
+    # every enabled champion too: the lane grades rank each pick against all of them
+    rows = db.scalars(select(Champion).where(Champion.id.in_(ids) | Champion.enabled.is_(True)))
+    pool = {c.id: (c.to_engine(), c.enabled) for c in rows}
+    champs = {cid: c for cid, (c, _) in pool.items() if cid in ids}
+    candidates = [c for c, enabled in pool.values() if enabled]
+    table = matchup_service.engine_table(db, pool)
 
     def rate(delta: float | None) -> float | None:
         return None if delta is None else round(delta, 1)
@@ -609,6 +669,8 @@ def matchup_preview(db: Session, game: Game, user: User) -> dict:
         blue, red = lineups["BLUE"].get(lane), lineups["RED"].get(lane)
         lanes[lane] = {"blue": blue, "red": red,
                        "blue_win_rate": table.enemy_rate(blue, red) if blue and red else None}
+    _add_lane_analysis(db, game, user, lanes, lineups, {**champs, **{c.id: c for c in candidates}}, candidates,
+                       table, cfg)
     wr, db_cfg = cfg["win_rates"], cfg["damage_balance"]
     return {
         "teams": teams,
@@ -621,8 +683,57 @@ def matchup_preview(db: Session, game: Game, user: User) -> dict:
         "settings": {"win_rates_enabled": wr["enabled"], "baseline": wr["baseline"],
                      "damage_balance_enabled": db_cfg["enabled"], "damage_threshold": db_cfg["threshold"],
                      "max_damage_penalty": db_cfg["max_penalty"],
-                     "champion_scaling_enabled": cfg["champion_scaling"]["enabled"]},
+                     "champion_scaling_enabled": cfg["champion_scaling"]["enabled"],
+                     "off_role_enabled": cfg["off_role"]["enabled"],
+                     "off_role_penalty": cfg["off_role"]["lane_penalty"]},
     }
+
+
+def _add_lane_analysis(db: Session, game: Game, user: User, lanes: dict, lineups: dict[str, dict[str, int]],
+                       champs: dict[int, EngineChampion], candidates: list[EngineChampion], table: MatchupTable,
+                       cfg: dict) -> None:
+    """Per lane: the matchup wheel and, for each side's player, their counter win rate (bot-lane aware), graded
+    expected lane score and role status. A side whose player data is hidden from this viewer gets no
+    grade, and its role status leaves out the pool exemption (the pool is hidden too)."""
+    viewer = side_of(game, user.id)
+    hidden = {s: (not game.is_solo and game.hide_player_data and game.status != "COMPLETED" and s != viewer)
+              for s in ("BLUE", "RED")}
+    setups = {}
+    for s in ("BLUE", "RED"):
+        snap = snapshot_of(db, game, s)
+        setups[s] = _snapshot_to_setup(snap, lineups[s], _own_players(db, game, s)) if snap else None
+    on = {s: {lane: champs[cid] for lane, cid in lineups[s].items() if cid in champs} for s in ("BLUE", "RED")}
+
+    for lane in LANES:
+        entry = lanes[lane]
+        blue, red = on["BLUE"].get(lane), on["RED"].get(lane)
+        drafts = {s: setups[s].coach.draft if setups[s] else 5 for s in ("BLUE", "RED")}
+        entry["wheel"] = (lane_preview.wheel_summary(blue, red, drafts["BLUE"], drafts["RED"], cfg)
+                          if blue and red else None)
+        facing = BOT_LANE if lane in BOT_LANE else (lane,)
+        players = {}
+        for s in ("BLUE", "RED"):
+            other = "RED" if s == "BLUE" else "BLUE"
+            champion, setup = on[s].get(lane), setups[s]
+            player = setup.roster.get(lane) if setup else None
+            if champion is None:
+                players[s] = None
+                continue
+            info = {"player_id": player.id if player else None, "grade": None, "percentile": None,
+                    "expected": None, "factors": None,
+                    "role_status": lane_preview.role_status(champion, lane, None if hidden[s] else player, cfg),
+                    "off_role_penalty": None,
+                    # average win rate against what this lane faces (bot and support: both enemy bot laners)
+                    "counter_rate": lane_preview.average_rate(
+                        champion.id, [on[other][l].id for l in facing if l in on[other]], table)}
+            if player is not None and not hidden[s]:
+                partner = on[s].get("SUPPORT" if lane == "BOT" else "BOT") if lane in BOT_LANE else None
+                info.update(lane_preview.lane_grade(
+                    player, champion, lane, candidates, opponents=on[other], partner=partner,
+                    my_draft=drafts[s], enemy_draft=drafts[other], table=table, config=cfg))
+                info["off_role_penalty"] = lane_preview.off_role_penalty(champion, lane, player, cfg)
+            players[s] = info
+        entry["players"] = players
 
 
 # ------------------------------------------------------------- simulation
@@ -785,6 +896,14 @@ def ready_next_game(db: Session, game: Game, user: User, ready: bool = True, sid
         sides = [me]
     if chooses:
         game.next_loser_side = side if ready else None
+    cpu = cpu_side(game)
+    if cpu:                 # the CPU is always ready for the next game, and keeps its side when it lost
+        if cpu == "BLUE":
+            game.blue_next_ready = True
+        else:
+            game.red_next_ready = True
+        if cpu == loser:
+            game.next_loser_side = loser
     events = [_event(game, "SERIES_READY", team=s, ready=ready) for s in sides]
     if game.blue_next_ready and game.red_next_ready:
         events += _start_next_game(db, game, loser)
@@ -810,7 +929,7 @@ def _start_next_game(db: Session, prev: Game, loser: str) -> Events:
     blue_team, red_team = flip(prev.blue_team_id, prev.red_team_id)
     blue_snap, red_snap = flip(snapshot_of(db, prev, "BLUE"), snapshot_of(db, prev, "RED"))
     game = Game(lobby_id=lobby.id, status="READY_CHECK", blue_player_id=blue_player, red_player_id=red_player,
-                blue_team_id=blue_team, red_team_id=red_team, is_solo=prev.is_solo,
+                blue_team_id=blue_team, red_team_id=red_team, is_solo=prev.is_solo, vs_cpu=prev.vs_cpu,
                 hide_player_data=prev.hide_player_data, bans_enabled=prev.bans_enabled,
                 timers_enabled=prev.timers_enabled, pick_seconds=prev.pick_seconds, ban_seconds=prev.ban_seconds,
                 series_id=prev.series_id, game_number=prev.game_number + 1,
@@ -848,7 +967,7 @@ def series_result(db: Session, series_id: int, user: User) -> dict:
     first = games[0]
     return {
         "id": series.id, "format": series.format, "wins_needed": series.wins_needed, "fearless": series.fearless,
-        "mode": "SOLO" if first.is_solo else "MULTI",
+        "mode": game_mode(first),
         "teams": {side: (snapshot_of(db, first, side) or {}).get("name") for side in ("BLUE", "RED")},
         **series_score(db, series, games),
         "games": out,
@@ -920,11 +1039,15 @@ def draft_view(db: Session, game: Game) -> dict:
     }
 
 
+def game_mode(game: Game) -> str:
+    return "SOLO" if game.is_solo else "CPU" if game.vs_cpu else "MULTI"
+
+
 def _settings_view(db: Session, game: Game) -> dict:
     series = db.get(Series, game.series_id) if game.series_id else None
     return {"hide_player_data": game.hide_player_data, "bans_enabled": game.bans_enabled,
             "timers_enabled": game.timers_enabled, "pick_seconds": game.pick_seconds,
-            "ban_seconds": game.ban_seconds, "mode": "SOLO" if game.is_solo else "MULTI",
+            "ban_seconds": game.ban_seconds, "mode": game_mode(game),
             "series_format": series.format if series else "BO1", "fearless": bool(series and series.fearless)}
 
 
@@ -935,6 +1058,9 @@ def game_state(db: Session, game: Game, viewer: User) -> dict:
         [i for i in (game.blue_player_id, game.red_player_id) if i])))}
 
     def player(uid, team_id, ready, lineup_ready):
+        if uid is None and game.vs_cpu:      # the CPU's seat
+            return {"id": None, "username": "CPU", "bot": True, "team_id": team_id,
+                    "ready": ready, "lineup_ready": lineup_ready}
         return None if uid is None else {"id": uid, "username": users[uid].username, "team_id": team_id,
                                          "ready": ready, "lineup_ready": lineup_ready}
 

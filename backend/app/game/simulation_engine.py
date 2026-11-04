@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Mapping
 
+from .comfort import off_role
 from .config import LANES, simulation_config
 from .fights import run_fight
 from .lane_phase import run_lane_phase
@@ -90,11 +91,12 @@ def _timeout_winner(match: Match) -> str:
     return "BLUE" if match.rng.random() < 0.5 else "RED"
 
 
-def _player_dict(p: PlayerState) -> dict:
+def _player_dict(p: PlayerState, config: dict) -> dict:
     return {
         "player_id": p.spec.id, "name": p.spec.name, "team": p.team, "lane": p.lane,
         "champion_id": p.champion.id, "champion": p.champion.name,
-        "comfort_tier": p.tier, "lane_score": round(p.lane_score, 1),
+        "comfort_tier": p.tier, "off_role": off_role(p.champion, p.lane, p.spec, config),
+        "lane_score": round(p.lane_score, 1),
         "kills": p.kills, "deaths": p.deaths, "assists": p.assists,
         "cs": round(p.cs), "gold": round(p.gold),
         "damage_dealt": p.damage_dealt, "damage_taken": p.damage_taken,
@@ -174,7 +176,7 @@ def simulate_match(blue: TeamSetup, red: TeamSetup, champions: Mapping[int, Cham
     match.update_cs(end_minute)
     match.emit("GAME_END", winner=match.winner, win_condition=match.win_condition, duration_seconds=duration)
 
-    players = [_player_dict(p) for team in match.sides for p in team.ordered_players()]
+    players = [_player_dict(p, match.config) for team in match.sides for p in team.ordered_players()]
     assign_ranks(players, match.rng)
     mvp, ace = pick_mvp_and_ace(players, match.winner)
 

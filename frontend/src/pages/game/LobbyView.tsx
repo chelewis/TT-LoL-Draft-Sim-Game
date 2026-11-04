@@ -4,11 +4,13 @@ import { api } from '../../api/client'
 import type { GameState, Side } from '../../api/types'
 import { ErrorNotice, Loading } from '../../components/common'
 import TeamCard from '../../components/TeamCard'
-import { draftRules, isSolo, seriesLabel } from '../../lib/format'
+import { draftRules, isCpu, isSolo, seriesLabel } from '../../lib/format'
 import { useTeams } from '../../hooks/useData'
 
-/** Single player: pick a team for each side from your own teams and the defaults, then start the draft. */
+/** Single player: pick a team for each side from your own teams and the defaults, then start the draft.
+ * Also used against the CPU: you choose your team and the CPU's, and which side you play. */
 function SoloLobby({ game, onChange }: { game: GameState; onChange: () => void }) {
+  const cpu = isCpu(game)
   const navigate = useNavigate()
   const teams = useTeams(true)
   const choose = useMutation({
@@ -17,6 +19,10 @@ function SoloLobby({ game, onChange }: { game: GameState; onChange: () => void }
     onSuccess: onChange,
   })
   const start = useMutation({ mutationFn: () => api(`/games/${game.game_id}/ready`, { body: { ready: true } }), onSuccess: onChange })
+  const switchSide = useMutation({
+    mutationFn: (side: Side) => api(`/lobbies/${game.lobby_id}/side`, { body: { side } }),
+    onSuccess: onChange,
+  })
   const leave = useMutation({
     mutationFn: () => api(`/lobbies/${game.lobby_id}/leave`, { method: 'POST' }),
     onSuccess: () => navigate('/'),
@@ -26,18 +32,39 @@ function SoloLobby({ game, onChange }: { game: GameState; onChange: () => void }
   return (
     <div className="stack">
       <div className="card">
-        <h2>Single player</h2>
+        <h2>{cpu ? 'Single player vs CPU' : 'Single player'}</h2>
         <p className="muted">
-          You control both sides. Choose a team for Blue and for Red (the same team on both sides is fine), then make every
-          pick and ban yourself. Draft: {draftRules(game.settings)}.
+          {cpu
+            ? "Choose your team and the CPU's team (the same team on both sides is fine), then draft against the CPU. It takes a moment to think before each pick and ban."
+            : 'You control both sides. Choose a team for Blue and for Red (the same team on both sides is fine), then make every pick and ban yourself.'}{' '}
+          Draft: {draftRules(game.settings)}.
           {seriesLabel(game.settings) && <> Format: {seriesLabel(game.settings)}.</>}
         </p>
+        {cpu && (
+          <div className="row wrap side-choice" role="radiogroup" aria-label="Your side">
+            {(['BLUE', 'RED'] as Side[]).map((side) => (
+              <button
+                key={side}
+                role="radio"
+                aria-checked={game.you.team === side}
+                className={`ghost side-${side.toLowerCase()} ${game.you.team === side ? 'active' : ''}`}
+                disabled={switchSide.isPending || game.you.team === side}
+                onClick={() => switchSide.mutate(side)}
+              >
+                Play {side === 'BLUE' ? 'Blue' : 'Red'}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       <div className="grid two">
         {(['BLUE', 'RED'] as Side[]).map((side) => (
           <div key={side} className="stack">
             <div className={`card side-${side.toLowerCase()} stack`}>
-              <h3>{side === 'BLUE' ? 'Blue' : 'Red'} team</h3>
+              <h3>
+                {side === 'BLUE' ? 'Blue' : 'Red'} team
+                {cpu && <span className="muted small"> · {game.you.team === side ? 'You' : 'CPU'}</span>}
+              </h3>
               <div className="team-picker">
                 {(teams.data ?? []).map((t) => (
                   <button
@@ -58,7 +85,7 @@ function SoloLobby({ game, onChange }: { game: GameState; onChange: () => void }
           </div>
         ))}
       </div>
-      <ErrorNotice error={choose.error ?? start.error ?? leave.error} />
+      <ErrorNotice error={choose.error ?? start.error ?? switchSide.error ?? leave.error} />
       <div className="row wrap">
         <button className="primary" disabled={game.status !== 'READY_CHECK' || start.isPending} onClick={() => start.mutate()}>
           {game.status === 'READY_CHECK' ? 'Start draft' : 'Choose a team for both sides'}
@@ -72,7 +99,7 @@ function SoloLobby({ game, onChange }: { game: GameState; onChange: () => void }
 }
 
 export default function LobbyView({ game, onChange }: { game: GameState; onChange: () => void }) {
-  if (isSolo(game)) return <SoloLobby game={game} onChange={onChange} />
+  if (isSolo(game) || isCpu(game)) return <SoloLobby game={game} onChange={onChange} />
   return <MultiLobby game={game} onChange={onChange} />
 }
 

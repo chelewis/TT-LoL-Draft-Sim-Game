@@ -23,6 +23,22 @@ export const TIER_LABEL: Record<string, string> = {
 export const TIER_MODIFIER: Record<string, number> = { BEST: 40, COMFORT: 25, FAMILIAR: 10, VULNERABLE: -10 }
 const POOL_TIERS = ['BEST', 'COMFORT', 'COMFORT', 'FAMILIAR', 'FAMILIAR']
 
+/** Pool slots that let a champion be played off-role without the penalty (game/config.py off_role.pool_exempt). */
+export const OFF_ROLE_POOL_EXEMPT = 3
+
+/** A champion played outside its usual roles, and not one of the player's top pool picks: the simulation cuts
+ * its lane score (when the admin setting is on). */
+export function isOffRole(champion: { id: number; roles?: Lane[] }, lane: Lane, pool: number[]): boolean {
+  const roles = champion.roles ?? []
+  if (roles.length === 0 || roles.includes(lane)) return false
+  return !pool.slice(0, OFF_ROLE_POOL_EXEMPT).includes(champion.id)
+}
+
+/** "Jungle / Top", or null without role data. */
+export function championRoles(champion: { roles?: Lane[] }): string | null {
+  return champion.roles?.length ? champion.roles.map((r) => LANE_LABEL[r]).join(' / ') : null
+}
+
 /** Comfort tier of a champion for a player pool (index 0 = best). Mirrors the server rule. */
 export function comfortTier(pool: number[], championId: number): string {
   const position = pool.indexOf(championId)
@@ -106,6 +122,11 @@ export function formatMetric(value: number, unit: 'percent' | 'number'): string 
 /** Single player: one person plays both sides. */
 export function isSolo(game: { settings: { mode?: string } }): boolean {
   return game.settings.mode === 'SOLO'
+}
+
+/** A game against the CPU: the user plays one side, the CPU the other. */
+export function isCpu(game: { settings: { mode?: string } }): boolean {
+  return game.settings.mode === 'CPU'
 }
 
 export function formatDuration(seconds: number): string {

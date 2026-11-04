@@ -407,6 +407,12 @@ table.compact th, table.compact td { padding: 4px 6px; font-size: 0.85rem; }
 .cs .cs-tab.active { color: var(--hex-gold-light); border-bottom-color: var(--hex-gold); }
 .cs input.cs-search { background: var(--hex-bg); border: 1px solid var(--hex-line); border-radius: 0; color: var(--hex-gold-light); min-height: 32px; padding: 4px 10px; width: 200px; }
 .cs input.cs-search:focus { border-color: var(--hex-gold); outline: none; }
+.cs-filter-tools { display: flex; align-items: center; gap: 8px; }
+.cs-filter-tools .cs-alert-toggle { min-height: 32px; white-space: nowrap; }
+.cs-search-wrap { position: relative; display: flex; }
+.cs .cs-search-wrap input.cs-search { padding-right: 28px; }
+.cs .cs-search-clear { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); width: 26px; height: 26px; min-height: 0; padding: 0; display: grid; place-items: center; background: transparent; border: 0; border-radius: 0; color: #a09b8c; font-size: 0.8rem; line-height: 1; }
+.cs .cs-search-clear:hover { color: var(--hex-gold-light); }
 /* the scroll box wraps the grid: a scrolling grid lets some browsers (Safari) squash its rows to fit */
 .cs .cs-matchup-toggle { align-self: flex-start; min-height: 30px; padding: 4px 14px; border-radius: 2px; border: 1px solid var(--hex-gold-dark); background: var(--hex-panel); color: var(--hex-gold); font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; }
 .cs .cs-matchup-toggle:hover { border-color: var(--hex-gold); color: var(--hex-gold-light); }
@@ -436,6 +442,48 @@ table.compact th, table.compact td { padding: 4px 6px; font-size: 0.85rem; }
 .mp-rate-bar::after { content: ''; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--hex-bg); }
 .mp-rate-nums { display: flex; justify-content: space-between; font-size: 0.78rem; font-variant-numeric: tabular-nums; }
 .mp-num { font-variant-numeric: tabular-nums; }
+.mp-lane-wrap { display: flex; flex-direction: column; background: var(--hex-panel); border: 1px solid var(--hex-line); }
+.mp-lane-wrap .mp-lane { background: transparent; border: 0; }
+.mp .mp-champ .mp-champ-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; overflow: visible; white-space: normal; }
+.mp .mp-champ.red .mp-champ-text { align-items: flex-end; }
+.mp .mp-champ .mp-champ-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp .mp-champ .mp-champ-insights { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; overflow: visible; }
+.mp .mp-champ.red .mp-champ-insights { justify-content: flex-end; }
+.mp-wheel { display: flex; justify-content: center; align-items: center; gap: 5px; font-size: 0.72rem; letter-spacing: 0.04em; }
+.mp-wheel-arrow { color: var(--hex-gold-light); }
+.mp-wheel.even .mp-wheel-arrow { color: #a09b8c; }
+.mp-wheel-kind { color: #a09b8c; text-transform: uppercase; font-size: 0.65rem; }
+.mp-lane-details { padding: 0 8px 6px; font-size: 0.75rem; color: #a09b8c; }
+.mp-lane-details summary { cursor: pointer; text-align: center; font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.mp-lane-details summary:hover { color: var(--hex-gold-light); }
+.mp-factor-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 6px; }
+.mp-factors { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.mp-factors li { display: flex; justify-content: space-between; gap: 8px; font-variant-numeric: tabular-nums; }
+
+/* lineup-stage lane insights: grade letter, wheel + counter win rate, role badge */
+.cs-row-insights { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 3px; }
+.cs-picks.red .cs-row-insights { justify-content: flex-end; }
+.grade-chip { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 4px; border: 1px solid currentColor; border-radius: 3px; font-size: 0.75rem; font-weight: 800; line-height: 1; cursor: help; background: rgba(1, 10, 19, 0.6); }
+.grade-chip.grade-s { color: var(--gold); box-shadow: 0 0 6px rgba(242, 193, 78, 0.45); }
+.grade-chip.grade-a { color: var(--ok); }
+.grade-chip.grade-b { color: #8fd3b6; }
+.grade-chip.grade-c { color: #a09b8c; }
+.grade-chip.grade-d { color: var(--warn); }
+.grade-chip.grade-f { color: var(--red); }
+.grade-chip.grade-hidden { color: #6b6658; border-style: dashed; }
+.counter-chip { display: inline-flex; align-items: center; gap: 3px; height: 20px; padding: 0 5px; border: 1px solid var(--hex-line); border-radius: 3px; font-size: 0.72rem; font-variant-numeric: tabular-nums; cursor: help; background: rgba(1, 10, 19, 0.6); }
+.counter-wheel { font-size: 0.65rem; letter-spacing: -0.08em; }
+.counter-wheel.edge-win-strong, .counter-wheel.edge-win { color: var(--ok); }
+.counter-wheel.edge-lose-strong, .counter-wheel.edge-lose { color: var(--red); }
+.counter-wheel.edge-even { color: #a09b8c; }
+.counter-rate.tone-good { color: var(--ok); }
+.counter-rate.tone-bad { color: var(--red); }
+.counter-rate.tone-even, .counter-rate.tone-none { color: #a09b8c; }
+.role-badge { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border: 1px solid; border-radius: 3px; font-size: 0.68rem; letter-spacing: 0.02em; white-space: nowrap; cursor: help; background: rgba(1, 10, 19, 0.6); }
+.role-badge.role-off { color: var(--red); border-color: var(--red); background: rgba(255, 91, 110, 0.12); }
+.role-badge.role-unknown { color: var(--warn); border-color: var(--warn); }
+.role-badge.role-exempt { color: #a09b8c; border-color: #5b5a56; border-style: dashed; }
+.role-badge.role-secondary { color: #a09b8c; border-color: transparent; padding: 0 2px; font-style: italic; }
 .mp-damage-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 .mp-damage { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .mp-damage-head { display: flex; flex-direction: column; gap: 2px; font-size: 0.85rem; }
@@ -461,6 +509,8 @@ table.compact th, table.compact td { padding: 4px 6px; font-size: 0.85rem; }
   .mp-lane { grid-template-columns: 1fr; text-align: center; }
   .mp-champ, .mp-champ.red { justify-content: center; }
   .mp-damage-pair { grid-template-columns: 1fr; }
+  .mp .mp-champ .mp-champ-text, .mp .mp-champ.red .mp-champ-text { align-items: center; }
+  .mp .mp-champ .mp-champ-insights { justify-content: center; }
   .mp-damage.red .mp-damage-head { align-items: flex-start; text-align: left; }
 }
 
@@ -568,6 +618,8 @@ table.compact th, table.compact td { padding: 4px 6px; font-size: 0.85rem; }
   .cs-row-timer { font-size: 1.3rem; }
   .cs-grid { grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); }
   .cs-champ-frame .champ-icon { width: 56px !important; height: 56px !important; }
+  .cs-filter-tools { width: 100%; }
+  .cs-search-wrap { flex: 1; min-width: 0; }
   .cs input.cs-search { width: 100%; }
 }
 

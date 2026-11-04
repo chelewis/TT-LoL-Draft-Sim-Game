@@ -15,7 +15,7 @@ class LobbySettings(BaseModel):
 
 class LobbyCreate(BaseModel):
     settings: LobbySettings = Field(default_factory=LobbySettings)
-    mode: str = Field(default="MULTI", pattern="^(MULTI|SOLO)$")     # SOLO: you control both sides
+    mode: str = Field(default="MULTI", pattern="^(MULTI|SOLO|CPU)$")  # SOLO: you control both sides; CPU: vs the CPU
 
 
 class SideSelect(BaseModel):

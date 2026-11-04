@@ -72,6 +72,8 @@ export interface Champion {
   range: number
   /** 1 weak, 2 average, 3 strong */
   waveclear: number
+  /** usual lanes, most played first; empty = no role data (never off-role) */
+  roles: Lane[]
   strength: string
   weakness: string
 }
@@ -285,7 +287,7 @@ export interface Team {
 }
 
 export interface LobbySettings {
-  mode: 'SOLO' | 'MULTI'   // SOLO: one person plays both sides
+  mode: 'SOLO' | 'MULTI' | 'CPU'   // SOLO: one person plays both sides; CPU: one person vs the CPU
   hide_player_data: boolean
   bans_enabled: boolean
   timers_enabled: boolean
@@ -370,8 +372,11 @@ export interface DraftView {
 }
 
 export interface GameUser {
-  id: number
+  /** null for the CPU's seat */
+  id: number | null
   username: string
+  /** the seat is played by the CPU */
+  bot?: boolean
   team_id: number | null
   ready: boolean
   lineup_ready: boolean
@@ -432,6 +437,8 @@ export interface ResultPlayer {
   champion_id: number
   champion: string
   comfort_tier: string
+  /** played outside the champion's usual roles (and not a top-3 pool pick): lane score penalty */
+  off_role?: boolean
   lane_score: number
   kills: number
   deaths: number
@@ -521,18 +528,82 @@ export interface MatchupTeam {
   /** average champion scaling, 1 (early) to 3 (late) */
   scaling: number
 }
+export type Attribute = 'Offence' | 'Defence' | 'Control'
+export type LaneGrade = 'S' | 'A' | 'B' | 'C' | 'D' | 'F'
+/** MAIN: the champion's most played role; SECONDARY: another usual role; OFF_ROLE_EXEMPT: off-role but a top
+ * pool pick of the player's, so no penalty. null: the champion has no role data. */
+export type RoleStatus = 'MAIN' | 'SECONDARY' | 'OFF_ROLE' | 'OFF_ROLE_EXEMPT' | null
+
+/** The matchup wheel (Offence > Defence > Control > Offence) for one lane. */
+export interface LaneWheel {
+  blue: { strength: Attribute; weakness: Attribute }
+  red: { strength: Attribute; weakness: Attribute }
+  winner: Side | null
+  kind: 'STRONG' | 'SLIGHT' | null
+  /** each side's lane score multiplier after its coach's Draft */
+  blue_multiplier: number
+  red_multiplier: number
+}
+
+/** The multipliers behind a lane grade (each 1.0 when neutral), plus the comfort tier. */
+export interface LaneFactors {
+  comfort_tier: string
+  comfort: number
+  playstyle: number
+  strength_fit: number
+  off_role: number
+  wheel: number
+  counter: number
+  duo: number
+  range: number
+  scaling: number
+}
+
+/** One side's player in a lane. Grade fields are null when that side's player data is hidden from you. */
+export interface LaneAnalysis {
+  player_id: number | null
+  grade: LaneGrade | null
+  /** 0..1: share of the champions they could play here that would score lower */
+  percentile: number | null
+  expected: number | null
+  factors: LaneFactors | null
+  role_status: RoleStatus
+  /** fraction of lane score the off-role rule takes (0 when none); null when unknown */
+  off_role_penalty: number | null
+  /** average win rate against what this lane faces (bot and support: both enemy bot laners); null without data */
+  counter_rate: number | null
+}
+
+export interface MatchupLane {
+  blue: number | null
+  red: number | null
+  /** blue's win rate against red */
+  blue_win_rate: number | null
+  wheel: LaneWheel | null
+  players: Record<Side, LaneAnalysis | null>
+}
+
 /** GET /games/{id}/matchups: what the drafted comps mean for the simulation. */
 export interface MatchupPreview {
   teams: Record<Side, MatchupTeam>
   /** lane -> champion id per side, the opponent's included */
   lineups: Record<Side, Partial<Record<Lane, number>>>
-  /** lane vs lane; blue_win_rate is blue's win rate against red */
-  lanes: Record<Lane, { blue: number | null; red: number | null; blue_win_rate: number | null }>
+  /** lane vs lane */
+  lanes: Record<Lane, MatchupLane>
   /** false when the against-team matrix has no win rates at all */
   counter_data: boolean
   /** callouts when one side has a clear range or waveclear edge */
   notes: string[]
-  settings: { win_rates_enabled: boolean; baseline: number; damage_balance_enabled: boolean; damage_threshold: number; max_damage_penalty: number; champion_scaling_enabled: boolean }
+  settings: {
+    win_rates_enabled: boolean
+    baseline: number
+    damage_balance_enabled: boolean
+    damage_threshold: number
+    max_damage_penalty: number
+    champion_scaling_enabled: boolean
+    off_role_enabled: boolean
+    off_role_penalty: number
+  }
 }
 
 export interface ComfortPreview {

@@ -28,6 +28,8 @@ class Game(Base):
     hide_player_data: Mapped[bool] = mapped_column(Boolean, default=False)
     # single player: one user holds both seats and makes every pick, ban and lineup decision for both sides
     is_solo: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    # vs CPU: the user holds one seat; the other seat (player id None) is played by the CPU (game/draft_ai.py)
+    vs_cpu: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
     bans_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa_true())
     timers_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa_true())
     pick_seconds: Mapped[int] = mapped_column(Integer, default=30, server_default="30")
