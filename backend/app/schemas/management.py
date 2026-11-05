@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+Lane = Literal["TOP", "JUNGLE", "MID", "BOT", "SUPPORT"]
 
 
 class PlayerIn(BaseModel):
@@ -39,6 +43,8 @@ class ChampionFitIn(BaseModel):
     dmg: int = Field(ge=1, le=10)
     pool: list[int] = Field(default_factory=list, max_length=5)
     limit: int | None = Field(default=10, ge=1)   # None: every enabled champion
+    role: Lane | None = None             # the player's lanes; with neither, no off-role penalty is applied
+    secondary_role: Lane | None = None
 
 
 class CoachIn(BaseModel):

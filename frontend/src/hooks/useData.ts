@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
-import type { Champion, ChampionFit, ChampionPair, Coach, MetaChampion, Player, Team, TeamInsights, TeamInsightsRequest } from '../api/types'
+import type { Champion, ChampionFit, ChampionPair, Coach, Lane, MetaChampion, Player, Team, TeamInsights, TeamInsightsRequest } from '../api/types'
 import { fetchLatestVersion } from '../lib/ddragon'
 
 /** Every Meta view's query starts with this key, so admin edits to what feeds them can refresh them all. */
@@ -46,11 +46,14 @@ export const useTeams = (selectable?: boolean) =>
 export const usePlayers = () => useQuery({ queryKey: ['players'], queryFn: () => api<Player[]>('/players') })
 
 /** Every champion ranked by lane fit for (possibly unsaved) stats and pool; keeps the last list while stats change. */
-export const useChampionFit = (stats: { aggr: number; aware: number; pos: number; dmg: number }, pool: number[]) =>
+export const useChampionFit = (
+  stats: { aggr: number; aware: number; pos: number; dmg: number }, pool: number[],
+  roles: { role: Lane; secondary_role: Lane | null },
+) =>
   useQuery({
-    queryKey: ['champion-fit', stats.aggr, stats.aware, stats.pos, stats.dmg, pool],
+    queryKey: ['champion-fit', stats.aggr, stats.aware, stats.pos, stats.dmg, pool, roles.role, roles.secondary_role],
     queryFn: () => api<ChampionFit[]>('/champion-fit', {
-      body: { aggr: stats.aggr, aware: stats.aware, pos: stats.pos, dmg: stats.dmg, pool, limit: null },
+      body: { aggr: stats.aggr, aware: stats.aware, pos: stats.pos, dmg: stats.dmg, pool, limit: null, ...roles },
     }),
     placeholderData: keepPreviousData,
   })

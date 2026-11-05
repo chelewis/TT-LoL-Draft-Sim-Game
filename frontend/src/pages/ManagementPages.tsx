@@ -14,6 +14,7 @@ import RosterSummary from '../components/RosterSummary'
 import TeamFieldHelp, { type TeamRules } from '../components/TeamFieldHelp'
 import TeamNotes from '../components/TeamNotes'
 import { LANE_LABEL, TIER_LABEL, editedFieldsText, isHidden, rankLabel, riotSourceLabel, riotSourceTag, roleLabel, titleCase } from '../lib/format'
+import { roleBadge } from '../lib/matchupPanel'
 import { MAX_TAGS, sortTags } from '../lib/playstyle'
 import { useRiotStatus } from './RiotImportPage'
 
@@ -500,7 +501,7 @@ export function PlayerEditorPage({ scope = USER_SCOPE }: { scope?: Scope }) {
           </label>
         ))}
       </div>
-      <ChampionFitCard stats={stats} pool={pool} />
+      <ChampionFitCard stats={stats} pool={pool} role={role} secondary={secondary || null} />
       <ErrorNotice error={save.error} />
       <div className="row wrap">
         <button className="primary" disabled={save.isPending || !poolValid}>Save player</button>
@@ -553,12 +554,16 @@ type FitSort = 'rank' | 'name' | 'class' | 'strength' | 'top_stat'
 const FIT_SORT_TEXT: FitSort[] = ['name', 'class', 'top_stat']   // these start ascending, the rest best first
 
 /** Every champion's lane fit for these stats, recomputed as the sliders and pool change; searchable and sortable. */
-function ChampionFitCard({ stats, pool }: { stats: { aggr: number; aware: number; pos: number; dmg: number }; pool: string[] }) {
-  const fit = useChampionFit(stats, pool.filter(Boolean).map(Number))
+function ChampionFitCard({ stats, pool, role, secondary }: {
+  stats: { aggr: number; aware: number; pos: number; dmg: number }; pool: string[]; role: Lane; secondary: Lane | null
+}) {
+  const fit = useChampionFit(stats, pool.filter(Boolean).map(Number), { role, secondary_role: secondary })
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<{ by: FitSort; desc: boolean }>({ by: 'rank', desc: true })
   const all = useMemo(() => (fit.data ?? []).map((r, i) => ({ ...r, rank: i + 1 })), [fit.data])
-  const top = all[0]?.score || 1
+  const top = Math.max(1, ...all.map((r) => r.score))   // off-role champions sink, so the first row may not be the highest
+  const penalty = all.find((r) => r.off_role_penalty > 0)?.off_role_penalty
+  const lanesText = secondary ? `${LANE_LABEL[role]} or ${LANE_LABEL[secondary]}` : LANE_LABEL[role]
   const q = query.trim().toLowerCase()
   const rows = all.filter((r) => !q || r.name.toLowerCase().includes(q) || r.class.toLowerCase().includes(q))
   rows.sort((x, y) => {
@@ -590,7 +595,8 @@ function ChampionFitCard({ stats, pool }: { stats: { aggr: number; aware: number
           onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault() }}
         />
       </div>
-      <p className="small muted">Based on the lane formula: these stats × each champion's attributes, boosted by pool comfort, then raised or lowered by the stats behind the champion's strength (Offence: Damage + Positioning, Defence: Aggression, Control: Awareness).</p>
+      <p className="small muted">Based on the lane formula: these stats × each champion's attributes, boosted by pool comfort, then raised or lowered by the stats behind the champion's strength (Offence: Damage + Positioning, Defence: Aggression, Control: Awareness).
+        Champions outside their usual roles for {lanesText} lose {penalty ? `${Math.round(penalty * 100)}%` : 'lane score'} (unless they are a top pool pick) and are listed after the on-role champions.</p>
       <ErrorNotice error={fit.error} />
       {fit.isLoading ? <Loading label="Ranking champions…" /> : (
         <>
@@ -617,6 +623,11 @@ function ChampionFitCard({ stats, pool }: { stats: { aggr: number; aware: number
                         <span>
                           {r.name}
                           {r.comfort_tier !== 'VULNERABLE' && <span className={`badge tier-${r.comfort_tier.toLowerCase()}`}>{TIER_LABEL[r.comfort_tier]}</span>}
+                          {(() => {
+                            const badge = roleBadge(r.role_status, r.off_role_penalty)
+                            return badge && <span className={`role-badge role-${badge.kind}`} title={badge.title}>{badge.label}</span>
+                          })()}
+                          {secondary && r.lane === secondary && r.off_role_penalty === 0 && <span className="small muted"> · {LANE_LABEL[secondary]}</span>}
                         </span>
                       </span>
                     </td>

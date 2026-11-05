@@ -106,3 +106,59 @@ def test_rejects_out_of_range_stats_and_big_pools(alice):
 
 def test_requires_login(client):
     assert client.post("/api/v1/champion-fit", json=STATS).status_code == 401
+
+
+# ------------------------------------------------------------ roles
+def by_id(rows):
+    return {r["champion_id"]: r for r in rows}
+
+
+def off_role_for(champions, lane):
+    """An enabled champion with role data that never plays `lane`."""
+    return next(c for c in champions.values() if c.roles and lane not in c.roles)
+
+
+def test_no_role_means_no_off_role_penalty(alice):
+    rows = fit(alice, limit=None).json()
+    assert all(r["lane"] is None and r["role_status"] is None and r["off_role_penalty"] == 0 for r in rows)
+
+
+def test_off_role_champions_lose_score_and_sink(alice, champions):
+    champ = off_role_for(champions, "SUPPORT")
+    plain = by_id(fit(alice, limit=None).json())[champ.id]
+    rows = fit(alice, limit=None, role="SUPPORT").json()
+    row = by_id(rows)[champ.id]
+    penalty = SIMULATION_CONFIG["off_role"]["lane_penalty"]
+    assert row["role_status"] == "OFF_ROLE" and row["lane"] == "SUPPORT"
+    assert row["off_role_penalty"] == pytest.approx(penalty)
+    assert row["score"] == pytest.approx(plain["score"] * (1 - penalty), abs=0.02)
+    penalised = [r["off_role_penalty"] > 0 for r in rows]
+    assert penalised == sorted(penalised)   # every unpenalised row comes first
+    first = next(r for r in rows if r["off_role_penalty"] == 0)
+    assert first["role_status"] in ("MAIN", "SECONDARY", None, "OFF_ROLE_EXEMPT")
+
+
+def test_top_pool_picks_are_exempt_off_role(alice, champions):
+    champ = off_role_for(champions, "SUPPORT")
+    plain = by_id(fit(alice, limit=None, pool=[champ.id]).json())[champ.id]
+    row = by_id(fit(alice, limit=None, pool=[champ.id], role="SUPPORT").json())[champ.id]
+    assert row["role_status"] == "OFF_ROLE_EXEMPT" and row["off_role_penalty"] == 0
+    assert row["score"] == plain["score"]
+
+
+def test_secondary_role_counts_when_it_suits_better(alice, champions):
+    champ = next(c for c in champions.values() if c.roles and "SUPPORT" not in c.roles)
+    row = by_id(fit(alice, limit=None, role="SUPPORT", secondary_role=champ.roles[0]).json())[champ.id]
+    assert row["lane"] == champ.roles[0] and row["role_status"] == "MAIN" and row["off_role_penalty"] == 0
+
+
+def test_primary_role_wins_ties(alice, champions):
+    champ = next(c for c in champions.values() if c.roles)
+    lane = champ.roles[0]
+    other = next(ln for ln in ("TOP", "JUNGLE", "MID", "BOT", "SUPPORT") if ln not in champ.roles)
+    row = by_id(fit(alice, limit=None, role=lane, secondary_role=other).json())[champ.id]
+    assert row["lane"] == lane
+
+
+def test_rejects_unknown_roles(alice):
+    assert fit(alice, role="ADC").status_code == 422

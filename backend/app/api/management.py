@@ -58,7 +58,8 @@ def list_champions(db: Session = Depends(get_db), _: User = Depends(get_current_
 @router.post("/champion-fit")
 def rank_champion_fit(body: ChampionFitIn, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     """Champions ranked by how well these (possibly unsaved) stats and pool score with them in lane."""
-    return champion_fit.rank_champions(db, body.aggr, body.aware, body.pos, body.dmg, body.pool, body.limit)
+    return champion_fit.rank_champions(db, body.aggr, body.aware, body.pos, body.dmg, body.pool, body.limit,
+                                       body.role, body.secondary_role)
 
 
 @router.post("/team-insights")

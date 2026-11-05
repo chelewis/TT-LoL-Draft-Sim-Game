@@ -796,6 +796,7 @@ table.mx { width: max-content; border-collapse: separate; border-spacing: 0; tab
 .fit-table tbody tr:last-child td { border-bottom: 0; }
 .fit-rank { width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }
 .fit-name { gap: 6px; }
+.fit-name .role-badge { margin-left: 4px; height: 18px; }
 .fit-bonus { color: var(--ok); }
 .fit-penalty { color: var(--red); }
 .fit-score { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }

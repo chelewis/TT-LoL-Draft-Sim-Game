@@ -189,6 +189,11 @@ export interface ChampionFit {
   strength: 'Offence' | 'Defence' | 'Control'
   /** Lane multiplier from the stats behind the champion's strength (0.75 to 1.25). */
   strength_fit: number
+  /** Which of the player's lanes suits the champion best; null when no role was given. */
+  lane: Lane | null
+  role_status: RoleStatus
+  /** Fraction of the score the off-role rule takes (0 when none). Penalised champions are listed last. */
+  off_role_penalty: number
 }
 
 export interface Player {
