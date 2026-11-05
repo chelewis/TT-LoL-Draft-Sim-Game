@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
-import type { AdminPlaystyleTag, AdminUser, MatchupKind, MatchupMatrix, PlaystyleOptions, SimulationSettings } from '../api/types'
+import type { AdminChampions, AdminPlaystyleTag, AdminUser, MatchupKind, MatchupMatrix, PlaystyleOptions, SimulationSettings } from '../api/types'
+import type { ChampionChange } from '../lib/championAdmin'
 import { toChanges, type Pending } from '../lib/matchups'
+import { metaKey } from './useData'
 
 const matchupsKey = (kind: MatchupKind) => ['admin', 'matchups', kind]
 
@@ -19,6 +21,7 @@ export function useSaveMatchups(kind: MatchupKind) {
     mutationFn: async (pending: Pending) => {
       await api(`/admin/matchups/${kind}`, { method: 'PUT', body: { changes: toChanges(pending) } })
       await qc.invalidateQueries({ queryKey: matchupsKey(kind) })
+      void qc.invalidateQueries({ queryKey: metaKey }) // the Meta views' win rates come from these tables
     },
   })
 }
@@ -29,6 +32,47 @@ export function useResetMatchups(kind: MatchupKind) {
     mutationFn: async () => {
       await api(`/admin/matchups/${kind}/reset`, { method: 'POST' })
       await qc.invalidateQueries({ queryKey: matchupsKey(kind) })
+      void qc.invalidateQueries({ queryKey: metaKey }) // the Meta views' win rates come from these tables
+    },
+  })
+}
+
+// ------------------------------------------------------------ champion info
+const championsKey = ['admin', 'champions']
+
+export const useAdminChampions = () =>
+  useQuery({
+    queryKey: championsKey,
+    queryFn: () => api<AdminChampions>('/admin/champions'),
+    staleTime: Infinity, // only admins change it, and an edit in progress should not be refetched under them
+  })
+
+/** Champion data is read all over the game (draft lists, Meta, pick suggestions), so refresh everything that uses it. */
+function refreshChampionData(qc: ReturnType<typeof useQueryClient>) {
+  void qc.invalidateQueries({ queryKey: metaKey })
+  void qc.invalidateQueries({ queryKey: ['champions'] })
+}
+
+/** Save edits. Resolves once the list has been reloaded, so the caller can drop its edits without a flicker. */
+export function useSaveChampions() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (changes: ChampionChange[]) => {
+      await api('/admin/champions', { method: 'PUT', body: { changes } })
+      await qc.invalidateQueries({ queryKey: championsKey })
+      refreshChampionData(qc)
+    },
+  })
+}
+
+/** Put CSV values back for the given champions, or every edited champion when `ids` is null. */
+export function useResetChampions() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (ids: number[] | null) => {
+      await api('/admin/champions/reset', { body: { ids } })
+      await qc.invalidateQueries({ queryKey: championsKey })
+      refreshChampionData(qc)
     },
   })
 }
@@ -48,7 +92,10 @@ export function useSaveSimulationSettings() {
   return useMutation({
     mutationFn: (values: Record<string, number | boolean>) =>
       api<SimulationSettings>('/admin/simulation', { method: 'PUT', body: { values } }),
-    onSuccess: (data) => qc.setQueryData(simulationKey, data),
+    onSuccess: (data) => {
+      qc.setQueryData(simulationKey, data)
+      void qc.invalidateQueries({ queryKey: metaKey }) // Meta → Champion Pairs notes read these settings
+    },
   })
 }
 
@@ -56,7 +103,10 @@ export function useResetSimulationSettings() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: () => api<SimulationSettings>('/admin/simulation/reset', { method: 'POST' }),
-    onSuccess: (data) => qc.setQueryData(simulationKey, data),
+    onSuccess: (data) => {
+      qc.setQueryData(simulationKey, data)
+      void qc.invalidateQueries({ queryKey: metaKey }) // Meta → Champion Pairs notes read these settings
+    },
   })
 }
 

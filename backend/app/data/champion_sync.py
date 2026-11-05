@@ -7,10 +7,11 @@ Runs on every backend start (and on demand via `python -m scripts.sync_champions
 * a champion whose **id changed in the CSV** (same name, new id) is renumbered in the database, but only when
   nothing refers to the old id (no player pool, draft or lineup uses it); otherwise it is skipped with an
   explanation, because changing an id that is in use would corrupt existing data;
+* columns an admin has edited (Admin -> Champions -> Info) are **not** overwritten until the admin resets them;
 * champions only in the database are **left alone** (nothing is ever deleted, so players' pools and past
   games keep working), and the `enabled` flag is never changed by a sync.
 
-The CSV is the source of truth for champion data; edit the CSV, not the table.
+The CSV is the source of truth for champion data, apart from admin edits; edit the CSV, not the table.
 """
 from __future__ import annotations
 
@@ -84,7 +85,9 @@ def sync_champions(db: Session, data: SeedData, commit: bool = True) -> SyncRepo
             names_in_use[champ.name.lower()] = champ.id
             report.added.append(champ.name)
             continue
-        changed = [column for column, attr in FIELDS.items() if not _same(getattr(row, column), getattr(champ, attr))]
+        edited = row.edited       # admin edits win over the CSV until an admin resets them
+        changed = [column for column, attr in FIELDS.items()
+                   if column not in edited and not _same(getattr(row, column), getattr(champ, attr))]
         if not changed:
             report.unchanged += 1
             continue

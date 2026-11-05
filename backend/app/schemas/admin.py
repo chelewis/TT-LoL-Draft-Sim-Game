@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 
 
 class MatchupChange(BaseModel):
@@ -11,6 +11,20 @@ class MatchupChange(BaseModel):
 
 class MatchupChangesIn(BaseModel):
     changes: list[MatchupChange] = Field(min_length=1, max_length=20000)
+
+
+class ChampionChange(BaseModel):
+    id: int
+    # column -> new value; checked against champion_admin_service.EDITABLE (StrictInt first keeps 3 an int)
+    values: dict[str, StrictInt | float | str] = Field(min_length=1, max_length=20)
+
+
+class ChampionChangesIn(BaseModel):
+    changes: list[ChampionChange] = Field(min_length=1, max_length=1000)
+
+
+class ChampionResetIn(BaseModel):
+    ids: list[int] | None = Field(default=None, max_length=1000)   # null resets every edited champion
 
 
 class SimulationSettingsIn(BaseModel):

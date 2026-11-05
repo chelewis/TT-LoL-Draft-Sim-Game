@@ -18,7 +18,9 @@ from app.services import matchup_service as svc
 from app.services import simulation_settings_service as sim_settings
 from app.services import team_management_service as teams
 
-from app.schemas.admin import MatchupChangesIn, PasswordResetIn, PlaystyleTagIn, SimulationSettingsIn
+from app.schemas.admin import (ChampionChangesIn, ChampionResetIn, MatchupChangesIn, PasswordResetIn,
+                               PlaystyleTagIn, SimulationSettingsIn)
+from app.services import champion_admin_service as champion_admin
 from app.services import matchup_service as svc
 from app.services import simulation_settings_service as sim_settings
 from app.services import playstyle_service as playstyle
@@ -26,6 +28,27 @@ from app.services import user_admin_service as users
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 log = logging.getLogger(__name__)
+
+
+# ------------------------------------------------- champion info (win rate, pick rate, attributes)
+@router.get("/champions")
+def list_champions(db: Session = Depends(get_db)):
+    return champion_admin.list_champions(db)
+
+
+@router.put("/champions")
+def update_champions(body: ChampionChangesIn, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    updated = champion_admin.apply_changes(db, body.changes)
+    log.info("admin_champions_updated user_id=%s champions=%s values=%s",
+             user.id, sorted(c.id for c in body.changes), updated)
+    return {"updated": updated}
+
+
+@router.post("/champions/reset")
+def reset_champions(body: ChampionResetIn, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    count = champion_admin.reset(db, body.ids)
+    log.info("admin_champions_reset user_id=%s ids=%s champions=%s", user.id, body.ids, count)
+    return {"reset": count}
 
 
 # ------------------------------------------------- champion win rate matrices

@@ -1,16 +1,14 @@
+import type { MenuEntry } from '../../components/NavMenu'
+
 /** The admin area's pages, as shown in the top bar dropdown. A new page is one entry here plus a route in AdminPage. */
-export interface AdminLink {
-  label: string
-  to: string
-}
-
-export interface AdminGroup {
-  label: string
-  items: AdminLink[]
-}
-
-export const ADMIN_NAV: (AdminLink | AdminGroup)[] = [
-  { label: 'Champions', items: [{ label: 'Winrates', to: '/admin/champions/winrates' }] },
+export const ADMIN_NAV: MenuEntry[] = [
+  {
+    label: 'Champions',
+    items: [
+      { label: 'Info', to: '/admin/champions/info' },
+      { label: 'Winrates', to: '/admin/champions/winrates' },
+    ],
+  },
   {
     label: 'Defaults',
     items: [

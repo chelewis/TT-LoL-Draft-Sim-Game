@@ -1,7 +1,22 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
-import type { Champion, ChampionFit, Coach, Player, Team, TeamInsights, TeamInsightsRequest } from '../api/types'
+import type { Champion, ChampionFit, ChampionPair, Coach, MetaChampion, Player, Team, TeamInsights, TeamInsightsRequest } from '../api/types'
 import { fetchLatestVersion } from '../lib/ddragon'
+
+/** Every Meta view's query starts with this key, so admin edits to what feeds them can refresh them all. */
+export const metaKey = ['meta']
+
+export const useMetaChampions = () =>
+  useQuery({ queryKey: [...metaKey, 'champions'], queryFn: () => api<MetaChampion[]>('/meta/champions') })
+
+/** How two champions interact; idle until two different champions are chosen. */
+export const useChampionPair = (a: number | null, b: number | null) =>
+  useQuery({
+    queryKey: [...metaKey, 'pair', a, b],
+    queryFn: () => api<ChampionPair>(`/meta/pair?a=${a}&b=${b}`),
+    enabled: a !== null && b !== null && a !== b,
+    placeholderData: keepPreviousData,
+  })
 
 export function useChampions() {
   return useQuery({
