@@ -31,8 +31,14 @@ class Champion(Base):
     waveclear: Mapped[int] = mapped_column(Integer, default=2)
     roles: Mapped[str] = mapped_column(String(64), default="")      # usual lanes, most played first: "JUNGLE|TOP"
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # columns an admin has changed ("pick_rate|win_rate"); the seed sync leaves these alone until they are reset
+    edited_fields: Mapped[str] = mapped_column(String(256), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    @property
+    def edited(self) -> set[str]:
+        return {f for f in (self.edited_fields or "").split("|") if f}
 
     def to_engine(self) -> EngineChampion:
         return EngineChampion(self.id, self.name, self.champ_class, self.style, self.difficulty,

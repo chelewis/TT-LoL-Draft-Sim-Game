@@ -33,6 +33,38 @@ export type SimulationSettingField = {
   default: number | boolean
   value: number | boolean
 } & ({ kind: 'bool' } | { kind: 'number'; min: number; max: number; step: number })
+/** Champion columns admins can edit on Admin → Champions → Info (backend champion_admin_service.EDITABLE). */
+export type AdminChampionColumn =
+  | 'win_rate' | 'pick_rate' | 'style' | 'difficulty' | 'damage_type' | 'damage' | 'sturdiness'
+  | 'crowd_control' | 'mobility' | 'utility' | 'scaling' | 'attack_range' | 'waveclear'
+
+export interface AdminChampionField {
+  kind: 'int' | 'float' | 'choice'
+  min: number
+  max: number
+  choices: string[]
+}
+
+/** One row of GET /admin/champions. */
+export type AdminChampion = {
+  id: number
+  name: string
+  class: string
+  enabled: boolean
+  roles: Lane[]
+  /** columns an admin has changed; the startup CSV sync leaves them alone until reset */
+  edited: AdminChampionColumn[]
+  /** the CSV value of each edited column (what a reset brings back) */
+  seed: Partial<Record<AdminChampionColumn, number | string>>
+  in_seed: boolean
+  updated_at: string | null
+} & Record<AdminChampionColumn, number | string>
+
+export interface AdminChampions {
+  fields: Record<AdminChampionColumn, AdminChampionField>
+  champions: AdminChampion[]
+}
+
 /** GET /admin/users: one row per site user. */
 export interface AdminUser {
   id: number
@@ -76,6 +108,73 @@ export interface Champion {
   roles: Lane[]
   strength: string
   weakness: string
+}
+
+/** One row of GET /meta/champions: how a champion is doing in the game's meta. */
+export interface MetaChampion {
+  id: number
+  name: string
+  class: string
+  roles: Lane[]
+  /** main role (first of roles); win_rate only counts opponents with the same main role */
+  role: Lane | null
+  /** percent; expected win rate against a lane opponent from the against-team win rate table, or the champion's own rate */
+  win_rate: number
+  win_rate_source: 'matchups' | 'base'
+  /** same-lane opponents with data in the against-team table */
+  opponents: number
+  /** percent */
+  pick_rate: number
+}
+
+/** A champion as GET /meta/pair describes it. */
+export interface PairChampion {
+  id: number
+  name: string
+  class: string
+  roles: Lane[]
+  /** "P", "M" or "PM" */
+  damage_type: string
+  /** 1 melee, 2 short range, 3 long range */
+  range: number
+  /** 1 early game, 2 neutral, 3 late game */
+  scaling: number
+  /** 1 weak, 2 average, 3 strong */
+  waveclear: number
+  /** matchup wheel type */
+  strength: string
+  weakness: string
+}
+
+/** A note on how two champions interact in the simulation. Same team: strength / weakness / neutral. Against
+ * team: which champion the effect favours (a = the first, b = the second), or even. */
+export interface PairNote {
+  kind: 'strength' | 'weakness' | 'neutral' | 'a' | 'b' | 'even'
+  title: string
+  detail: string
+  weight: number
+}
+
+/** Where a pair's win rate came from: games behind it, and whether an admin set it. */
+export interface PairRate {
+  /** percent, or null when the table has no value */
+  win_rate: number | null
+  games: number
+  edited: boolean
+  notes: PairNote[]
+}
+
+/** GET /meta/pair?a=&b=: how two champions do together and against each other. */
+export interface ChampionPair {
+  champions: [PairChampion, PairChampion]
+  same_team: PairRate
+  /** win_rate is the first champion's against the second */
+  against: PairRate & {
+    /** the lane where they would face each other; null when they never share one */
+    lane: Lane | null
+    /** same role (true), or across the bot lane, bot vs support (false) */
+    head_to_head: boolean
+  }
 }
 
 /** One row of POST /champion-fit: lane fit of a champion for given stats and pool, best first. */

@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { CoachesPage, DEFAULTS_SCOPE, PlayerEditorPage, PlayersPage, TeamEditorPage, TeamsPage } from '../ManagementPages'
+import ChampionInfoPage from './ChampionInfoPage'
 import GlobalsPage from './GlobalsPage'
 import PlaystyleTagsPage from './PlaystyleTagsPage'
 import SimulationSettingsPage from './SimulationSettingsPage'
@@ -15,6 +16,7 @@ export default function AdminPage() {
       <p className="admin-crumbs muted small" aria-label="You are here">{['Admin', ...adminTrail(pathname)].join(' / ')}</p>
       <Routes>
         <Route index element={<Navigate to={ADMIN_HOME} replace />} />
+        <Route path="champions/info" element={<ChampionInfoPage />} />
         <Route path="champions/winrates/:matrix?" element={<WinratesPage />} />
         <Route path="defaults/teams" element={<TeamsPage scope={DEFAULTS_SCOPE} />} />
         <Route path="defaults/teams/new" element={<TeamEditorPage scope={DEFAULTS_SCOPE} />} />
