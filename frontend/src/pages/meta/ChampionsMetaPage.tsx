@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { LANES, type Lane, type MetaChampion } from '../../api/types'
 import { ChampionIcon, LaneIcon } from '../../components/ChampionArt'
 import { ErrorNotice, Loading } from '../../components/common'
+import Tooltip from '../../components/Tooltip'
 import { useMetaChampions } from '../../hooks/useData'
 import { togglePair } from '../../lib/championPair'
 import { LANE_LABEL } from '../../lib/format'
@@ -12,6 +13,22 @@ import {
 import ChampionPairDrawer from './ChampionPairDrawer'
 
 const percent = (value: number) => `${value.toFixed(1)}%`
+
+/** Why a low winrate champion can still be a good pick. No numbers: comfort and scaling values are admin settings. */
+const LOW_WINRATE_TIP = (
+  <div className="tip-content">
+    <strong>Winrate is an average over every matchup.</strong> The simulation cares more about:
+    <ul>
+      <li><strong>Comfort:</strong> a champion high in the player's pool gets a big bonus; one outside their pool gets a penalty.</li>
+      <li><strong>Difficulty:</strong> hard champions swing more in each fight: stronger on a practised player, risky on anyone else.</li>
+      <li><strong>Scaling:</strong> late-game champions are weaker in lane but stronger in late fights; early-game champions are the
+        opposite. Match them to the team style.</li>
+      <li><strong>Partners and matchups:</strong> some champions do much better with certain allies or against certain opponents.
+        Select two champions to check.</li>
+      <li><strong>Comp fit:</strong> range, waveclear and damage type (magic or physical) can fill a gap in the team.</li>
+    </ul>
+  </div>
+)
 
 function winRateTitle(r: MetaChampion): string {
   return r.win_rate_source === 'matchups'
@@ -61,7 +78,10 @@ export default function ChampionsMetaPage() {
         does in its main lane: its against-team win rates (the ones the simulation uses)
         against champions with the same main role, weighted by how often each opponent is picked. Extreme matchups are
         softened, so a few hard counters can't sink an otherwise strong champion. Pick Rate is how often the champion is
-        picked.
+        picked.{' '}
+        <Tooltip label="Why a low winrate champion can still be a good pick" content={LOW_WINRATE_TIP}>
+          <span className="has-tip">Low winrate ≠ bad pick</span>
+        </Tooltip>
       </p>
       <div className="card stack">
         <div className="meta-toolbar">
