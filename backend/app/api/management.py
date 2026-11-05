@@ -8,9 +8,9 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.game.config import DRAFT_CONFIG, LANES, MANAGEMENT_CONFIG
-from app.models import Champion, Coach, Player, Team, User
+from app.models import Champion, Coach, Lobby, Player, Team, User
 from app.schemas.management import ChampionFitIn, CoachIn, PlayerIn, TeamIn, TeamInsightsIn
-from app.services import champion_fit, playstyle_service, team_insights_service
+from app.services import champion_fit, game_service, lobby_rules, playstyle_service, team_insights_service
 from app.services.simulation_settings_service import current_config
 from app.services import team_management_service as svc
 
@@ -70,8 +70,16 @@ def team_insights(body: TeamInsightsIn, db: Session = Depends(get_db), user: Use
 
 # ------------------------------------------------------------------- teams
 @router.get("/teams")
-def list_teams(selectable: bool | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    return svc.list_teams(db, user.id, selectable)
+def list_teams(selectable: bool | None = None, game_id: int | None = None, db: Session = Depends(get_db),
+               user: User = Depends(get_current_user)):
+    """With `game_id`, each team also lists `rule_issues`: why it breaks that lobby's restrictions."""
+    views = svc.list_teams(db, user.id, selectable)
+    if game_id is not None:
+        game = game_service.get_game(db, game_id, user.id)
+        settings = db.get(Lobby, game.lobby_id).settings or {}
+        for v in views:
+            v["rule_issues"] = lobby_rules.team_rule_issues(v, settings)
+    return views
 
 
 @router.post("/teams", status_code=201)

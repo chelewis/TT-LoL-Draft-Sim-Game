@@ -1,10 +1,10 @@
 import { useMutation } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
-import type { GameState, Side } from '../../api/types'
+import type { GameState, Side, Team } from '../../api/types'
 import { ErrorNotice, Loading } from '../../components/common'
 import TeamCard from '../../components/TeamCard'
-import { draftRules, isCpu, isSolo, seriesLabel } from '../../lib/format'
+import { draftRules, isCpu, isSolo, lobbyLimits, rulesetLabel, seriesLabel } from '../../lib/format'
 import { useTeams } from '../../hooks/useData'
 
 /** Single player: pick a team for each side from your own teams and the defaults, then start the draft.
@@ -12,7 +12,7 @@ import { useTeams } from '../../hooks/useData'
 function SoloLobby({ game, onChange }: { game: GameState; onChange: () => void }) {
   const cpu = isCpu(game)
   const navigate = useNavigate()
-  const teams = useTeams(true)
+  const teams = useTeams(true, game.game_id)
   const choose = useMutation({
     mutationFn: ({ side, teamId }: { side: Side; teamId: number }) =>
       api(`/lobbies/${game.lobby_id}/team`, { body: { team_id: teamId, side } }),
@@ -40,6 +40,7 @@ function SoloLobby({ game, onChange }: { game: GameState; onChange: () => void }
           Draft: {draftRules(game.settings)}.
           {seriesLabel(game.settings) && <> Format: {seriesLabel(game.settings)}.</>}
         </p>
+        <p className="small muted">Ruleset: {rulesetLabel(game.settings)} · {lobbyLimits(game.settings)}</p>
         {cpu && (
           <div className="row wrap side-choice" role="radiogroup" aria-label="Your side">
             {(['BLUE', 'RED'] as Side[]).map((side) => (
@@ -71,11 +72,13 @@ function SoloLobby({ game, onChange }: { game: GameState; onChange: () => void }
                     key={t.id}
                     className={`pick-card ${chosen[side] === t.id ? 'selected' : ''}`}
                     onClick={() => choose.mutate({ side, teamId: t.id })}
-                    disabled={choose.isPending}
+                    disabled={choose.isPending || !!t.rule_issues?.length}
                     aria-pressed={chosen[side] === t.id}
+                    title={t.rule_issues?.join('; ') || undefined}
                   >
                     <strong>{t.name}</strong>
                     <span className="muted small">{t.is_default ? 'Default team' : 'Your team'}</span>
+                    <RuleBadge team={t} />
                   </button>
                 ))}
               </div>
@@ -98,6 +101,12 @@ function SoloLobby({ game, onChange }: { game: GameState; onChange: () => void }
   )
 }
 
+/** Shown on a team that breaks the lobby's restrictions (the reasons are in the card's tooltip). */
+function RuleBadge({ team }: { team: Team }) {
+  if (!team.rule_issues?.length) return null
+  return <span className="badge badge-warn">⚠ Not allowed: {team.rule_issues[0]}{team.rule_issues.length > 1 ? ` (+${team.rule_issues.length - 1} more)` : ''}</span>
+}
+
 export default function LobbyView({ game, onChange }: { game: GameState; onChange: () => void }) {
   if (isSolo(game) || isCpu(game)) return <SoloLobby game={game} onChange={onChange} />
   return <MultiLobby game={game} onChange={onChange} />
@@ -105,7 +114,7 @@ export default function LobbyView({ game, onChange }: { game: GameState; onChang
 
 function MultiLobby({ game, onChange }: { game: GameState; onChange: () => void }) {
   const navigate = useNavigate()
-  const teams = useTeams(true)
+  const teams = useTeams(true, game.game_id)
   const me = game.you.team
   const mine = me === 'BLUE' ? game.players.blue : game.players.red
   const myTeamId = mine?.team_id ?? null
@@ -148,6 +157,7 @@ function MultiLobby({ game, onChange }: { game: GameState; onChange: () => void 
             Draft: {draftRules(game.settings)}
           </p>
           {seriesLabel(game.settings) && <p className="small muted">Format: {seriesLabel(game.settings)}</p>}
+          <p className="small muted">Ruleset: {rulesetLabel(game.settings)} · {lobbyLimits(game.settings)}</p>
         </div>
         <div className="code-box" aria-label="Lobby code">
           <span className="muted small">Lobby code</span>
@@ -183,10 +193,12 @@ function MultiLobby({ game, onChange }: { game: GameState; onChange: () => void 
               key={t.id}
               className={`pick-card ${myTeamId === t.id ? 'selected' : ''}`}
               onClick={() => choose.mutate(t.id)}
-              disabled={choose.isPending}
+              disabled={choose.isPending || !!t.rule_issues?.length}
+              title={t.rule_issues?.join('; ') || undefined}
             >
               <strong>{t.name}</strong>
               <span className="muted small">{t.is_default ? 'Default team' : 'Your team'}</span>
+              <RuleBadge team={t} />
               {t.over_budget && <span className="badge badge-warn">⚠ over stat ceiling</span>}
             </button>
           ))}

@@ -386,6 +386,8 @@ export interface Team {
   roster: Record<Lane, Player | HiddenPlayer | null>
   selectable?: boolean
   issues?: string[]
+  /** with ?game_id: why the team breaks that lobby's restrictions (empty when allowed) */
+  rule_issues?: string[]
   over_budget: boolean
   over_budget_players: OverBudgetPlayer[]
   is_default?: boolean
@@ -402,6 +404,42 @@ export interface LobbySettings {
   series_format: SeriesFormat
   /** fearless draft: champions picked earlier in a series can't be picked or banned again */
   fearless: boolean
+  /** team restrictions: every player a ranked Riot import at or below this tier; stat total caps */
+  max_rank: string | null
+  max_player_total: number | null
+  max_team_total: number | null
+  ruleset: string
+  ruleset_name: string
+  /** the creator changed some options from the ruleset's preset */
+  ruleset_modified: boolean
+}
+
+/** Options a ruleset fills in on the create-lobby form. */
+export interface RulesetSettings {
+  hide_player_data: boolean
+  bans_enabled: boolean
+  timers_enabled: boolean
+  pick_seconds: number
+  ban_seconds: number
+  series_format: SeriesFormat
+  fearless: boolean
+  max_rank: string | null
+  max_player_total: number | null
+  max_team_total: number | null
+}
+
+export interface Ruleset {
+  key: string
+  name: string
+  description: string
+  settings: RulesetSettings
+}
+
+/** GET /lobbies/rulesets */
+export interface RulesetList {
+  rulesets: Ruleset[]
+  rank_tiers: string[]
+  default: string
 }
 
 export type SeriesFormat = 'BO1' | 'BO3' | 'BO5'

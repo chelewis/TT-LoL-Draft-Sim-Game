@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
-import type { Champion, ChampionFit, ChampionPair, Coach, Lane, MetaChampion, Player, Team, TeamInsights, TeamInsightsRequest } from '../api/types'
+import type { Champion, ChampionFit, ChampionPair, Coach, Lane, MetaChampion, Player, RulesetList, Team, TeamInsights, TeamInsightsRequest } from '../api/types'
 import { fetchLatestVersion } from '../lib/ddragon'
 
 /** Every Meta view's query starts with this key, so admin edits to what feeds them can refresh them all. */
@@ -37,11 +37,21 @@ export function useChampionMap(): Map<number, Champion> {
   return new Map((data ?? []).map((c) => [c.id, c]))
 }
 
-export const useTeams = (selectable?: boolean) =>
+/** With `gameId`, each team also carries `rule_issues` for that game's lobby restrictions. */
+export const useTeams = (selectable?: boolean, gameId?: number) =>
   useQuery({
-    queryKey: ['teams', selectable ?? 'all'],
-    queryFn: () => api<Team[]>(`/teams${selectable === undefined ? '' : `?selectable=${selectable}`}`),
+    queryKey: ['teams', selectable ?? 'all', gameId ?? null],
+    queryFn: () => {
+      const params = new URLSearchParams()
+      if (selectable !== undefined) params.set('selectable', String(selectable))
+      if (gameId !== undefined) params.set('game_id', String(gameId))
+      const query = params.toString()
+      return api<Team[]>(`/teams${query ? `?${query}` : ''}`)
+    },
   })
+
+export const useRulesets = () =>
+  useQuery({ queryKey: ['rulesets'], queryFn: () => api<RulesetList>('/lobbies/rulesets'), staleTime: Infinity })
 
 export const usePlayers = () => useQuery({ queryKey: ['players'], queryFn: () => api<Player[]>('/players') })
 

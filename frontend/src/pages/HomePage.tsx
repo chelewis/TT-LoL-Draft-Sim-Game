@@ -2,9 +2,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
-import type { LobbySummary, SeriesFormat } from '../api/types'
+import type { LobbySummary, Ruleset, RulesetSettings, SeriesFormat } from '../api/types'
 import { ErrorNotice, Loading } from '../components/common'
-import { seriesShort, titleCase } from '../lib/format'
+import { useRulesets } from '../hooks/useData'
+import { RANK_TIERS, seriesShort, titleCase } from '../lib/format'
 
 type Mode = 'SOLO' | 'MULTI'
 const MODE_KEY = 'ldm_create_mode'
@@ -29,61 +30,146 @@ function savedOpponent(): Opponent {
   }
 }
 
-interface DraftOptions {
-  bans: boolean
-  timers: boolean
-  pickSeconds: number
-  banSeconds: number
-  format: SeriesFormat
-  fearless: boolean
+type DraftOptions = RulesetSettings & { ruleset: string }
+
+/** Anything Goes, used until the ruleset list loads (the server has the same preset). */
+const ANYTHING_GOES: DraftOptions = {
+  ruleset: 'ANYTHING_GOES', hide_player_data: false, bans_enabled: true, timers_enabled: true, pick_seconds: 30,
+  ban_seconds: 30, series_format: 'BO1', fearless: false, max_rank: null, max_player_total: null, max_team_total: null,
 }
 
-const clamp = (n: number) => Math.max(5, Math.min(600, Math.round(n) || 30))
+const clampTo = (lo: number, hi: number, fallback: number) => (n: number) => Math.max(lo, Math.min(hi, Math.round(n) || fallback))
+const clamp = clampTo(5, 600, 30)
+const clampPlayerTotal = clampTo(5, 50, 32)
+const clampTeamTotal = clampTo(25, 250, 160)
 
-/** Series format, ban phases and pick/ban timers: the same options in both modes. */
-function DraftOptionsForm({ value, onChange }: { value: DraftOptions; onChange: (v: DraftOptions) => void }) {
+/** Whether the options differ from their ruleset's preset. Single player ignores hidden data (it's always shown). */
+function isModified(value: DraftOptions, rulesets: Ruleset[], single: boolean): boolean {
+  const preset = rulesets.find((r) => r.key === value.ruleset)?.settings
+  if (!preset) return false
+  return (Object.keys(preset) as (keyof RulesetSettings)[]).some(
+    (k) => !(single && k === 'hide_player_data') && preset[k] !== value[k],
+  )
+}
+
+/** A stat total cap: a "limit" checkbox and the number (null means no limit). */
+function CapField({ label, value, fallback, min, max, onChange }: {
+  label: string
+  value: number | null
+  fallback: number
+  min: number
+  max: number
+  onChange: (v: number | null) => void
+}) {
+  return (
+    <div className="stack">
+      <label className="check">
+        <input type="checkbox" checked={value !== null} onChange={(e) => onChange(e.target.checked ? fallback : null)} />
+        {label}
+      </label>
+      {value !== null && (
+        <input type="number" aria-label={label} min={min} max={max} value={value} onChange={(e) => onChange(Number(e.target.value))} />
+      )}
+    </div>
+  )
+}
+
+/** Ruleset, series format, ban phases, pick/ban timers and team restrictions: the same options in both modes.
+ * Choosing a ruleset fills in every option; the creator can still change any of them afterwards. */
+function DraftOptionsForm({ value, onChange, single }: { value: DraftOptions; onChange: (v: DraftOptions) => void; single: boolean }) {
+  const rulesets = useRulesets()
+  const list = rulesets.data?.rulesets ?? []
+  const current = list.find((r) => r.key === value.ruleset)
+  const modified = isModified(value, list, single)
   const set = (patch: Partial<DraftOptions>) => onChange({ ...value, ...patch })
+  const apply = (key: string) => {
+    const preset = list.find((r) => r.key === key)
+    if (preset) onChange({ ruleset: key, ...preset.settings })
+  }
+  const choices = list.length ? list.map((r) => ({ key: r.key, name: r.name })) : [{ key: ANYTHING_GOES.ruleset, name: 'Anything Goes' }]
   return (
     <>
       <label>
+        Ruleset
+        <select value={value.ruleset} onChange={(e) => apply(e.target.value)} disabled={!list.length}>
+          {choices.map((r) => (
+            <option key={r.key} value={r.key}>{r.name}</option>
+          ))}
+        </select>
+      </label>
+      {current && (
+        <p className="muted small">
+          {current.description}
+          {modified && (
+            <>
+              {' '}<span className="badge">Modified</span>{' '}
+              <button type="button" className="ghost small" onClick={() => apply(value.ruleset)}>Reset to {current.name}</button>
+            </>
+          )}
+        </p>
+      )}
+      {!single && (
+        <label className="check">
+          <input type="checkbox" checked={value.hide_player_data} onChange={(e) => set({ hide_player_data: e.target.checked })} />
+          Hide player data (opponent stats and champion pools stay secret until the match ends)
+        </label>
+      )}
+      <label>
         Format
-        <select value={value.format} onChange={(e) => set({ format: e.target.value as SeriesFormat })}>
+        <select value={value.series_format} onChange={(e) => set({ series_format: e.target.value as SeriesFormat })}>
           <option value="BO1">Best of 1</option>
           <option value="BO3">Best of 3</option>
           <option value="BO5">Best of 5</option>
         </select>
       </label>
-      <label className="check" title={value.format === 'BO1' ? 'Fearless Draft needs a Best of 3 or Best of 5' : undefined}>
+      <label className="check" title={value.series_format === 'BO1' ? 'Fearless Draft needs a Best of 3 or Best of 5' : undefined}>
         <input
           type="checkbox"
-          checked={value.fearless && value.format !== 'BO1'}
-          disabled={value.format === 'BO1'}
+          checked={value.fearless && value.series_format !== 'BO1'}
+          disabled={value.series_format === 'BO1'}
           onChange={(e) => set({ fearless: e.target.checked })}
         />
         Fearless Draft (champions picked in a game can't be picked or banned again in the series)
       </label>
       <label className="check">
-        <input type="checkbox" checked={!value.bans} onChange={(e) => set({ bans: !e.target.checked })} />
+        <input type="checkbox" checked={!value.bans_enabled} onChange={(e) => set({ bans_enabled: !e.target.checked })} />
         Disable ban phases (pick only)
       </label>
       <label className="check">
-        <input type="checkbox" checked={value.timers} onChange={(e) => set({ timers: e.target.checked })} />
+        <input type="checkbox" checked={value.timers_enabled} onChange={(e) => set({ timers_enabled: e.target.checked })} />
         Enable pick/ban timers
       </label>
-      {value.timers && (
+      {value.timers_enabled && (
         <div className="grid two">
           <label>
             Pick time limit (seconds)
-            <input type="number" min={5} max={600} value={value.pickSeconds} onChange={(e) => set({ pickSeconds: Number(e.target.value) })} />
+            <input type="number" min={5} max={600} value={value.pick_seconds} onChange={(e) => set({ pick_seconds: Number(e.target.value) })} />
           </label>
-          {value.bans && (
+          {value.bans_enabled && (
             <label>
               Ban time limit (seconds)
-              <input type="number" min={5} max={600} value={value.banSeconds} onChange={(e) => set({ banSeconds: Number(e.target.value) })} />
+              <input type="number" min={5} max={600} value={value.ban_seconds} onChange={(e) => set({ ban_seconds: Number(e.target.value) })} />
             </label>
           )}
         </div>
       )}
+      <h3>Team restrictions</h3>
+      <label>
+        Max rank
+        <select value={value.max_rank ?? ''} onChange={(e) => set({ max_rank: e.target.value || null })}>
+          <option value="">No limit</option>
+          {(rulesets.data?.rank_tiers ?? RANK_TIERS).map((tier) => (
+            <option key={tier} value={tier}>{titleCase(tier)} and below</option>
+          ))}
+        </select>
+      </label>
+      {value.max_rank && <p className="muted small">A rank limit only allows players imported from a ranked Riot account.</p>}
+      <div className="grid two">
+        <CapField label="Limit each player's stat total" value={value.max_player_total} fallback={32} min={5} max={50}
+          onChange={(v) => set({ max_player_total: v })} />
+        <CapField label="Limit the team's stat total" value={value.max_team_total} fallback={160} min={25} max={250}
+          onChange={(v) => set({ max_team_total: v })} />
+      </div>
     </>
   )
 }
@@ -94,10 +180,9 @@ export default function HomePage() {
   const [code, setCode] = useState('')
   const [mode, setModeState] = useState<Mode>(savedMode)
   const [opponent, setOpponentState] = useState<Opponent>(savedOpponent)
-  const [hide, setHide] = useState(false)
   // each tab keeps its own draft options: a single player sandbox defaults to no timers
-  const [multi, setMulti] = useState<DraftOptions>({ bans: true, timers: true, pickSeconds: 30, banSeconds: 30, format: 'BO1', fearless: false })
-  const [solo, setSolo] = useState<DraftOptions>({ bans: true, timers: false, pickSeconds: 30, banSeconds: 30, format: 'BO1', fearless: false })
+  const [multi, setMulti] = useState<DraftOptions>(ANYTHING_GOES)
+  const [solo, setSolo] = useState<DraftOptions>({ ...ANYTHING_GOES, timers_enabled: false })
 
   function setOpponent(next: Opponent) {
     setOpponentState(next)
@@ -125,13 +210,17 @@ export default function HomePage() {
         body: {
           mode: mode === 'SOLO' && opponent === 'CPU' ? 'CPU' : mode,
           settings: {
-            hide_player_data: mode === 'MULTI' && hide,
-            bans_enabled: o.bans,
-            timers_enabled: o.timers,
-            pick_seconds: clamp(o.pickSeconds),
-            ban_seconds: clamp(o.banSeconds),
-            series_format: o.format,
-            fearless: o.format !== 'BO1' && o.fearless,
+            ruleset: o.ruleset,
+            hide_player_data: mode === 'MULTI' && o.hide_player_data,
+            bans_enabled: o.bans_enabled,
+            timers_enabled: o.timers_enabled,
+            pick_seconds: clamp(o.pick_seconds),
+            ban_seconds: clamp(o.ban_seconds),
+            series_format: o.series_format,
+            fearless: o.series_format !== 'BO1' && o.fearless,
+            max_rank: o.max_rank,
+            max_player_total: o.max_player_total === null ? null : clampPlayerTotal(o.max_player_total),
+            max_team_total: o.max_team_total === null ? null : clampTeamTotal(o.max_team_total),
           },
         },
       })
@@ -197,16 +286,12 @@ export default function HomePage() {
                   ? "Draft against the CPU: choose your team and the CPU's team, then take turns picking and banning. The CPU drafts from the same stats, pools and matchups the simulation uses."
                   : 'Play both sides yourself: choose a team for Blue and for Red, make every pick and ban, then watch the simulated match. No second player needed.'}
               </p>
-              <DraftOptionsForm value={solo} onChange={setSolo} />
+              <DraftOptionsForm value={solo} onChange={setSolo} single />
             </>
           ) : (
             <>
               <p className="muted">You play Blue. Share the lobby code with a friend.</p>
-              <label className="check">
-                <input type="checkbox" checked={hide} onChange={(e) => setHide(e.target.checked)} />
-                Hide player data (opponent stats and champion pools stay secret until the match ends)
-              </label>
-              <DraftOptionsForm value={multi} onChange={setMulti} />
+              <DraftOptionsForm value={multi} onChange={setMulti} single={false} />
             </>
           )}
 
