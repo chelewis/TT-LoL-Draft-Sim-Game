@@ -21,6 +21,16 @@ class PlayerIn(BaseModel):
     tags: list[str] | None = Field(default=None, max_length=10)
 
 
+class TeamInsightsIn(BaseModel):
+    """The team editor's current (possibly unsaved) choices."""
+    style1: str | None = None
+    style2: str | None = None
+    focus1: str | None = None
+    focus2: str | None = None
+    coach_id: int | None = None
+    roster: dict[str, int | None] = Field(default_factory=dict)  # lane -> player id
+
+
 class ChampionFitIn(BaseModel):
     """Unsaved player stats and pool from the editor; only the stats the lane formula uses."""
     aggr: int = Field(ge=1, le=10)

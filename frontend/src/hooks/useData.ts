@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
-import type { Champion, ChampionFit, Coach, Player, Team } from '../api/types'
+import type { Champion, ChampionFit, Coach, Player, Team, TeamInsights, TeamInsightsRequest } from '../api/types'
 import { fetchLatestVersion } from '../lib/ddragon'
 
 export function useChampions() {
@@ -55,3 +55,12 @@ export function useCountdown(expiresAt: string | null): number {
   }, [expiresAt])
   return remainingSeconds(expiresAt, now)
 }
+
+/** Team notes for the team editor's current (unsaved) choices; keeps the last notes while the next load. */
+export const useTeamInsights = (request: TeamInsightsRequest, enabled: boolean) =>
+  useQuery({
+    queryKey: ['team-insights', request],
+    queryFn: () => api<TeamInsights>('/team-insights', { body: request }),
+    placeholderData: keepPreviousData,
+    enabled,
+  })

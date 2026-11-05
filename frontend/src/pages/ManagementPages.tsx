@@ -2,14 +2,16 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
-import type { Coach, ImportCheck, Lane, Player, PlaystyleTag, RiotPreview, Team } from '../api/types'
+import type { Coach, ImportCheck, Lane, Player, PlaystyleTag, RiotPreview, Team, TeamInsightsRequest } from '../api/types'
 import { LANES, STYLES } from '../api/types'
 import { ErrorNotice, Loading } from '../components/common'
 import { ChampionIcon } from '../components/ChampionArt'
 import RiotBadge from '../components/RiotBadge'
-import TagChips, { TagChip } from '../components/TagChips'
+import { TagChip } from '../components/TagChips'
 import { OverBudgetBadge } from '../components/TeamCard'
 import { useChampionFit, useChampions, useCoaches, usePlayers, useTeams } from '../hooks/useData'
+import RosterSummary from '../components/RosterSummary'
+import TeamNotes from '../components/TeamNotes'
 import { LANE_LABEL, TIER_LABEL, editedFieldsText, isHidden, rankLabel, riotSourceLabel, riotSourceTag, roleLabel, titleCase } from '../lib/format'
 import { MAX_TAGS, sortTags } from '../lib/playstyle'
 import { useRiotStatus } from './RiotImportPage'
@@ -176,10 +178,17 @@ export function TeamEditorPage({ scope = USER_SCOPE }: { scope?: Scope }) {
   // a default team may only use default players and coaches
   const playerOptions = (players.data ?? []).filter((p) => !scope.defaults || p.is_default)
   const coachOptions = (coaches.data ?? []).filter((c) => !scope.defaults || c.is_default)
-  const overBudget = LANES.flatMap((l) => {
+  const rosterPlayers: Partial<Record<Lane, Player>> = {}
+  for (const l of LANES) {
     const p = playerOptions.find((x) => x.id === roster[l])
-    return p && p.over_budget_by > 0 ? [p] : []
-  })
+    if (p) rosterPlayers[l] = p
+  }
+  const overBudget = Object.values(rosterPlayers).filter((p) => p.over_budget_by > 0)
+  const [notesOpen, setNotesOpen] = useState(false)
+  const notesRequest: TeamInsightsRequest = {
+    style1: style1 || null, style2: style2 || null, focus1: focus1 || null, focus2: focus2 || null,
+    coach_id: coachId ? Number(coachId) : null, roster,
+  }
 
   if (!isNew && existing.isLoading) return <Loading />
   if (existing.data && existing.data.is_default !== scope.defaults) return scope.defaults
@@ -188,7 +197,16 @@ export function TeamEditorPage({ scope = USER_SCOPE }: { scope?: Scope }) {
 
   return (
     <form className="stack" onSubmit={submit}>
-      <h1>{isNew ? 'New' : 'Edit'}{scope.defaults ? ' default' : ''} team</h1>
+      <div className="row between wrap">
+        <h1>{isNew ? 'New' : 'Edit'}{scope.defaults ? ' default' : ''} team</h1>
+        <button type="button" className="notes-button" onClick={() => setNotesOpen(true)}
+                disabled={Object.keys(rosterPlayers).length === 0} title={Object.keys(rosterPlayers).length ? undefined : 'Add a player first'}>
+          📋 Team notes
+        </button>
+      </div>
+      <TeamNotes open={notesOpen} onClose={() => setNotesOpen(false)} request={notesRequest}
+                 onUseStyles={(a, b) => { setStyle1(a); setStyle2(b) }}
+                 onUseFocus={(a, b) => { setFocus1(a); setFocus2(b ?? '') }} />
       <div className="card stack">
         <div className="grid two">
           <label>Team name<input value={name} onChange={(e) => setName(e.target.value)} maxLength={40} required /></label>
@@ -215,6 +233,7 @@ export function TeamEditorPage({ scope = USER_SCOPE }: { scope?: Scope }) {
       </div>
       <div className="card stack">
         <h2>Roster</h2>
+        <RosterSummary roster={rosterPlayers} />
         {LANES.map((lane) => (
           <label key={lane}>{LANE_LABEL[lane]}
             <select value={roster[lane] ?? ''} onChange={(e) => setRoster({ ...roster, [lane]: e.target.value ? Number(e.target.value) : undefined })}>
@@ -258,8 +277,7 @@ export function PlayersPage({ scope = USER_SCOPE }: { scope?: Scope }) {
     <tr key={p.id}>
       <td>{p.name} <RiotBadge riot={p.riot} showAccount />
         {p.riot?.rank && <span className="badge" title={`${riotSourceLabel(p.riot.rank.queue)} rank when imported: ${rankLabel(p.riot.rank, true)}`}>{rankLabel(p.riot.rank)}</span>}
-        {p.riot && riotSourceTag(p.riot.data_source) && <span className="badge badge-warn" title={`Stats come from ${riotSourceLabel(p.riot.data_source)} (${p.riot.games_used ?? '?'} games), not solo queue`}>⚠ {riotSourceTag(p.riot.data_source)}</span>} {p.over_budget_by > 0 && <span className="badge badge-warn" title="Above the soft stat ceiling">⚠ +{p.over_budget_by}</span>}
-        <TagChips tags={p.tags} /></td>
+        {p.riot && riotSourceTag(p.riot.data_source) && <span className="badge badge-warn" title={`Stats come from ${riotSourceLabel(p.riot.data_source)} (${p.riot.games_used ?? '?'} games), not solo queue`}>⚠ {riotSourceTag(p.riot.data_source)}</span>} {p.over_budget_by > 0 && <span className="badge badge-warn" title="Above the soft stat ceiling">⚠ +{p.over_budget_by}</span>}</td>
       <td>{roleLabel(p)}</td>
       <td>{p.aggr}/{p.aware}/{p.pos}/{p.dmg}/{p.cs}</td>
       <td>{p.stat_total}</td>

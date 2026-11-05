@@ -623,3 +623,44 @@ export interface ChatMessage {
   body: string
   created_at: string
 }
+
+/** Team notes for the team editor (POST /team-insights). */
+export type TeamStyle = typeof STYLES[number]
+
+export interface TeamNote {
+  kind: 'strength' | 'weakness'
+  title: string
+  detail: string
+  weight: number
+}
+
+export interface TeamInsights {
+  filled: number
+  stats: Record<'aggr' | 'aware' | 'pos' | 'dmg' | 'cs', number>
+  typical_stat: number
+  strengths: TeamNote[]
+  weaknesses: TeamNote[]
+  styles: { style: TeamStyle; label: string; score: number; pros: string[]; cons: string[] }[]
+  suggested_styles: TeamStyle[]
+  focus: { lane: Lane; gain: number; reason: string; power: number }[]
+  suggested_focus: Lane[]
+  comps: {
+    style: TeamStyle
+    label: string
+    picks: Partial<Record<Lane, { champion_id: number; name: string; comfort: string; fit: number }>>
+    damage: { physical: number; magic: number }
+    scaling: number
+    range: number
+    notes: string[]
+  }[]
+  lanes: Partial<Record<Lane, { player: string; power: number; best: string }>>
+}
+
+export interface TeamInsightsRequest {
+  style1: string | null
+  style2: string | null
+  focus1: string | null
+  focus2: string | null
+  coach_id: number | null
+  roster: Partial<Record<Lane, number>>
+}

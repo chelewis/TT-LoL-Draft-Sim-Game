@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { championRoles, comfortTier, isOffRole, editedFieldsText, importCheckBadge, draftRules, isSolo, formatDuration, formatMetric, isSoloSource, matchupText, overBudgetNotice, rankLabel, remainingSeconds, riotSourceLabel, riotSourceTag, roleLabel, scalingLabel } from './format'
+import { championRoles, comfortTier, isOffRole, editedFieldsText, importCheckBadge, draftRules, isSolo, formatDuration, formatMetric, isSoloSource, matchupText, overBudgetNotice, rankLabel, averageRank, rankValue, teamRating, remainingSeconds, riotSourceLabel, riotSourceTag, roleLabel, scalingLabel } from './format'
 import type { Lane } from '../api/types'
 
 describe('scalingLabel', () => {
@@ -161,5 +161,31 @@ describe('isOffRole', () => {
     expect(isOffRole({ id: 50, roles: [] }, 'BOT', [])).toBe(false)
     expect(championRoles({ roles: [] })).toBeNull()
     expect(championRoles(jungler)).toBe('Jungle / Top')
+  })
+})
+
+describe('averageRank', () => {
+  const p = (tier: string | null, division: string | null = null) => ({ riot: tier === undefined ? null : { rank: { tier, division } } }) as never
+  it('averages across tiers and divisions', () => {
+    expect(rankValue({ tier: 'IRON', division: 'IV' })).toBe(0)
+    expect(averageRank([p('GOLD', 'I'), p('PLATINUM', 'III')]).rank).toEqual({ tier: 'PLATINUM', division: 'IV' })
+  })
+  it('snaps apex tiers to the nearest apex tier', () => {
+    expect(averageRank([p('MASTER'), p('CHALLENGER')]).rank).toEqual({ tier: 'GRANDMASTER', division: null })
+  })
+  it('skips unranked and custom players', () => {
+    const result = averageRank([p('DIAMOND', 'II'), p(null), { riot: null } as never])
+    expect(result).toEqual({ rank: { tier: 'DIAMOND', division: 'II' }, ranked: 1, total: 3 })
+  })
+  it('returns no rank when nobody is ranked', () => {
+    expect(averageRank([{ riot: null } as never]).rank).toBeNull()
+    expect(rankLabel(averageRank([]).rank)).toBe('Unranked')
+  })
+})
+
+describe('teamRating', () => {
+  it('sums stat totals', () => {
+    expect(teamRating([{ stat_total: 30 }, { stat_total: 34 }])).toEqual({ rating: 64, filled: 2 })
+    expect(teamRating([])).toEqual({ rating: 0, filled: 0 })
   })
 })

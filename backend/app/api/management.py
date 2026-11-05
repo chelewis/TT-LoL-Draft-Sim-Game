@@ -9,8 +9,8 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.game.config import DRAFT_CONFIG, LANES, MANAGEMENT_CONFIG
 from app.models import Champion, Coach, Player, Team, User
-from app.schemas.management import ChampionFitIn, CoachIn, PlayerIn, TeamIn
-from app.services import champion_fit, playstyle_service
+from app.schemas.management import ChampionFitIn, CoachIn, PlayerIn, TeamIn, TeamInsightsIn
+from app.services import champion_fit, playstyle_service, team_insights_service
 from app.services import team_management_service as svc
 
 router = APIRouter(tags=["management"])
@@ -46,6 +46,12 @@ def list_champions(db: Session = Depends(get_db), _: User = Depends(get_current_
 def rank_champion_fit(body: ChampionFitIn, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     """Champions ranked by how well these (possibly unsaved) stats and pool score with them in lane."""
     return champion_fit.rank_champions(db, body.aggr, body.aware, body.pos, body.dmg, body.pool, body.limit)
+
+
+@router.post("/team-insights")
+def team_insights(body: TeamInsightsIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Strengths, weaknesses, suggested playstyles and focus lanes, and ideal comps for an (unsaved) team."""
+    return team_insights_service.team_insights(db, user.id, body)
 
 
 # ------------------------------------------------------------------- teams

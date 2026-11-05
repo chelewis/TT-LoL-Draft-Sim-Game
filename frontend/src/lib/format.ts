@@ -108,10 +108,45 @@ export function importCheckBadge(check: ImportCheck | null | undefined): { text:
 }
 
 /** "Emerald II", "Master" or "Unranked"; with `withLp`, "Emerald II · 45 LP". */
-export function rankLabel(rank: Pick<RiotRank, 'tier' | 'division' | 'lp'> | null | undefined, withLp = false): string {
+export function rankLabel(rank: Pick<RiotRank, 'tier' | 'division'> & { lp?: number | null } | null | undefined, withLp = false): string {
   if (!rank?.tier) return 'Unranked'
   const name = [titleCase(rank.tier), rank.division].filter(Boolean).join(' ')
   return withLp && rank.lp != null ? `${name} · ${rank.lp} LP` : name
+}
+
+/** Riot tiers, lowest first (same order as the backend's RANK_TIERS). Master and above have no division. */
+export const RANK_TIERS = ['IRON', 'BRONZE', 'SILVER', 'GOLD', 'PLATINUM', 'EMERALD', 'DIAMOND', 'MASTER', 'GRANDMASTER', 'CHALLENGER'] as const
+const FIRST_APEX = RANK_TIERS.indexOf('MASTER')
+const DIVISIONS = ['IV', 'III', 'II', 'I'] as const
+
+/** A rank as a number for averaging: 4 steps per tier (IV=0 … I=3); apex tiers count as their tier's base. Null when unranked. */
+export function rankValue(rank: Pick<RiotRank, 'tier' | 'division'> | null | undefined): number | null {
+  const tier = rank?.tier ? RANK_TIERS.indexOf(rank.tier.toUpperCase() as typeof RANK_TIERS[number]) : -1
+  if (tier < 0) return null
+  const division = tier >= FIRST_APEX ? 0 : Math.max(DIVISIONS.indexOf((rank?.division ?? 'IV') as typeof DIVISIONS[number]), 0)
+  return tier * 4 + division
+}
+
+/** The rank a number from `rankValue` stands for; apex values snap to the nearest apex tier. */
+export function rankFromValue(value: number): Pick<RiotRank, 'tier' | 'division'> {
+  const v = Math.max(Math.round(value), 0)
+  if (v >= FIRST_APEX * 4) {
+    const tier = Math.min(FIRST_APEX + Math.round((v - FIRST_APEX * 4) / 4), RANK_TIERS.length - 1)
+    return { tier: RANK_TIERS[tier], division: null }
+  }
+  return { tier: RANK_TIERS[Math.floor(v / 4)], division: DIVISIONS[v % 4] }
+}
+
+/** Average Riot rank of the players that have one; `ranked` of `total` players counted. `rank` is null when none are ranked. */
+export function averageRank(players: Pick<Player, 'riot'>[]): { rank: Pick<RiotRank, 'tier' | 'division'> | null; ranked: number; total: number } {
+  const values = players.map((p) => rankValue(p.riot?.rank)).filter((v): v is number => v !== null)
+  const rank = values.length ? rankFromValue(values.reduce((a, b) => a + b, 0) / values.length) : null
+  return { rank, ranked: values.length, total: players.length }
+}
+
+/** Team rating: the sum of the rostered players' stat totals. */
+export function teamRating(players: Pick<Player, 'stat_total'>[]): { rating: number; filled: number } {
+  return { rating: players.reduce((sum, p) => sum + p.stat_total, 0), filled: players.length }
 }
 
 /** Show a metric value the way people read it: percentages as 47%, everything else with 2 decimals. */
