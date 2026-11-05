@@ -11,6 +11,7 @@ import { TagChip } from '../components/TagChips'
 import { OverBudgetBadge } from '../components/TeamCard'
 import { useChampionFit, useChampions, useCoaches, usePlayers, useTeams } from '../hooks/useData'
 import RosterSummary from '../components/RosterSummary'
+import TeamFieldHelp, { type TeamRules } from '../components/TeamFieldHelp'
 import TeamNotes from '../components/TeamNotes'
 import { LANE_LABEL, TIER_LABEL, editedFieldsText, isHidden, rankLabel, riotSourceLabel, riotSourceTag, roleLabel, titleCase } from '../lib/format'
 import { MAX_TAGS, sortTags } from '../lib/playstyle'
@@ -21,6 +22,7 @@ interface GameConfig {
   coach_stat_budget: number
   stat_range: [number, number]
   champion_pool_size: number
+  team_rules?: TeamRules
 }
 
 const useConfig = () => useQuery({ queryKey: ['config'], queryFn: () => api<GameConfig>('/config'), staleTime: Infinity })
@@ -185,6 +187,7 @@ export function TeamEditorPage({ scope = USER_SCOPE }: { scope?: Scope }) {
   }
   const overBudget = Object.values(rosterPlayers).filter((p) => p.over_budget_by > 0)
   const [notesOpen, setNotesOpen] = useState(false)
+  const rules = useConfig().data?.team_rules
   const notesRequest: TeamInsightsRequest = {
     style1: style1 || null, style2: style2 || null, focus1: focus1 || null, focus2: focus2 || null,
     coach_id: coachId ? Number(coachId) : null, roster,
@@ -209,21 +212,21 @@ export function TeamEditorPage({ scope = USER_SCOPE }: { scope?: Scope }) {
                  onUseFocus={(a, b) => { setFocus1(a); setFocus2(b ?? '') }} />
       <div className="card stack">
         <div className="grid two">
-          <label>Team name<input value={name} onChange={(e) => setName(e.target.value)} maxLength={40} required /></label>
-          <label>Short logo text<input value={logo} onChange={(e) => setLogo(e.target.value)} maxLength={8} /></label>
-          <label>Primary playstyle
+          <label><span className="field-label">Team name <TeamFieldHelp field="name" rules={rules} /></span><input value={name} onChange={(e) => setName(e.target.value)} maxLength={40} required /></label>
+          <label><span className="field-label">Short logo text <TeamFieldHelp field="logo" rules={rules} /></span><input value={logo} onChange={(e) => setLogo(e.target.value)} maxLength={8} /></label>
+          <label><span className="field-label">Primary playstyle <TeamFieldHelp field="style1" rules={rules} /></span>
             <select value={style1} onChange={(e) => setStyle1(e.target.value)}><option value="">Choose…</option>{STYLES.map((s) => <option key={s} value={s} disabled={s === style2}>{titleCase(s)}</option>)}</select>
           </label>
-          <label>Secondary playstyle
+          <label><span className="field-label">Secondary playstyle <TeamFieldHelp field="style2" rules={rules} /></span>
             <select value={style2} onChange={(e) => setStyle2(e.target.value)}><option value="">Choose…</option>{STYLES.map((s) => <option key={s} value={s} disabled={s === style1}>{titleCase(s)}</option>)}</select>
           </label>
-          <label>Focus lane 1
+          <label><span className="field-label">Focus lane 1 <TeamFieldHelp field="focus1" rules={rules} /></span>
             <select value={focus1} onChange={(e) => setFocus1(e.target.value)}><option value="">None</option>{LANES.map((l) => <option key={l} value={l} disabled={l === focus2}>{LANE_LABEL[l]}</option>)}</select>
           </label>
-          <label>Focus lane 2
+          <label><span className="field-label">Focus lane 2 <TeamFieldHelp field="focus2" rules={rules} /></span>
             <select value={focus2} onChange={(e) => setFocus2(e.target.value)}><option value="">None</option>{LANES.map((l) => <option key={l} value={l} disabled={l === focus1}>{LANE_LABEL[l]}</option>)}</select>
           </label>
-          <label>Coach
+          <label><span className="field-label">Coach <TeamFieldHelp field="coach" rules={rules} /></span>
             <select value={coachId} onChange={(e) => setCoachId(e.target.value)}>
               <option value="">Choose…</option>
               {coachOptions.map((c) => <option key={c.id} value={c.id}>{c.name} (Draft {c.draft} / Synergy {c.synergy}){c.is_default && !scope.defaults ? ' — default' : ''}</option>)}
@@ -232,7 +235,7 @@ export function TeamEditorPage({ scope = USER_SCOPE }: { scope?: Scope }) {
         </div>
       </div>
       <div className="card stack">
-        <h2>Roster</h2>
+        <h2 className="field-label">Roster <TeamFieldHelp field="roster" rules={rules} /></h2>
         <RosterSummary roster={rosterPlayers} />
         {LANES.map((lane) => (
           <label key={lane}>{LANE_LABEL[lane]}

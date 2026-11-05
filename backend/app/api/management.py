@@ -11,16 +11,29 @@ from app.game.config import DRAFT_CONFIG, LANES, MANAGEMENT_CONFIG
 from app.models import Champion, Coach, Player, Team, User
 from app.schemas.management import ChampionFitIn, CoachIn, PlayerIn, TeamIn, TeamInsightsIn
 from app.services import champion_fit, playstyle_service, team_insights_service
+from app.services.simulation_settings_service import current_config
 from app.services import team_management_service as svc
 
 router = APIRouter(tags=["management"])
 
 
 @router.get("/config")
-def public_config(_: User = Depends(get_current_user)):
+def public_config(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     """Game rules the client needs for forms and hints (the server still enforces everything)."""
     m = MANAGEMENT_CONFIG
+    sim = current_config(db)
+    ts, lane, coach = sim["team_style"], sim["lane"], sim["coach"]
     return {
+        # the live numbers behind the team editor's field help
+        "team_rules": {
+            "styles_enabled": ts["enabled"],
+            "primary_bonus": ts["primary_bonus"], "secondary_bonus": ts["secondary_bonus"],
+            "scaling_lane_penalty": ts["scaling_lane_penalty"], "focus_lane_bonus": ts["focus_lane_bonus"],
+            "focus_cs_bonus": sim["cs"]["focus_bonus"], "focus_assist_boost": lane["focus_assist_boost"],
+            "jungle_assist": lane["assist"]["jungle"], "support_assist": lane["assist"]["support_to_bot"],
+            "coach_synergy_scale": coach["synergy_scale"], "coach_draft_scale": coach["draft_matchup_scale"],
+            "off_role_penalty": sim["off_role"]["lane_penalty"] if sim["off_role"]["enabled"] else 0,
+        },
         "lanes": LANES,
         "draft_timer_seconds": DRAFT_CONFIG["timer_seconds"],
         "player_stat_budget": m["player_stat_budget"],

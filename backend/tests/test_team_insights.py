@@ -96,3 +96,10 @@ def test_api_rejects_players_the_user_cannot_see(alice, bob):
     assert pid.status_code == 201, pid.text
     res = alice.post("/team-insights", {"roster": {"TOP": pid.json()["id"]}})
     assert res.status_code in (403, 404)
+
+
+def test_config_sends_the_team_rules_for_field_help(alice):
+    rules = alice.get("/config").json()["team_rules"]
+    assert rules["primary_bonus"] == CFG["team_style"]["primary_bonus"]
+    assert rules["focus_cs_bonus"] == CFG["cs"]["focus_bonus"]
+    assert rules["coach_synergy_scale"] == CFG["coach"]["synergy_scale"]

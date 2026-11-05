@@ -963,3 +963,19 @@ table.mx { width: max-content; border-collapse: separate; border-spacing: 0; tab
 .comp-notes { display: flex; flex-direction: column; gap: 2px; color: var(--muted); }
 .comp-notes li::before { content: '• '; }
 @media (prefers-reduced-motion: reduce) { .notes-drawer[open] { animation: none; } }
+
+/* ---- field help: an (i) icon after a form label, explaining the field ---- */
+.field-label { display: inline-flex; align-items: center; gap: 6px; }
+label:has(.field-help), h2:has(.field-help) { position: relative; }
+.field-help .tip { position: static; }   /* anchor the tooltip to the whole field, so it never runs off-screen */
+@media (min-width: 601px) { .field-help .tip-body { width: min(420px, 100%); min-width: 280px; } }
+.field-help .tip-body { font-size: 0.85rem; }
+.field-help .tip-content > strong { display: block; color: var(--gold); }
+.info-icon {
+  display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 50%;
+  font: 700 11px/1 Georgia, 'Times New Roman', serif; font-style: italic; color: var(--blue);
+  border: 1.5px solid currentColor; background: rgba(79, 140, 255, 0.12); cursor: help;
+  transition: color 0.15s, background 0.15s;
+}
+.field-help .tip:hover .info-icon, .field-help .tip:focus-visible .info-icon { color: var(--gold); background: rgba(242, 193, 78, 0.15); }
+h2 .field-help .tip-body { font-weight: 400; }
