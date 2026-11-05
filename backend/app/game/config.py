@@ -45,6 +45,12 @@ MANAGEMENT_CONFIG: dict[str, Any] = {
         "IRON": 10, "BRONZE": 10, "SILVER": 28, "GOLD": 28, "PLATINUM": 28, "EMERALD": 28, "DIAMOND": 28,
         "MASTER": 36, "GRANDMASTER": 36, "CHALLENGER": 40,
     },
+    # region strength out of region_max_rating; each point below the max takes 1 point off a Riot import's
+    # ceiling and floor (KR 0, NA -4), so a high rank on a weak server can still beat a lower rank on a strong one
+    "region_ratings": {"KR": 10, "CN": 8, "EU": 7, "NA": 6, "BR": 5, "OTHER": 4},
+    "region_max_rating": 10,
+    # Riot platform -> region group; any platform not listed is OTHER (CN has no public Riot platform today)
+    "region_groups": {"KR": "KR", "EUW1": "EU", "NA1": "NA", "BR1": "BR"},
     "enforce_budget": False,         # True would turn the ceiling into a hard limit
     "system_players_exempt": True,
     "coach_stat_budget": 12,

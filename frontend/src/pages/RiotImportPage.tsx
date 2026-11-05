@@ -44,12 +44,12 @@ function FinalExplanation({ label, raw, final, rank, fit }: {
   label: string; raw: number; final: number; rank: RiotPreview['analysis']['rank']; fit: RiotPreview['analysis']['fit']
 }) {
   const fitted = fit.total_before > fit.budget
-  const whose = rank.tier ? `for ${rankLabel(rank)}` : 'for unranked players'
+  const whose = `${rank.tier ? `for ${rankLabel(rank)}` : 'for unranked players'} on ${rank.region_group}`
   return (
     <div className="tip-content">
       <strong>{label}: {final}</strong>
       <p>Rounded raw value: {Math.max(1, Math.min(10, Math.round(raw)))}.</p>
-      <p>The stat ceiling{fit.floor > 0 ? ' and floor depend' : ' depends'} on rank: {fit.floor > 0 ? `${fit.budget} and ${fit.floor}` : fit.budget} {whose}.</p>
+      <p>The stat ceiling{fit.floor > 0 ? ' and floor depend' : ' depends'} on rank and region: {fit.floor > 0 ? `${fit.budget} and ${fit.floor}` : fit.budget} {whose}{rank.region_offset < 0 ? ` (${rank.region_group} is rated ${rank.region_rating}/10, ${rank.region_offset} points)` : ''}.</p>
       {fit.total_before < fit.floor ? (
         <>
           <p>All five rounded stats total <b>{fit.total_before}</b>, below the floor of <b>{fit.floor}</b>, so every stat is scaled up together until they total {fit.floor}:</p>
@@ -101,7 +101,7 @@ export default function RiotImportPage() {
       <form className="card stack" onSubmit={submit}>
         <p className="muted">
           Enter a Riot ID. We read that account's public ranked solo games and rank, and turn their performance into a player.
-          A higher rank allows a higher stat total and guarantees a higher minimum.
+          A higher rank allows a higher stat total and guarantees a higher minimum. Weaker regions lower both (Korea 10/10, EUW 7, NA 6, BR 5, other servers 4: one point per rating point below 10), so a top player on a weaker server can still out-rate a lower rank on a stronger one.
           You can edit everything before saving. Imports are unverified: anyone can import any public Riot ID.
         </p>
         <div className="grid two">
@@ -131,7 +131,7 @@ export default function RiotImportPage() {
           <p className="small">
             <span className="badge" title={preview.analysis.rank.tier ? `${riotSourceLabel(preview.analysis.rank.queue)} rank` : 'No rank found for this account'}>{rankLabel(preview.analysis.rank, true)}</span>
             {preview.analysis.rank.tier && <span className="muted"> {preview.analysis.rank.wins}W {preview.analysis.rank.losses}L</span>}
-            <span className="muted"> · stat ceiling {preview.analysis.rank.budget}{preview.analysis.rank.floor > 0 ? `, floor ${preview.analysis.rank.floor}` : ''}</span>
+            <span className="muted"> · stat ceiling {preview.analysis.rank.budget}{preview.analysis.rank.floor > 0 ? `, floor ${preview.analysis.rank.floor}` : ''} ({preview.analysis.rank.region_group} {preview.analysis.rank.region_rating}/10{preview.analysis.rank.region_offset < 0 ? `, ${preview.analysis.rank.region_offset}` : ''})</span>
           </p>
           {preview.analysis.source.is_solo ? (
             <p className="muted small">Source: {preview.analysis.source.label} · {preview.analysis.source.games} games</p>

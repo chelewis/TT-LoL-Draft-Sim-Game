@@ -19,21 +19,45 @@ STYLES = ("early", "scaling", "teamfight", "skirmish")
 
 
 # ------------------------------------------------------------------ views
-def stat_budget(rank_tier: str | None, cfg: dict = CFG) -> int:
-    """The soft stat ceiling: set by rank for players imported from a ranked Riot account, the default otherwise."""
-    return cfg["rank_stat_budgets"].get(rank_tier, cfg["player_stat_budget"])
+def region_group(platform: str | None, cfg: dict = CFG) -> str | None:
+    """The strength group of a Riot platform (KR, EU, NA, BR, OTHER), or None for players not imported from Riot."""
+    if not platform:
+        return None
+    return cfg["region_groups"].get(platform.upper(), "OTHER")
 
 
-def stat_floor(rank_tier: str | None, cfg: dict = CFG) -> int:
-    """The stat total a Riot import of this rank is raised to (0: no floor). Only used when importing."""
-    return cfg["rank_stat_floors"].get(rank_tier, 0)
+def region_rating(platform: str | None, cfg: dict = CFG) -> int:
+    group = region_group(platform, cfg)
+    return cfg["region_max_rating"] if group is None else cfg["region_ratings"][group]
+
+
+def region_offset(platform: str | None, cfg: dict = CFG) -> int:
+    """Points added to a Riot import's ceiling and floor for its region (0 on KR and for hand-made players)."""
+    return region_rating(platform, cfg) - cfg["region_max_rating"]
+
+
+def stat_budget(rank_tier: str | None, region: str | None = None, cfg: dict = CFG) -> int:
+    """The soft stat ceiling: set by rank (and lowered by region) for players imported from Riot, the default
+    otherwise. `region` is the Riot platform the player was imported from (None for hand-made players)."""
+    return cfg["rank_stat_budgets"].get(rank_tier, cfg["player_stat_budget"]) + region_offset(region, cfg)
+
+
+def stat_floor(rank_tier: str | None, region: str | None = None, cfg: dict = CFG) -> int:
+    """The stat total a Riot import of this rank and region is raised to (0: no floor). Only used when importing."""
+    floor = cfg["rank_stat_floors"].get(rank_tier, 0)
+    return max(0, floor + region_offset(region, cfg)) if floor else 0
+
+
+def player_budget(player: Player, cfg: dict = CFG) -> int:
+    """The ceiling for a saved player: its rank and Riot platform (set only from the signed import token)."""
+    return stat_budget(player.riot_rank_tier, player.riot_region if player.riot_puuid else None, cfg)
 
 
 def over_budget_by(player: Player, cfg: dict = CFG) -> int:
     """Points over the soft stat ceiling (0 for default players and within-budget players)."""
     if player.owner_user_id is None and cfg["system_players_exempt"]:
         return 0
-    return max(0, player.stat_total - stat_budget(player.riot_rank_tier, cfg))
+    return max(0, player.stat_total - player_budget(player, cfg))
 
 
 def player_view(p: Player) -> dict:
@@ -41,7 +65,7 @@ def player_view(p: Player) -> dict:
     return {
         "id": p.id, "name": p.name, "role": p.role, "secondary_role": p.secondary_role, "age": p.age, "region": p.region,
         "aggr": p.aggr, "aware": p.aware, "pos": p.pos, "dmg": p.dmg, "cs": p.cs,
-        "pool": p.pool, "stat_total": p.stat_total, "stat_budget": stat_budget(p.riot_rank_tier),
+        "pool": p.pool, "stat_total": p.stat_total, "stat_budget": player_budget(p),
         "over_budget_by": over_budget_by(p),
         "is_default": p.owner_user_id is None,
         "tags": tags,                 # playstyle tags in effect (they travel into game snapshots)
@@ -146,7 +170,7 @@ def _validate_player(db: Session, body: PlayerIn) -> None:
 def _check_budget(player: Player) -> None:
     """Hard limit, only when enforce_budget is on. Runs once stats and rank are on the player, before the commit."""
     if CFG["enforce_budget"] and over_budget_by(player) > 0:
-        raise bad_request(f"Stats may total at most {stat_budget(player.riot_rank_tier)}.")
+        raise bad_request(f"Stats may total at most {player_budget(player)}.")
 
 
 def _apply_riot(player: Player, body: PlayerIn, user_id: int | None) -> bool:

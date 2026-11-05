@@ -69,8 +69,9 @@ METRIC_INFO = {
     "cs_per_min": {"label": "CS per minute", "unit": "number", "how": "(lane minions + jungle monsters) / game minutes"},
 }
 
-# Rank: the tier sets the player's stat ceiling (MANAGEMENT_CONFIG["rank_stat_budgets"]). Division and LP are
-# shown to the user but change nothing.
+# Rank: the tier sets the player's stat ceiling and floor (MANAGEMENT_CONFIG["rank_stat_budgets"/"rank_stat_floors"]),
+# lowered by the platform's region strength (MANAGEMENT_CONFIG["region_ratings"]). Division and LP are shown to
+# the user but change nothing.
 RANK_TIERS = ("IRON", "BRONZE", "SILVER", "GOLD", "PLATINUM", "EMERALD", "DIAMOND", "MASTER", "GRANDMASTER", "CHALLENGER")
 APEX_TIERS = frozenset({"MASTER", "GRANDMASTER", "CHALLENGER"})   # no divisions
 # our queue tier key -> league-v4 queueType

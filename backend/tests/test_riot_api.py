@@ -98,7 +98,8 @@ def test_preview_reports_rank_and_saving_keeps_it(alice, riot):
     riot.ranks = {"SOLO": "EMERALD", "FLEX": "GOLD"}
     preview = alice.post("/riot/preview", BODY).json()
     assert preview["analysis"]["rank"] == {"queue": "SOLO", "tier": "EMERALD", "division": "II", "lp": 45,
-                                           "wins": 60, "losses": 40, "budget": 36, "floor": 28}
+                                           "wins": 60, "losses": 40, "budget": 36, "floor": 28,
+                                           "region_group": "KR", "region_rating": 10, "region_offset": 0}
     assert preview["analysis"]["fit"]["budget"] == 36
     assert "league" in riot.calls
     # the browser cannot claim a better rank: it comes from the signed token only
@@ -166,6 +167,50 @@ def test_saved_players_are_flagged_against_their_own_ceiling(alice, riot):
     assert manual["stat_budget"] == 32 and manual["over_budget_by"] == 0
 
 
+def preview_on(alice, riot, region, rank):
+    riot.ranks = {"SOLO": rank, "FLEX": None}
+    riot_import_service.reset_state()
+    return alice.post("/riot/preview", {"riot_id": "Faker#KR1", "region": region}).json()
+
+
+def test_weaker_regions_lower_the_ceiling_and_floor(alice, riot):
+    for region, group, cap in (("KR", "KR", 48), ("EUW1", "EU", 45), ("NA1", "NA", 44), ("BR1", "BR", 43),
+                               ("EUN1", "OTHER", 42), ("JP1", "OTHER", 42)):
+        rank = preview_on(alice, riot, region, "CHALLENGER")["analysis"]["rank"]
+        assert rank["region_group"] == group and rank["budget"] == cap and rank["floor"] == cap - 8
+        assert rank["region_offset"] == cap - 48
+    na = preview_on(alice, riot, "NA1", "CHALLENGER")
+    assert any("44-point ceiling for Challenger on NA" in n for n in na["analysis"]["notes"])
+    assert not any("rated" in n for n in na["analysis"]["notes"])        # no region warning is shown
+
+
+def test_a_top_player_on_a_weak_server_can_outrate_a_lower_rank_on_a_strong_one(alice, riot):
+    na_chall = preview_on(alice, riot, "NA1", "CHALLENGER")
+    kr_master = preview_on(alice, riot, "KR", "MASTER")
+    assert na_chall["analysis"]["rank"]["budget"] > kr_master["analysis"]["rank"]["budget"]
+    assert stat_total(na_chall["player"]) > stat_total(kr_master["player"])
+    # but the same rank is worth less on a weaker server
+    assert preview_on(alice, riot, "NA1", "DIAMOND")["analysis"]["rank"]["budget"] == 32
+
+
+def test_region_floor_never_goes_negative_and_unranked_keeps_no_floor(alice, riot):
+    iron = preview_on(alice, riot, "JP1", "IRON")["analysis"]["rank"]
+    assert iron["budget"] == 22 and iron["floor"] == 4
+    unranked = preview_on(alice, riot, "NA1", None)["analysis"]["rank"]
+    assert unranked["budget"] == 28 and unranked["floor"] == 0
+
+
+def test_saved_import_is_flagged_against_its_region_ceiling(alice, riot):
+    preview = preview_on(alice, riot, "NA1", "CHALLENGER")
+    saved = save_from_preview(alice, preview).json()
+    assert saved["stat_budget"] == 44 and saved["over_budget_by"] == 0
+    padded = save_from_preview(alice, preview, name="Padded", aggr=10, aware=10, pos=10, dmg=9, cs=9).json()  # 48
+    assert padded["stat_budget"] == 44 and padded["over_budget_by"] == 4
+    # the free-text region on a hand-made player changes nothing
+    manual = alice.post("/players", {**preview["player"], "name": "Manual", "region": "NA"}).json()
+    assert manual["stat_budget"] == 32
+
+
 def test_unranked_account_gets_the_standard_ceiling_and_says_so(alice, riot):
     riot.ranks = {"SOLO": None, "FLEX": "DIAMOND"}          # solo stats never borrow the flex rank
     preview = alice.post("/riot/preview", BODY).json()
@@ -225,6 +270,7 @@ def test_refresh_returns_a_new_draft_without_changing_the_player(alice, riot):
     res = alice.post(f"/players/{saved['id']}/riot-refresh")
     assert res.status_code == 200
     assert res.json()["player"]["aggr"] != 2 and res.json()["riot_ref"]
+    assert not any("already imported" in n for n in res.json()["analysis"]["notes"])   # refreshing is not a re-import
     assert alice.get(f"/players/{saved['id']}").json()["aggr"] == 2          # nothing saved until the user does so
 
 

@@ -22,7 +22,7 @@ from app.integrations.riot.config import MATCH_COUNT, MIN_GAMES, PLATFORM_CLUSTE
 from app.integrations.riot.errors import RiotError, RiotNotFound, RiotRateLimited
 from app.models import Champion, Player
 from app.services import playstyle_service
-from app.services.team_management_service import stat_budget, stat_floor
+from app.services.team_management_service import region_group, region_offset, region_rating, stat_budget, stat_floor
 
 _cache: dict[tuple, tuple[float, dict]] = {}
 _last_import: dict[int, float] = {}
@@ -83,8 +83,9 @@ def _cooldown(user_id: int) -> None:
 
 
 def preview(db: Session, client: RiotClient, user_id: int, riot_id: str | None = None, region: str = "NA1",
-            role: str | None = None, puuid: str | None = None) -> dict:
-    """Analyse a Riot account. Give either `riot_id` ("Name#TAG") or a known `puuid` (for refreshes)."""
+            role: str | None = None, puuid: str | None = None, refreshing: bool = False) -> dict:
+    """Analyse a Riot account. Give either `riot_id` ("Name#TAG") or a known `puuid` (for refreshes).
+    `refreshing` is set when updating a saved player, so it is not warned that the account was already imported."""
     region = region.upper()
     if region not in PLATFORM_CLUSTER:
         raise bad_request(f"Unknown region {region!r}.")
@@ -94,7 +95,7 @@ def preview(db: Session, client: RiotClient, user_id: int, riot_id: str | None =
     if puuid is None:
         game_name, tag_line = parse_riot_id(riot_id or "")
 
-    cache_key = (region, puuid or f"{game_name.lower()}#{tag_line.lower()}", role)
+    cache_key = (region, puuid or f"{game_name.lower()}#{tag_line.lower()}", role, refreshing)
     with _lock:
         hit = _cache.get(cache_key)
         if hit and time.monotonic() - hit[0] < settings.riot_cache_seconds:
@@ -122,10 +123,13 @@ def preview(db: Session, client: RiotClient, user_id: int, riot_id: str | None =
         rank = stat_mapper.pick_rank(client.league_entries(region, puuid), tier["key"])
     except RiotNotFound:
         rank = None
-    # the rank sets the stat ceiling and floor; an unranked account gets the default ceiling and no floor
-    budget = stat_budget(rank["tier"] if rank else None)
-    floor = stat_floor(rank["tier"] if rank else None)
+    # rank sets the stat ceiling and floor, and region strength lowers both; an unranked account gets the default
+    # ceiling (still lowered by region) and no floor
+    budget = stat_budget(rank["tier"] if rank else None, region)
+    floor = stat_floor(rank["tier"] if rank else None, region)
+    group, rating, offset = region_group(region), region_rating(region), region_offset(region)
     rank_name = " ".join(filter(None, [rank["tier"].title(), rank["division"]])) if rank else "unranked players"
+    rank_name = f"{rank_name} on {group}"
 
     analysis = stat_mapper.analyse(choice.matches, puuid, budget, role=role,
                                    min_games=MIN_GAMES, queue_ids=tier["queue_ids"], floor=floor)
@@ -166,7 +170,8 @@ def preview(db: Session, client: RiotClient, user_id: int, riot_id: str | None =
         notes.append(f"Not in this game, so skipped: {names}.")
     if challenge_data is None:
         notes.append("Riot's challenge data could not be loaded, so no challenge-based playstyle tags were checked.")
-    existing = db.scalar(select(Player).where(Player.owner_user_id == user_id, Player.riot_puuid == puuid))
+    existing = None if refreshing else db.scalar(
+        select(Player).where(Player.owner_user_id == user_id, Player.riot_puuid == puuid))
     if existing:
         notes.append(f"You already imported this account as \"{existing.name}\".")
 
@@ -181,7 +186,8 @@ def preview(db: Session, client: RiotClient, user_id: int, riot_id: str | None =
         "riot": {"game_name": game_name, "tag_line": tag_line, "region": region},
         "analysis": {"games": analysis.games, "lane_counts": analysis.lane_counts, "raw_stats": analysis.raw_stats,
                      "rank": {**(rank or dict.fromkeys(("queue", "tier", "division", "lp", "wins", "losses"))),
-                              "budget": budget, "floor": floor},
+                              "budget": budget, "floor": floor,
+                              "region_group": group, "region_rating": rating, "region_offset": offset},
                      "fitted_to_budget": analysis.fitted_to_budget, "raised_to_floor": analysis.raised_to_floor,
                      "source": source, "breakdown": analysis.breakdown,
                      "fit": {"budget": analysis.budget, "floor": analysis.floor, "total_before": analysis.total_before_fit,
@@ -230,7 +236,7 @@ def refresh(db: Session, client: RiotClient, user_id: int, player: Player, role:
     if not player.riot_puuid:
         raise bad_request("That player was not imported from Riot.")
     data = preview(db, client, user_id, region=player.riot_region or "NA1", role=role or player.role,
-                   puuid=player.riot_puuid)
+                   puuid=player.riot_puuid, refreshing=True)
     # keep the tags the user chose that are still earned; fall back to the suggestion when none are
     earned = {t["key"] for t in data["analysis"]["tags"]["earned"]}
     kept = [k for k in player.playstyle_tags or [] if k in earned]

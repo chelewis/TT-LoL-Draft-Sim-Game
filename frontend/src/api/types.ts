@@ -328,7 +328,9 @@ export interface RiotPreview {
   analysis: {
     games: number
     raw_stats: Record<string, number>
-    rank: RiotRank & { budget: number; floor: number }   // the stat ceiling and floor for this rank (floor 0: none)
+    // the stat ceiling and floor for this rank and region (floor 0: none); region_offset is the points the region
+    // takes off both (0 on the strongest region)
+    rank: RiotRank & { budget: number; floor: number; region_group: string; region_rating: number; region_offset: number }
     fitted_to_budget: boolean
     raised_to_floor: boolean
     missing_pool_slots: number
