@@ -12,6 +12,7 @@ import { LANE_LABEL, TIER_LABEL, formatDuration, isCpu, isSolo, matchupText, ser
 import GoldGraph from '../../components/GoldGraph'
 import { formatThousands, goldTimeline } from '../../lib/scoreboard'
 import { describeEvent, summarize } from '../../lib/summary'
+import RematchPanel from './RematchPanel'
 
 /** Draft effects on the match: one-sided damage being itemized against, and same-team win rates. Absent on old results. */
 function CompModifiers({ penalty, synergy }: { penalty?: number; synergy?: number }) {
@@ -193,6 +194,7 @@ export default function ResultView({ game }: { game: GameState }) {
       </div>
 
       {game.series && <SeriesNext game={game} names={names} />}
+      {game.rematch?.available && <RematchPanel game={game} names={names} />}
 
       {rerun.error && <ErrorNotice error={rerun.error} />}
       <div className="row between wrap">

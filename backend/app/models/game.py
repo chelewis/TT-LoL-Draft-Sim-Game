@@ -41,6 +41,10 @@ class Game(Base):
     blue_next_ready: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
     red_next_ready: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
     next_loser_side: Mapped[str | None] = mapped_column(String(4))   # side the loser chose for the next game
+    # rematch: once both sides are ready a new lobby opens with the same settings, players, teams and sides
+    blue_rematch_ready: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    red_rematch_ready: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    rematch_game_id: Mapped[int | None] = mapped_column(ForeignKey("games.id", name="fk_games_rematch_game_id_games"))
     blue_ready: Mapped[bool] = mapped_column(Boolean, default=False)
     red_ready: Mapped[bool] = mapped_column(Boolean, default=False)
     blue_lineup_ready: Mapped[bool] = mapped_column(Boolean, default=False)

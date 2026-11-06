@@ -146,6 +146,27 @@ DEFAULT_SETTINGS = {"ruleset": DEFAULT_RULESET, **LOBBY_RULESETS_BY_KEY[DEFAULT_
 SERIES_WINS = {"BO3": 2, "BO5": 3}      # wins needed to take the series
 
 
+def _open_lobby(db: Session, owner_id: int, settings: dict) -> Lobby:
+    """A new lobby row with a fresh code and expiry (flushed, so it has an id)."""
+    now = utcnow()
+    lobby = Lobby(code=_new_code(db), created_by=owner_id, settings=settings,
+                  created_at=now, expires_at=now + timedelta(minutes=GAME_CONFIG["lobby_expiration_minutes"]))
+    db.add(lobby)
+    db.flush()
+    return lobby
+
+
+def _open_series(db: Session, game: Game, opts: dict, owner_id: int) -> None:
+    """Best-of settings: start a new series with `game` as its game 1. Best of one: nothing to do."""
+    if opts.get("series_format") not in SERIES_WINS:
+        return
+    series = Series(format=opts["series_format"], wins_needed=SERIES_WINS[opts["series_format"]],
+                    fearless=bool(opts.get("fearless")), created_by=owner_id)
+    db.add(series)
+    db.flush()
+    game.series_id, game.game_number = series.id, 1
+
+
 def create_lobby(db: Session, user: User, settings: dict | None = None, mode: str = "MULTI") -> tuple[Lobby, Game]:
     """Create a lobby and its game. `settings` are the creator's lobby options (see DEFAULT_SETTINGS).
 
@@ -161,22 +182,13 @@ def create_lobby(db: Session, user: User, settings: dict | None = None, mode: st
         opts["hide_player_data"] = False
     if opts["series_format"] not in SERIES_WINS:
         opts["series_format"], opts["fearless"] = "BO1", False     # fearless only means something across games
-    now = utcnow()
-    lobby = Lobby(code=_new_code(db), created_by=user.id, settings=opts,
-                  created_at=now, expires_at=now + timedelta(minutes=GAME_CONFIG["lobby_expiration_minutes"]))
-    db.add(lobby)
-    db.flush()
+    lobby = _open_lobby(db, user.id, opts)
     game = Game(lobby_id=lobby.id, status="TEAM_SELECTION" if solo or cpu else "WAITING_FOR_PLAYERS",
                 blue_player_id=user.id, red_player_id=user.id if solo else None, is_solo=solo, vs_cpu=cpu,
                 hide_player_data=bool(opts["hide_player_data"]), bans_enabled=bool(opts["bans_enabled"]),
                 timers_enabled=bool(opts["timers_enabled"]), pick_seconds=int(opts["pick_seconds"]),
                 ban_seconds=int(opts["ban_seconds"]))
-    if opts["series_format"] in SERIES_WINS:
-        series = Series(format=opts["series_format"], wins_needed=SERIES_WINS[opts["series_format"]],
-                        fearless=bool(opts["fearless"]), created_by=user.id)
-        db.add(series)
-        db.flush()
-        game.series_id, game.game_number = series.id, 1
+    _open_series(db, game, opts, user.id)
     db.add(game)
     db.commit()
     track("lobby_created", lobby_id=lobby.id, game_id=game.id, user_id=user.id, mode=mode,
@@ -947,11 +959,7 @@ def _start_next_game(db: Session, prev: Game, loser: str) -> Events:
         return (red, blue) if swap else (blue, red)
 
     prev_lobby = db.get(Lobby, prev.lobby_id)
-    now = utcnow()
-    lobby = Lobby(code=_new_code(db), created_by=prev_lobby.created_by, settings=prev_lobby.settings,
-                  created_at=now, expires_at=now + timedelta(minutes=GAME_CONFIG["lobby_expiration_minutes"]))
-    db.add(lobby)
-    db.flush()
+    lobby = _open_lobby(db, prev_lobby.created_by, prev_lobby.settings)
     blue_player, red_player = flip(prev.blue_player_id, prev.red_player_id)
     blue_team, red_team = flip(prev.blue_team_id, prev.red_team_id)
     blue_snap, red_snap = flip(snapshot_of(db, prev, "BLUE"), snapshot_of(db, prev, "RED"))
@@ -999,6 +1007,80 @@ def series_result(db: Session, series_id: int, user: User) -> dict:
         **series_score(db, series, games),
         "games": out,
     }
+
+
+# ---------------------------------------------------------------- rematch
+# After a finished match (or the last game of a finished series) both sides ready up for a rematch: a new
+# lobby with the same settings, owner, players, teams and sides, waiting at the ready check.
+def _rematch_available(db: Session, game: Game) -> bool:
+    if game.status != "COMPLETED":
+        return False
+    if game.series_id is None:
+        return True
+    games = series_games(db, game.series_id)
+    return (series_score(db, db.get(Series, game.series_id), games)["complete"]
+            and not any(g.game_number > game.game_number for g in games))
+
+
+def rematch_state(db: Session, game: Game) -> dict | None:
+    if game.status != "COMPLETED":
+        return None
+    return {"available": _rematch_available(db, game),
+            "ready": {"blue": game.blue_rematch_ready, "red": game.red_rematch_ready},
+            "game_id": game.rematch_game_id}
+
+
+def ready_rematch(db: Session, game: Game, user: User, ready: bool = True) -> Events:
+    """Ready up (or stop being ready) for a rematch. Once both sides are ready the new lobby opens."""
+    if game.rematch_game_id is not None:
+        raise conflict("The rematch has already started.")
+    if not _rematch_available(db, game):
+        raise conflict("A rematch is only possible once the match (or series) is over.")
+    if game.is_solo:
+        game.blue_rematch_ready = game.red_rematch_ready = ready
+        sides = ["BLUE", "RED"]
+    else:
+        me = side_of(game, user.id)
+        if me == "BLUE":
+            game.blue_rematch_ready = ready
+        else:
+            game.red_rematch_ready = ready
+        sides = [me]
+    cpu = cpu_side(game)
+    if cpu == "BLUE":        # the CPU is always up for a rematch
+        game.blue_rematch_ready = True
+    elif cpu == "RED":
+        game.red_rematch_ready = True
+    events = [_event(game, "REMATCH_READY", team=s, ready=ready) for s in sides]
+    if game.blue_rematch_ready and game.red_rematch_ready:
+        events += _start_rematch(db, game)
+    db.commit()
+    return events
+
+
+def _rematch_team(db: Session, team_id: int | None) -> int | None:
+    """Reuse a team only if it still exists and can still be played; otherwise that side picks again."""
+    team = db.get(Team, team_id) if team_id else None
+    return team.id if team is not None and not teams.team_issues(team) else None
+
+
+def _start_rematch(db: Session, prev: Game) -> Events:
+    # a series rematch uses the sides chosen in the lobby (game 1), not the loser's later side choices
+    origin = series_games(db, prev.series_id)[0] if prev.series_id else prev
+    prev_lobby = db.get(Lobby, prev.lobby_id)
+    lobby = _open_lobby(db, prev_lobby.created_by, prev_lobby.settings)
+    blue_team, red_team = _rematch_team(db, origin.blue_team_id), _rematch_team(db, origin.red_team_id)
+    game = Game(lobby_id=lobby.id, status="READY_CHECK" if blue_team and red_team else "TEAM_SELECTION",
+                blue_player_id=origin.blue_player_id, red_player_id=origin.red_player_id,
+                blue_team_id=blue_team, red_team_id=red_team, is_solo=prev.is_solo, vs_cpu=prev.vs_cpu,
+                hide_player_data=prev.hide_player_data, bans_enabled=prev.bans_enabled,
+                timers_enabled=prev.timers_enabled, pick_seconds=prev.pick_seconds, ban_seconds=prev.ban_seconds)
+    _open_series(db, game, prev_lobby.settings or {}, prev_lobby.created_by)
+    db.add(game)
+    db.flush()
+    prev.rematch_game_id = game.id
+    track("rematch_started", game_id=game.id, previous_game_id=prev.id, mode=game_mode(prev))
+    return [_event(prev, "REMATCH_STARTED", rematch_game_id=game.id)]
 
 
 # ---------------------------------------------------------- state views
@@ -1118,6 +1200,7 @@ def game_state(db: Session, game: Game, viewer: User) -> dict:
         "seed": game.seed if game.status == "COMPLETED" else None,
         "simulation_version": game.simulation_version if game.status == "COMPLETED" else None,
         "series": series_state(db, game),
+        "rematch": rematch_state(db, game),
     }
     if game.status in ("DRAFTING", "LANE_ASSIGNMENT", "READY_TO_SIMULATE", "SIMULATING", "COMPLETED"):
         state["draft"] = draft_view(db, game)
