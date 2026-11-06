@@ -135,6 +135,14 @@ async def series_ready(game_id: int, body: SeriesReadyIn | None = None, db: Sess
     return svc.game_state(db, game, user)
 
 
+@router.post("/{game_id}/rematch")
+async def rematch(game_id: int, body: ReadyIn | None = None, db: Session = Depends(get_db),
+                  user: User = Depends(get_current_user)):
+    game = await _load(db, game_id, user)
+    await manager.publish(svc.ready_rematch(db, game, user, (body or ReadyIn()).ready))
+    return svc.game_state(db, game, user)
+
+
 # ------------------------------------------------------------------- chat
 @router.get("/{game_id}/chat")
 async def get_chat(game_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):

@@ -10,6 +10,7 @@ import MusicPlayer from '../components/MusicPlayer'
 import SideBanner from '../components/SideBanner'
 import DraftView from './game/DraftView'
 import LobbyView from './game/LobbyView'
+import RematchPanel from './game/RematchPanel'
 import ReplayView from './game/ReplayView'
 import ResultView from './game/ResultView'
 import SeriesResultView from './game/SeriesResultView'
@@ -51,6 +52,8 @@ function GameScreen({ gameId }: { gameId: number }) {
       }
       // both players readied up: everyone moves on to the series' next game
       if (event.type === 'SERIES_NEXT_GAME') navigate(`/game/${event.next_game_id}`)
+      // both players asked for a rematch: everyone moves to its new lobby
+      if (event.type === 'REMATCH_STARTED') navigate(`/game/${event.rematch_game_id}`)
     },
     [qc, gameId, refresh, navigate],
   )
@@ -107,6 +110,12 @@ function GameScreen({ gameId }: { gameId: number }) {
           ? (
             <div className="stack">
               <SeriesResultView seriesId={game.series.id} />
+              {game.rematch?.available && (
+                <RematchPanel
+                  game={game}
+                  names={{ BLUE: game.teams.BLUE?.name ?? 'Blue team', RED: game.teams.RED?.name ?? 'Red team' }}
+                />
+              )}
               <div className="row between wrap">
                 <Link to="/">← Back home</Link>
                 <button className="ghost" onClick={() => setGameDetails(true)}>Game {game.series.game_number} details</button>

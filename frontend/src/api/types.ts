@@ -480,6 +480,15 @@ export interface SeriesState {
   next_loser_side: Side | null
 }
 
+/** A finished game's rematch: both sides ready up, then a new lobby opens with the same settings, teams and sides. */
+export interface RematchState {
+  /** false mid-series: a rematch is only offered once the whole series is over */
+  available: boolean
+  ready: { blue: boolean; red: boolean }
+  /** the rematch game, once it has started */
+  game_id: number | null
+}
+
 /** Shown in match history. */
 export interface SeriesSummary {
   id: number
@@ -577,6 +586,8 @@ export interface GameState {
   /** the simulation seed once completed; it changes when the match is re-run */
   seed: number | null
   series: SeriesState | null
+  /** set once the game is completed */
+  rematch: RematchState | null
 }
 
 export interface LobbySummary {
