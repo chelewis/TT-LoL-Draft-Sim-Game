@@ -7,6 +7,7 @@ import { RequireAdmin, RequireAuth } from './components/common'
 import AdminPage from './pages/admin/AdminPage'
 import GamePage from './pages/GamePage'
 import HomePage from './pages/HomePage'
+import JoinPage from './pages/JoinPage'
 import LoginPage from './pages/LoginPage'
 import MetaPage from './pages/meta/MetaPage'
 import { META_NAV } from './pages/meta/nav'
@@ -55,6 +56,7 @@ export default function App() {
             <Shell>
               <Routes>
                 <Route path="/" element={<HomePage />} />
+                <Route path="/join/:code" element={<JoinPage />} />
                 <Route path="/game/:gameId" element={<GamePage />} />
                 <Route path="/series/:seriesId" element={<SeriesPage />} />
                 <Route path="/teams" element={<TeamsPage />} />

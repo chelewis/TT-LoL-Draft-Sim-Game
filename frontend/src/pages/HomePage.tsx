@@ -301,7 +301,7 @@ export default function HomePage() {
             </>
           ) : (
             <>
-              <p className="muted">You play Blue. Share the lobby code with a friend.</p>
+              <p className="muted">You play Blue. Share the lobby code or invite link with a friend.</p>
               <DraftOptionsForm value={multi} onChange={setMulti} single={false} />
             </>
           )}

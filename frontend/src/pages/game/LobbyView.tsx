@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import type { GameState, Side, Team } from '../../api/types'
@@ -121,6 +121,58 @@ function useRefetchOnPicks(game: GameState, refetch: () => unknown) {
   useEffect(() => { refetch() }, [blue, red, refetch])
 }
 
+/** The link a friend clicks to join this lobby (signing in first if they need to). */
+function inviteLink(code: string): string {
+  return `${window.location.origin}${import.meta.env.BASE_URL}join/${code}`
+}
+
+/** Copy to the clipboard. navigator.clipboard only exists on HTTPS or localhost, so fall back to execCommand. */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    /* try the fallback */
+  }
+  const area = document.createElement('textarea')
+  area.value = text
+  area.setAttribute('readonly', '')
+  area.style.position = 'fixed'
+  area.style.opacity = '0'
+  document.body.appendChild(area)
+  area.select()
+  let ok = false
+  try {
+    ok = document.execCommand('copy')
+  } catch {
+    ok = false
+  }
+  document.body.removeChild(area)
+  return ok
+}
+
+/** A copy button that says "Copied!" for a moment. If copying fails, shows the text so it can be copied by hand. */
+function CopyButton({ text, label }: { text: string; label: string }) {
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  useEffect(() => {
+    if (state !== 'copied') return
+    const t = setTimeout(() => setState('idle'), 2000)
+    return () => clearTimeout(t)
+  }, [state])
+  return (
+    <>
+      <button className="ghost small" onClick={async () => setState((await copyText(text)) ? 'copied' : 'failed')}>
+        {state === 'copied' ? 'Copied!' : label}
+      </button>
+      {state === 'failed' && (
+        <input readOnly value={text} aria-label={label} onFocus={(e) => e.currentTarget.select()} autoFocus />
+      )}
+    </>
+  )
+}
+
 export default function LobbyView({ game, onChange }: { game: GameState; onChange: () => void }) {
   if (isSolo(game) || isCpu(game)) return <SoloLobby game={game} onChange={onChange} />
   return <MultiLobby game={game} onChange={onChange} />
@@ -177,9 +229,10 @@ function MultiLobby({ game, onChange }: { game: GameState; onChange: () => void 
         <div className="code-box" aria-label="Lobby code">
           <span className="muted small">Lobby code</span>
           <strong>{game.lobby_code}</strong>
-          <button className="ghost small" onClick={() => navigator.clipboard?.writeText(game.lobby_code)}>
-            Copy
-          </button>
+          <div className="row wrap">
+            <CopyButton text={game.lobby_code} label="Copy code" />
+            {game.you.is_owner && !bothJoined && <CopyButton text={inviteLink(game.lobby_code)} label="Copy invite link" />}
+          </div>
         </div>
       </div>
 
