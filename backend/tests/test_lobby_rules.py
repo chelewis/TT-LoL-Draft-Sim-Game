@@ -119,3 +119,72 @@ def test_solo_tournament_is_not_modified_by_forced_visible_data(alice):
     preset = next(r for r in alice.get("/lobbies/rulesets").json()["rulesets"] if r["key"] == "TOURNAMENT")["settings"]
     lobby = alice.post("/lobbies", {"mode": "SOLO", "settings": {"ruleset": "TOURNAMENT", **preset}}).json()
     assert lobby["settings"]["hide_player_data"] is False and not lobby["settings"]["ruleset_modified"]
+
+
+# ------------------------------------------------------- duplicate / mirror clauses
+from app.game.config import LANES  # noqa: E402
+from tests.test_import_seal import riot  # noqa: E402,F401  (fixture)
+from tests.test_sharing import coach, imported  # noqa: E402
+
+
+def same_account_team(alice, fake, name="Faker x5"):
+    """A complete team whose five players are all imports of the same Riot account."""
+    roster = {lane: imported(alice, fake, role=lane)["id"] for lane in LANES}
+    res = alice.post("/teams", {"name": name, "style1": "early", "style2": "teamfight",
+                                "coach_id": coach(alice)["id"], "roster": roster})
+    assert res.status_code == 201, res.text
+    return res.json()["id"]
+
+
+def test_tournament_preset_turns_both_clauses_on(alice):
+    rulesets = {r["key"]: r["settings"] for r in alice.get("/lobbies/rulesets").json()["rulesets"]}
+    assert rulesets["TOURNAMENT"]["duplicate_clause"] and rulesets["TOURNAMENT"]["mirror_clause"]
+    assert not any(s["duplicate_clause"] or s["mirror_clause"] for k, s in rulesets.items() if k != "TOURNAMENT")
+
+
+def test_duplicate_clause_blocks_one_riot_account_twice(alice, riot):  # noqa: F811
+    team = same_account_team(alice, riot)
+    assert pick(alice, solo_lobby(alice), team).status_code == 200            # off: allowed
+    res = pick(alice, solo_lobby(alice, duplicate_clause=True), team)
+    assert res.status_code == 400 and "Faker#KR1 is on the team 5 times (same Riot account)" in res.json()["detail"]
+
+
+def test_duplicate_clause_matches_hand_made_players_by_name(alice, default_team_ids):
+    copy = alice.post(f"/teams/{default_team_ids[0]}/duplicate").json()
+    with SessionLocal() as db:
+        team = db.get(Team, copy["id"])
+        for slot in team.slots[:2]:
+            db.get(Player, slot.player_id).name = "Twin"
+        db.commit()
+    res = pick(alice, solo_lobby(alice, duplicate_clause=True), copy["id"])
+    assert res.status_code == 400 and "Twin is on the team 2 times (same player name)" in res.json()["detail"]
+
+
+def test_mirror_clause_blocks_the_same_player_on_both_sides(alice, default_team_ids):
+    team = default_team_ids[0]
+    off = solo_lobby(alice)
+    assert pick(alice, off, team, "BLUE").status_code == 200 and pick(alice, off, team, "RED").status_code == 200
+    on = solo_lobby(alice, mirror_clause=True)
+    assert pick(alice, on, team, "BLUE").status_code == 200
+    res = pick(alice, on, team, "RED")
+    assert res.status_code == 400 and "already on the other team" in res.json()["detail"]
+    # a copy of the same team is still the same players
+    copy = alice.post(f"/teams/{team}/duplicate").json()["id"]
+    assert pick(alice, on, copy, "RED").status_code == 400
+    assert pick(alice, on, default_team_ids[1], "RED").status_code == 200
+    # the team list says which side each team is blocked for
+    listed = {t["id"]: t for t in alice.get(f"/teams?selectable=true&game_id={on['game_id']}").json()}
+    assert listed[team]["mirror_issues"]["RED"] and not listed[team]["mirror_issues"]["BLUE"]
+
+
+def test_mirror_clause_is_checked_again_at_ready(alice, default_team_ids):
+    on = solo_lobby(alice, mirror_clause=True)
+    blue = alice.post(f"/teams/{default_team_ids[0]}/duplicate").json()
+    assert pick(alice, on, blue["id"], "BLUE").status_code == 200
+    assert pick(alice, on, default_team_ids[1], "RED").status_code == 200
+    red = next(t for t in alice.get("/teams").json() if t["id"] == default_team_ids[1])
+    with SessionLocal() as db:   # blue's owner renames a player to match one on red
+        db.get(Player, blue["roster"]["TOP"]["id"]).name = red["roster"]["TOP"]["name"]
+        db.commit()
+    res = alice.post(f"/games/{on['game_id']}/ready", {"ready": True})
+    assert res.status_code == 409 and "already on the other team" in res.json()["detail"]

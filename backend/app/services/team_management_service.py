@@ -18,6 +18,12 @@ CFG = MANAGEMENT_CONFIG
 STYLES = ("early", "scaling", "teamfight", "skirmish")
 
 
+def _sharing():
+    """sharing_service imports this module, so it's loaded on first use."""
+    from app.services import sharing_service
+    return sharing_service
+
+
 # ------------------------------------------------------------------ views
 def region_group(platform: str | None, cfg: dict = CFG) -> str | None:
     """The strength group of a Riot platform (KR, EU, NA, BR, OTHER), or None for players not imported from Riot."""
@@ -68,6 +74,8 @@ def player_view(p: Player) -> dict:
         "pool": p.pool, "stat_total": p.stat_total, "stat_budget": player_budget(p),
         "over_budget_by": over_budget_by(p),
         "is_default": p.owner_user_id is None,
+        "is_public": bool(p.is_public),
+        "share_issues": _sharing().player_share_issues(p) if p.owner_user_id is not None else [],
         "tags": tags,                 # playstyle tags in effect (they travel into game snapshots)
         "earned_tags": earned,        # every tag the Riot import earned, for the editor
         "riot": None if not p.riot_puuid else {
@@ -85,7 +93,8 @@ def player_view(p: Player) -> dict:
 def coach_view(c: Coach | None) -> dict | None:
     if c is None:
         return None
-    return {"id": c.id, "name": c.name, "draft": c.draft, "synergy": c.synergy, "is_default": c.owner_user_id is None}
+    return {"id": c.id, "name": c.name, "draft": c.draft, "synergy": c.synergy, "is_default": c.owner_user_id is None,
+            "is_public": bool(c.is_public)}
 
 
 def team_issues(team: Team) -> list[str]:
@@ -115,6 +124,8 @@ def team_view(db: Session, team: Team) -> dict:
         "selectable": not issues, "issues": issues,
         "over_budget": bool(over), "over_budget_players": over,
         "is_default": team.owner_user_id is None,
+        "is_public": bool(team.is_public),
+        "share_issues": _sharing().team_share_issues(db, team) if team.owner_user_id is not None else [],
     }
 
 
@@ -138,7 +149,7 @@ def get_owned(db: Session, model, obj_id: int, user_id: int | None):
     return obj
 
 
-def _check_limit(db: Session, model, user_id: int | None, limit: int, label: str) -> None:
+def check_limit(db: Session, model, user_id: int | None, limit: int, label: str) -> None:
     if user_id is None:   # default content has no per-user limit
         return
     count = db.scalar(select(func.count()).select_from(model).where(model.owner_user_id == user_id))
@@ -217,7 +228,7 @@ def _apply_player(player: Player, body: PlayerIn) -> None:
 
 def create_player(db: Session, user_id: int | None, body: PlayerIn) -> Player:
     _validate_player(db, body)
-    _check_limit(db, Player, user_id, CFG["max_players_per_user"], "players")
+    check_limit(db, Player, user_id, CFG["max_players_per_user"], "players")
     player = Player(owner_user_id=user_id)
     _apply_player(player, body)
     _apply_tags(db, player, body, _apply_riot(player, body, user_id))
@@ -240,15 +251,18 @@ def update_player(db: Session, user_id: int | None, player_id: int, body: Player
     _apply_player(player, body)
     _apply_tags(db, player, body, _apply_riot(player, body, user_id))
     _check_budget(player)
+    _sharing().revalidate_player(db, player)   # a public player keeps its Riot name, or stops being public
     db.commit()
     return player
 
 
 def delete_player(db: Session, user_id: int | None, player_id: int) -> None:
     player = get_owned(db, Player, player_id, user_id)
+    affected = _sharing()._teams_with_players(db, [player.id])
     for slot in db.scalars(select(TeamRosterSlot).where(TeamRosterSlot.player_id == player.id)):
         db.delete(slot)  # the affected teams become unselectable until refilled
     db.delete(player)
+    _sharing().revalidate_teams(db, affected)   # public teams missing a player are no longer public
     db.commit()
 
 
@@ -264,7 +278,7 @@ def _validate_coach(body: CoachIn) -> None:
 
 def create_coach(db: Session, user_id: int | None, body: CoachIn) -> Coach:
     _validate_coach(body)
-    _check_limit(db, Coach, user_id, CFG["max_coaches_per_user"], "coaches")
+    check_limit(db, Coach, user_id, CFG["max_coaches_per_user"], "coaches")
     coach = Coach(owner_user_id=user_id, name=body.name, draft=body.draft, synergy=body.synergy)
     db.add(coach)
     db.commit()
@@ -281,9 +295,14 @@ def update_coach(db: Session, user_id: int | None, coach_id: int, body: CoachIn)
 
 def delete_coach(db: Session, user_id: int | None, coach_id: int) -> None:
     coach = get_owned(db, Coach, coach_id, user_id)
-    for team in db.scalars(select(Team).where(Team.coach_id == coach.id)):
+    affected = list(db.scalars(select(Team).where(Team.coach_id == coach.id)))
+    for team in affected:
         team.coach_id = None
     db.delete(coach)
+    db.flush()
+    for team in affected:
+        db.refresh(team)
+    _sharing().revalidate_teams(db, affected)
     db.commit()
 
 
@@ -327,7 +346,7 @@ def _apply_team(team: Team, body: TeamIn) -> None:
 
 def create_team(db: Session, user_id: int | None, body: TeamIn) -> Team:
     _validate_team(db, user_id, body, None)
-    _check_limit(db, Team, user_id, CFG["max_teams_per_user"], "teams")
+    check_limit(db, Team, user_id, CFG["max_teams_per_user"], "teams")
     team = Team(owner_user_id=user_id)
     _apply_team(team, body)
     db.add(team)
@@ -341,6 +360,9 @@ def update_team(db: Session, user_id: int | None, team_id: int, body: TeamIn) ->
     team.slots.clear()
     db.flush()
     _apply_team(team, body)
+    db.flush()
+    db.refresh(team)
+    _sharing().revalidate_teams(db, [team])
     db.commit()
     return team
 
@@ -351,10 +373,27 @@ def delete_team(db: Session, user_id: int | None, team_id: int) -> None:
     db.commit()
 
 
-def duplicate_team(db: Session, user_id: int, team_id: int) -> Team:
-    """Copy a visible team (and its roster players and coach) into the user's account."""
-    source = get_visible(db, Team, team_id, user_id)
-    _check_limit(db, Team, user_id, CFG["max_teams_per_user"], "teams")
+PLAYER_COPY_FIELDS = (
+    "name", "role", "secondary_role", "age", "region", "aggr", "aware", "pos", "dmg", "cs",
+    "riot_puuid", "riot_game_name", "riot_tag_line", "riot_region", "riot_data_source", "riot_games_used",
+    "riot_rank_queue", "riot_rank_tier", "riot_rank_division", "riot_rank_lp", "riot_rank_wins", "riot_rank_losses",
+    "riot_imported_at", "riot_earned_tags", "playstyle_tags", "riot_seal",
+)
+
+
+def copy_player(original: Player, user_id: int) -> Player:
+    """A private copy of a player for this user, Riot link and import seal included (so it stays verifiable)."""
+    copy = Player(owner_user_id=user_id, **{f: getattr(original, f) for f in PLAYER_COPY_FIELDS})
+    for field in ("riot_earned_tags", "playstyle_tags"):
+        value = getattr(copy, field)
+        setattr(copy, field, list(value) if value is not None else None)
+    copy.pool_entries = [PlayerPoolEntry(position=e.position, champion_id=e.champion_id) for e in original.pool_entries]
+    return copy
+
+
+def copy_team(db: Session, user_id: int, source: Team, name_suffix: str = " (copy)") -> Team:
+    """Copy a team (and its roster players and coach) into the user's account, as private copies."""
+    check_limit(db, Team, user_id, CFG["max_teams_per_user"], "teams")
 
     coach = None
     if source.coach is not None:
@@ -364,21 +403,15 @@ def duplicate_team(db: Session, user_id: int, team_id: int) -> Team:
 
     copies: dict[str, Player] = {}
     for slot in source.slots:
-        original = db.get(Player, slot.player_id)
-        copy = Player(owner_user_id=user_id, name=original.name, role=original.role,
-                      secondary_role=original.secondary_role, age=original.age,
-                      region=original.region, aggr=original.aggr, aware=original.aware, pos=original.pos,
-                      dmg=original.dmg, cs=original.cs)
-        copy.pool_entries = [PlayerPoolEntry(position=e.position, champion_id=e.champion_id)
-                             for e in original.pool_entries]
+        copy = copy_player(db.get(Player, slot.player_id), user_id)
         db.add(copy)
         copies[slot.lane] = copy
     db.flush()
 
-    base_name = f"{source.name} (copy)"
+    base_name = f"{source.name}{name_suffix}"[:40]
     name, n = base_name, 2
     while db.scalar(select(Team).where(Team.owner_user_id == user_id, Team.name == name)):
-        name, n = f"{base_name} {n}", n + 1
+        name, n = f"{base_name[:36]} {n}", n + 1
     team = Team(owner_user_id=user_id, name=name[:40], logo=source.logo, region=source.region,
                 fanbase=source.fanbase, style1=source.style1, style2=source.style2,
                 focus1=source.focus1, focus2=source.focus2, coach_id=coach.id if coach else None)
@@ -386,6 +419,11 @@ def duplicate_team(db: Session, user_id: int, team_id: int) -> Team:
     db.add(team)
     db.commit()
     return team
+
+
+def duplicate_team(db: Session, user_id: int, team_id: int) -> Team:
+    """Copy a visible team (and its roster players and coach) into the user's account."""
+    return copy_team(db, user_id, get_visible(db, Team, team_id, user_id))
 
 
 # ----------------------------------------------------------------- lists

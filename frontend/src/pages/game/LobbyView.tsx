@@ -1,4 +1,5 @@
 import { useMutation } from '@tanstack/react-query'
+import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import type { GameState, Side, Team } from '../../api/types'
@@ -13,6 +14,7 @@ function SoloLobby({ game, onChange }: { game: GameState; onChange: () => void }
   const cpu = isCpu(game)
   const navigate = useNavigate()
   const teams = useTeams(true, game.game_id)
+  useRefetchOnPicks(game, teams.refetch)
   const choose = useMutation({
     mutationFn: ({ side, teamId }: { side: Side; teamId: number }) =>
       api(`/lobbies/${game.lobby_id}/team`, { body: { team_id: teamId, side } }),
@@ -72,13 +74,13 @@ function SoloLobby({ game, onChange }: { game: GameState; onChange: () => void }
                     key={t.id}
                     className={`pick-card ${chosen[side] === t.id ? 'selected' : ''}`}
                     onClick={() => choose.mutate({ side, teamId: t.id })}
-                    disabled={choose.isPending || !!t.rule_issues?.length}
+                    disabled={choose.isPending || (chosen[side] !== t.id && teamIssues(t, side).length > 0)}
                     aria-pressed={chosen[side] === t.id}
-                    title={t.rule_issues?.join('; ') || undefined}
+                    title={teamIssues(t, side).join('; ') || undefined}
                   >
                     <strong>{t.name}</strong>
                     <span className="muted small">{t.is_default ? 'Default team' : 'Your team'}</span>
-                    <RuleBadge team={t} />
+                    <RuleBadge issues={teamIssues(t, side)} />
                   </button>
                 ))}
               </div>
@@ -101,10 +103,22 @@ function SoloLobby({ game, onChange }: { game: GameState; onChange: () => void }
   )
 }
 
+/** Why a team can't be chosen for this side: the lobby's restrictions, plus players already on the other team. */
+function teamIssues(team: Team, side: Side | null): string[] {
+  return [...(team.rule_issues ?? []), ...(side ? team.mirror_issues?.[side] ?? [] : [])]
+}
+
 /** Shown on a team that breaks the lobby's restrictions (the reasons are in the card's tooltip). */
-function RuleBadge({ team }: { team: Team }) {
-  if (!team.rule_issues?.length) return null
-  return <span className="badge badge-warn">⚠ Not allowed: {team.rule_issues[0]}{team.rule_issues.length > 1 ? ` (+${team.rule_issues.length - 1} more)` : ''}</span>
+function RuleBadge({ issues }: { issues: string[] }) {
+  if (!issues.length) return null
+  return <span className="badge badge-warn">⚠ Not allowed: {issues[0]}{issues.length > 1 ? ` (+${issues.length - 1} more)` : ''}</span>
+}
+
+/** The mirror clause depends on the other side's team: refresh the team list whenever either side's pick changes. */
+function useRefetchOnPicks(game: GameState, refetch: () => unknown) {
+  const blue = game.players.blue?.team_id ?? null
+  const red = game.players.red?.team_id ?? null
+  useEffect(() => { refetch() }, [blue, red, refetch])
 }
 
 export default function LobbyView({ game, onChange }: { game: GameState; onChange: () => void }) {
@@ -115,6 +129,7 @@ export default function LobbyView({ game, onChange }: { game: GameState; onChang
 function MultiLobby({ game, onChange }: { game: GameState; onChange: () => void }) {
   const navigate = useNavigate()
   const teams = useTeams(true, game.game_id)
+  useRefetchOnPicks(game, teams.refetch)
   const me = game.you.team
   const mine = me === 'BLUE' ? game.players.blue : game.players.red
   const myTeamId = mine?.team_id ?? null
@@ -193,12 +208,12 @@ function MultiLobby({ game, onChange }: { game: GameState; onChange: () => void 
               key={t.id}
               className={`pick-card ${myTeamId === t.id ? 'selected' : ''}`}
               onClick={() => choose.mutate(t.id)}
-              disabled={choose.isPending || !!t.rule_issues?.length}
-              title={t.rule_issues?.join('; ') || undefined}
+              disabled={choose.isPending || (myTeamId !== t.id && teamIssues(t, me).length > 0)}
+              title={teamIssues(t, me).join('; ') || undefined}
             >
               <strong>{t.name}</strong>
               <span className="muted small">{t.is_default ? 'Default team' : 'Your team'}</span>
-              <RuleBadge team={t} />
+              <RuleBadge issues={teamIssues(t, me)} />
               {t.over_budget && <span className="badge badge-warn">⚠ over stat ceiling</span>}
             </button>
           ))}

@@ -72,13 +72,20 @@ def team_insights(body: TeamInsightsIn, db: Session = Depends(get_db), user: Use
 @router.get("/teams")
 def list_teams(selectable: bool | None = None, game_id: int | None = None, db: Session = Depends(get_db),
                user: User = Depends(get_current_user)):
-    """With `game_id`, each team also lists `rule_issues`: why it breaks that lobby's restrictions."""
+    """With `game_id`, each team also lists `rule_issues` (why it breaks that lobby's restrictions) and
+    `mirror_issues` ({BLUE, RED}: why it can't be chosen for that side, given the other side's team)."""
     views = svc.list_teams(db, user.id, selectable)
     if game_id is not None:
         game = game_service.get_game(db, game_id, user.id)
         settings = db.get(Lobby, game.lobby_id).settings or {}
+        chosen = {}
+        for side, tid in (("BLUE", game.blue_team_id), ("RED", game.red_team_id)):
+            team = db.get(Team, tid) if tid else None
+            chosen[side] = svc.team_view(db, team) if team else None
         for v in views:
             v["rule_issues"] = lobby_rules.team_rule_issues(v, settings)
+            v["mirror_issues"] = {"BLUE": lobby_rules.mirror_issues(v, chosen["RED"], settings),
+                                  "RED": lobby_rules.mirror_issues(v, chosen["BLUE"], settings)}
     return views
 
 

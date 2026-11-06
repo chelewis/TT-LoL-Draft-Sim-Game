@@ -1,10 +1,11 @@
-"""Lobby rulesets and the team restrictions they set (max rank, player and team stat totals)."""
+"""Lobby rulesets and the team restrictions they set (max rank, stat totals, duplicate and mirror clauses)."""
 from __future__ import annotations
 
 from app.game.config import DEFAULT_RULESET, LANES, LOBBY_RULESETS, LOBBY_RULESETS_BY_KEY
 from app.integrations.riot.config import RANK_TIERS
 
-RULE_FIELDS = ("max_rank", "max_player_total", "max_team_total")
+RULE_FIELDS = ("max_rank", "max_player_total", "max_team_total", "duplicate_clause", "mirror_clause")
+CLAUSES = ("duplicate_clause", "mirror_clause")
 
 
 def ruleset(key: str | None) -> dict:
@@ -23,7 +24,35 @@ def is_modified(settings: dict, ignore: tuple[str, ...] = ()) -> bool:
 
 def rules_of(settings: dict) -> dict:
     """The team restrictions in a lobby's stored options (lobbies from before rulesets have none)."""
-    return {k: settings.get(k) for k in RULE_FIELDS}
+    return {k: bool(settings.get(k)) if k in CLAUSES else settings.get(k) for k in RULE_FIELDS}
+
+
+def player_identity(p: dict) -> tuple[str, str]:
+    """Who a rostered player really is: their Riot ID for imports (copies of one account match), else their name."""
+    riot = p.get("riot") or {}
+    if riot.get("game_name"):
+        return ("riot", f"{riot['game_name']}#{riot.get('tag_line') or ''}".lower())
+    return ("name", p["name"].strip().lower())
+
+
+def _describe(identity: tuple[str, str], p: dict) -> str:
+    if identity[0] == "riot":
+        riot = p["riot"]
+        return f"{riot['game_name']}#{riot.get('tag_line') or ''}"
+    return p["name"]
+
+
+def _roster(view: dict | None) -> list[dict]:
+    return [p for lane in LANES if (p := ((view or {}).get("roster") or {}).get(lane))]
+
+
+def mirror_issues(team_view: dict, other_view: dict | None, settings: dict) -> list[str]:
+    """With the mirror clause on: the players this team shares with the other side's team."""
+    if not rules_of(settings)["mirror_clause"] or not other_view:
+        return []
+    theirs = {player_identity(p) for p in _roster(other_view)}
+    shared = [p for p in _roster(team_view) if player_identity(p) in theirs]
+    return [f"{_describe(player_identity(p), p)} is already on the other team (no mirror players)" for p in shared]
 
 
 def _tier_name(tier: str) -> str:
@@ -35,7 +64,17 @@ def team_rule_issues(team_view: dict, settings: dict) -> list[str]:
     lobby's restrictions. Empty when it's allowed."""
     rules = rules_of(settings)
     issues: list[str] = []
-    players = [p for lane in LANES if (p := (team_view.get("roster") or {}).get(lane))]
+    players = _roster(team_view)
+    if rules["duplicate_clause"]:
+        seen: dict[tuple[str, str], int] = {}
+        for p in players:
+            seen[player_identity(p)] = seen.get(player_identity(p), 0) + 1
+        for p in players:
+            ident = player_identity(p)
+            if seen.get(ident, 0) > 1:
+                what = "Riot account" if ident[0] == "riot" else "player name"
+                issues.append(f"{_describe(ident, p)} is on the team {seen[ident]} times (same {what})")
+                seen[ident] = 0   # report each duplicate once
     max_rank = rules["max_rank"]
     if max_rank:
         limit = RANK_TIERS.index(max_rank)

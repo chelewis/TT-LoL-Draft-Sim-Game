@@ -72,11 +72,16 @@ export function rulesetLabel(s: { ruleset_name?: string; ruleset_modified?: bool
 }
 
 /** "Diamond and below · players ≤ 36 · team ≤ 170", or "No team restrictions". */
-export function lobbyLimits(s: { max_rank?: string | null; max_player_total?: number | null; max_team_total?: number | null }): string {
+export function lobbyLimits(s: {
+  max_rank?: string | null; max_player_total?: number | null; max_team_total?: number | null
+  duplicate_clause?: boolean; mirror_clause?: boolean
+}): string {
   const parts: string[] = []
   if (s.max_rank) parts.push(s.max_rank === 'CHALLENGER' ? 'Ranked players only' : `${titleCase(s.max_rank)} and below`)
   if (s.max_player_total != null) parts.push(`players ≤ ${s.max_player_total}`)
   if (s.max_team_total != null) parts.push(`team ≤ ${s.max_team_total}`)
+  if (s.duplicate_clause) parts.push('no duplicate players')
+  if (s.mirror_clause) parts.push('no mirror players')
   if (!parts.length) return 'No team restrictions'
   const text = parts.join(' · ')
   return text.charAt(0).toUpperCase() + text.slice(1)

@@ -38,7 +38,8 @@ def _ruleset(key: str, name: str, description: str, max_rank: str | None, max_pl
     settings = {"hide_player_data": False, "bans_enabled": True, "timers_enabled": True,
                 "pick_seconds": DRAFT_CONFIG["timer_seconds"], "ban_seconds": DRAFT_CONFIG["timer_seconds"],
                 "series_format": "BO1", "fearless": False,
-                "max_rank": max_rank, "max_player_total": max_player_total, "max_team_total": max_team_total}
+                "max_rank": max_rank, "max_player_total": max_player_total, "max_team_total": max_team_total,
+                "duplicate_clause": False, "mirror_clause": False}
     return {"key": key, "name": name, "description": description, "settings": {**settings, **draft}}
 
 
@@ -46,6 +47,8 @@ def _ruleset(key: str, name: str, description: str, max_rank: str | None, max_pl
 # the lobby; the stored options are what's enforced, the ruleset key is only a label.
 # max_rank: every rostered player must be a ranked Riot import at or below this tier (unranked players fail).
 # max_player_total / max_team_total: caps on a player's stat total and on the five rostered players' sum.
+# duplicate_clause: a team can't roster the same Riot account twice (hand-made players: the same name).
+# mirror_clause: the two teams in a lobby can't both field the same player (same account, or same name).
 LOBBY_RULESETS: list[dict[str, Any]] = [
     _ruleset("ANYTHING_GOES", "Anything Goes", "No team restrictions. Any team can play.", None, None, None),
     _ruleset("PRO", "Pro", "Ranked players of any tier. Players up to 48 stats, teams up to 200.",
@@ -58,8 +61,10 @@ LOBBY_RULESETS: list[dict[str, Any]] = [
              "PLATINUM", 32, 155),
     _ruleset("LOW_ELO", "Low Elo", "Bronze and below. Players up to 28 stats, teams up to 135.",
              "BRONZE", 28, 135),
-    _ruleset("TOURNAMENT", "Tournament", "Pro limits, played as a Fearless best of 3 with hidden player data.",
-             "CHALLENGER", 48, 200, series_format="BO3", fearless=True, hide_player_data=True),
+    _ruleset("TOURNAMENT", "Tournament", "Pro limits, played as a Fearless best of 3 with hidden player data. "
+             "No player twice on a team, and no player on both teams.",
+             "CHALLENGER", 48, 200, series_format="BO3", fearless=True, hide_player_data=True,
+             duplicate_clause=True, mirror_clause=True),
 ]
 LOBBY_RULESETS_BY_KEY = {r["key"]: r for r in LOBBY_RULESETS}
 DEFAULT_RULESET = "ANYTHING_GOES"

@@ -48,6 +48,8 @@ describe('lobby rulesets', () => {
     expect(lobbyLimits({ max_rank: 'DIAMOND', max_player_total: 36, max_team_total: 170 })).toBe('Diamond and below · players ≤ 36 · team ≤ 170')
     expect(lobbyLimits({ max_rank: 'CHALLENGER', max_player_total: null, max_team_total: null })).toBe('Ranked players only')
     expect(lobbyLimits({ max_rank: null, max_player_total: 30, max_team_total: null })).toBe('Players ≤ 30')
+    expect(lobbyLimits({ max_rank: null, max_player_total: null, max_team_total: null, duplicate_clause: true, mirror_clause: true }))
+      .toBe('No duplicate players · no mirror players')
   })
 })
 

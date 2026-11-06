@@ -28,6 +28,7 @@ def test_defaults(alice, bob, default_team_ids):
                                  "pick_seconds": 30, "ban_seconds": 30, "mode": "MULTI",
                                  "series_format": "BO1", "fearless": False,
                                  "max_rank": None, "max_player_total": None, "max_team_total": None,
+                                 "duplicate_clause": False, "mirror_clause": False,
                                  "ruleset": "ANYTHING_GOES", "ruleset_name": "Anything Goes",
                                  "ruleset_modified": False}
     assert lobby["series"] is None

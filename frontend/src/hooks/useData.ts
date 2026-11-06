@@ -1,7 +1,8 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
-import type { Champion, ChampionFit, ChampionPair, Coach, Lane, MetaChampion, Player, RulesetList, Team, TeamInsights, TeamInsightsRequest } from '../api/types'
+import type { Champion, ChampionFit, ChampionPair, Coach, Lane, MetaChampion, Player, PublicKind, RulesetList, SearchFilters, SearchPage, Team, TeamInsights, TeamInsightsRequest } from '../api/types'
 import { fetchLatestVersion } from '../lib/ddragon'
+import { searchQuery } from '../lib/search'
 
 /** Every Meta view's query starts with this key, so admin edits to what feeds them can refresh them all. */
 export const metaKey = ['meta']
@@ -92,3 +93,13 @@ export const useTeamInsights = (request: TeamInsightsRequest, enabled: boolean) 
     placeholderData: keepPreviousData,
     enabled,
   })
+
+/** Other users' public players, coaches or teams matching the filters (keeps the last page while filters change). */
+export function usePublicSearch<T>(kind: PublicKind, filters: SearchFilters, enabled = true) {
+  return useQuery({
+    queryKey: ['public', kind, filters],
+    queryFn: () => api<SearchPage<T>>(`/public/${kind}?${searchQuery(filters)}`),
+    placeholderData: keepPreviousData,
+    enabled,
+  })
+}

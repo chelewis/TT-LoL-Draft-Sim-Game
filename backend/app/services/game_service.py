@@ -266,7 +266,12 @@ def select_team(db: Session, game: Game, user: User, team_id: int, requested_sid
     issues = teams.team_issues(team)
     if issues:
         raise bad_request("That team cannot be used yet: " + "; ".join(issues))
-    broken = lobby_rules.team_rule_issues(teams.team_view(db, team), db.get(Lobby, game.lobby_id).settings or {})
+    settings = db.get(Lobby, game.lobby_id).settings or {}
+    view = teams.team_view(db, team)
+    other_id = game.red_team_id if side == "BLUE" else game.blue_team_id
+    other = db.get(Team, other_id) if other_id else None
+    broken = lobby_rules.team_rule_issues(view, settings)
+    broken += lobby_rules.mirror_issues(view, teams.team_view(db, other) if other else None, settings)
     if broken:
         raise bad_request("That team breaks this lobby's rules: " + "; ".join(broken))
     if side == "BLUE":
@@ -284,13 +289,19 @@ def select_team(db: Session, game: Game, user: User, team_id: int, requested_sid
 def _check_rules_before_draft(db: Session, game: Game) -> None:
     """A team can be edited after it was chosen: check both again against the lobby's restrictions."""
     settings = db.get(Lobby, game.lobby_id).settings or {}
+    views = {}
     for side, team_id in (("Blue", game.blue_team_id), ("Red", game.red_team_id)):
         team = db.get(Team, team_id) if team_id else None
         if team is None:
             continue
-        broken = lobby_rules.team_rule_issues(teams.team_view(db, team), settings)
+        views[side] = teams.team_view(db, team)
+        broken = lobby_rules.team_rule_issues(views[side], settings)
         if broken:
             raise conflict(f"The {side} team no longer meets this lobby's rules: " + "; ".join(broken))
+    if len(views) == 2:
+        broken = lobby_rules.mirror_issues(views["Red"], views["Blue"], settings)
+        if broken:
+            raise conflict("The teams no longer meet this lobby's rules: " + "; ".join(broken))
 
 
 def set_ready(db: Session, game: Game, user: User, ready: bool = True) -> Events:

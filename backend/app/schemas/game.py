@@ -11,6 +11,8 @@ class LobbySettings(BaseModel):
     max_rank: str | None = None        # every rostered player must be a ranked Riot import at or below this tier
     max_player_total: int | None = Field(default=None, ge=5, le=50)
     max_team_total: int | None = Field(default=None, ge=25, le=250)
+    duplicate_clause: bool = False     # no Riot account (or hand-made player name) twice on one team
+    mirror_clause: bool = False        # no player (same account or name) on both teams
     hide_player_data: bool = False
     bans_enabled: bool = True          # False skips every ban phase (picks only)
     timers_enabled: bool = True        # False means no time limit on picks and bans

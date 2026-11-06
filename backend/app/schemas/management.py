@@ -70,3 +70,7 @@ class RiotPreviewIn(BaseModel):
     riot_id: str = Field(min_length=3, max_length=40)   # "GameName#TAG"
     region: str = Field(default="NA1", max_length=6)
     role: str | None = None                              # optional lane override
+
+
+class PublicIn(BaseModel):
+    public: bool

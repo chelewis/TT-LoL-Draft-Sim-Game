@@ -36,6 +36,7 @@ type DraftOptions = RulesetSettings & { ruleset: string }
 const ANYTHING_GOES: DraftOptions = {
   ruleset: 'ANYTHING_GOES', hide_player_data: false, bans_enabled: true, timers_enabled: true, pick_seconds: 30,
   ban_seconds: 30, series_format: 'BO1', fearless: false, max_rank: null, max_player_total: null, max_team_total: null,
+  duplicate_clause: false, mirror_clause: false,
 }
 
 const clampTo = (lo: number, hi: number, fallback: number) => (n: number) => Math.max(lo, Math.min(hi, Math.round(n) || fallback))
@@ -170,6 +171,14 @@ function DraftOptionsForm({ value, onChange, single }: { value: DraftOptions; on
         <CapField label="Limit the team's stat total" value={value.max_team_total} fallback={160} min={25} max={250}
           onChange={(v) => set({ max_team_total: v })} />
       </div>
+      <label className="check">
+        <input type="checkbox" checked={value.duplicate_clause} onChange={(e) => set({ duplicate_clause: e.target.checked })} />
+        Duplicate clause (a team can't roster the same Riot account twice; hand-made players are matched by name)
+      </label>
+      <label className="check">
+        <input type="checkbox" checked={value.mirror_clause} onChange={(e) => set({ mirror_clause: e.target.checked })} />
+        No mirror players (the same player can't be on both teams)
+      </label>
     </>
   )
 }
@@ -221,6 +230,8 @@ export default function HomePage() {
             max_rank: o.max_rank,
             max_player_total: o.max_player_total === null ? null : clampPlayerTotal(o.max_player_total),
             max_team_total: o.max_team_total === null ? null : clampTeamTotal(o.max_team_total),
+            duplicate_clause: o.duplicate_clause,
+            mirror_clause: o.mirror_clause,
           },
         },
       })

@@ -2,13 +2,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
-import type { Coach, ImportCheck, Lane, Player, PlaystyleTag, RiotPreview, Team, TeamInsightsRequest } from '../api/types'
+import type { Coach, ImportCheck, Lane, Player, PlaystyleTag, PublicKind, RiotPreview, Team, TeamInsightsRequest } from '../api/types'
 import { LANES, STYLES } from '../api/types'
 import { ErrorNotice, Loading } from '../components/common'
 import { ChampionIcon } from '../components/ChampionArt'
 import RiotBadge from '../components/RiotBadge'
 import { TagChip } from '../components/TagChips'
 import { OverBudgetBadge } from '../components/TeamCard'
+import { CollapsibleSection, PublicCoachesBrowser, PublicPlayersBrowser, PublicTeamsBrowser } from '../components/PublicBrowser'
 import { useChampionFit, useChampions, useCoaches, usePlayers, useTeams } from '../hooks/useData'
 import RosterSummary from '../components/RosterSummary'
 import TeamFieldHelp, { type TeamRules } from '../components/TeamFieldHelp'
@@ -51,6 +52,30 @@ function useInvalidate() {
   }
 }
 
+/** Make public / Make private. Disabled (with the reason on hover) when the item can't be shared. */
+function ShareButton({ kind, item }: { kind: PublicKind; item: { id: number; is_public?: boolean; share_issues?: string[] } }) {
+  const invalidate = useInvalidate()
+  const toggle = useMutation({
+    mutationFn: (pub: boolean) => api(`/${kind}/${item.id}/public`, { method: 'PUT', body: { public: pub } }),
+    onSuccess: invalidate,
+  })
+  const blocked = !item.is_public && !!item.share_issues?.length
+  return (
+    <>
+      <button type="button" className="ghost small" disabled={toggle.isPending || blocked}
+              title={blocked ? item.share_issues!.join(' ') : item.is_public ? 'Stop sharing. Copies others already made are kept.' : 'Let other users find this and copy it'}
+              onClick={() => toggle.mutate(!item.is_public)}>
+        {item.is_public ? 'Make private' : 'Make public'}
+      </button>
+      <ErrorNotice error={toggle.error} />
+    </>
+  )
+}
+
+function PublicBadge({ item }: { item: { is_public?: boolean } }) {
+  return item.is_public ? <span className="badge ok" title="Other users can find and copy this">Public</span> : null
+}
+
 // ------------------------------------------------------------------ teams
 export function TeamsPage({ scope = USER_SCOPE }: { scope?: Scope }) {
   const teams = useTeams()
@@ -90,6 +115,7 @@ export function TeamsPage({ scope = USER_SCOPE }: { scope?: Scope }) {
         <h1>My teams</h1>
         <Link className="button primary" to="/teams/new">New team</Link>
       </div>
+      <PublicTeamsBrowser />
       <ErrorNotice error={del.error ?? dup.error} />
       {teams.isLoading && <Loading />}
       {mine.length === 0 && !teams.isLoading && <p className="muted">You have not created a team yet. Duplicate a default team or start from scratch.</p>}
@@ -99,17 +125,19 @@ export function TeamsPage({ scope = USER_SCOPE }: { scope?: Scope }) {
             <>
               <Link className="button ghost small" to={`/teams/${t.id}`}>Edit</Link>
               <button className="ghost small" onClick={() => dup.mutate(t.id)}>Duplicate</button>
+              <ShareButton kind="teams" item={t} />
               <button className="ghost small danger" onClick={() => window.confirm(`Delete ${t.name}?`) && del.mutate(t.id)}>Delete</button>
             </>
           } />
         ))}
       </div>
-      <h2>Default teams</h2>
-      <div className="grid two">
-        {defaults.map((t) => (
-          <TeamRow key={t.id} team={t} actions={<button className="ghost small" onClick={() => dup.mutate(t.id)} disabled={!t.selectable}>Duplicate to edit</button>} />
-        ))}
-      </div>
+      <CollapsibleSection title={`Default teams (${defaults.length})`} storageKey="ldm_defaults_teams">
+        <div className="grid two">
+          {defaults.map((t) => (
+            <TeamRow key={t.id} team={t} actions={<button className="ghost small" onClick={() => dup.mutate(t.id)} disabled={!t.selectable}>Duplicate to edit</button>} />
+          ))}
+        </div>
+      </CollapsibleSection>
       <p><Link to="/players">Manage players →</Link> · <Link to="/coaches">Manage coaches →</Link></p>
     </div>
   )
@@ -119,7 +147,7 @@ function TeamRow({ team, actions }: { team: Team; actions: React.ReactNode }) {
   return (
     <div className="card stack">
       <div className="row between wrap">
-        <h3>{team.name}</h3>
+        <h3>{team.name} <PublicBadge item={team} /></h3>
         <OverBudgetBadge team={team} />
       </div>
       <p className="small muted">
@@ -279,7 +307,7 @@ export function PlayersPage({ scope = USER_SCOPE }: { scope?: Scope }) {
 
   const row = (p: Player) => (
     <tr key={p.id}>
-      <td>{p.name} <RiotBadge riot={p.riot} showAccount />
+      <td>{p.name} <PublicBadge item={p} /> <RiotBadge riot={p.riot} showAccount />
         {p.riot?.rank && <span className="badge" title={`${riotSourceLabel(p.riot.rank.queue)} rank when imported: ${rankLabel(p.riot.rank, true)}`}>{rankLabel(p.riot.rank)}</span>}
         {p.riot && riotSourceTag(p.riot.data_source) && <span className="badge badge-warn" title={`Stats come from ${riotSourceLabel(p.riot.data_source)} (${p.riot.games_used ?? '?'} games), not solo queue`}>⚠ {riotSourceTag(p.riot.data_source)}</span>} {p.over_budget_by > 0 && <span className="badge badge-warn" title="Above the soft stat ceiling">⚠ +{p.over_budget_by}</span>}</td>
       <td>{roleLabel(p)}</td>
@@ -288,6 +316,7 @@ export function PlayersPage({ scope = USER_SCOPE }: { scope?: Scope }) {
       <td className="small muted">{p.pool.map((id) => names.get(id)).join(', ')}</td>
       <td>{p.is_default === scope.defaults && <>
         <Link className="button ghost small" to={`${scope.home}/players/${p.id}`}>Edit</Link>{' '}
+        {!scope.defaults && <><ShareButton kind="players" item={p} />{' '}</>}
         <button type="button" className="ghost small danger" onClick={() => confirmDelete(scope, p.name) && del.mutate(p.id)}>Delete</button></>}</td>
     </tr>
   )
@@ -311,11 +340,14 @@ export function PlayersPage({ scope = USER_SCOPE }: { scope?: Scope }) {
           {riotStatus.data?.enabled && <Link className="button" to="/players/import">Import from Riot</Link>}
           <Link className="button primary" to="/players/new">New player</Link>
         </span></div>
+      <PublicPlayersBrowser />
       <ErrorNotice error={del.error} />
       {players.isLoading && <Loading />}
       {mine.length === 0 ? <p className="muted">No custom players yet.</p> : table(mine)}
-      <h2>Default players</h2>
-      {table(defaults)}
+      <p className="small muted">Only unedited Riot imports can be made public. A public player uses its Riot name.</p>
+      <CollapsibleSection title={`Default players (${defaults.length})`} storageKey="ldm_defaults_players">
+        {table(defaults)}
+      </CollapsibleSection>
       <p><Link to="/teams">← Teams</Link></p>
     </div>
   )
@@ -454,7 +486,9 @@ export function PlayerEditorPage({ scope = USER_SCOPE }: { scope?: Scope }) {
       )}
       <div className="card stack">
         <div className="grid two">
-          <label>Name<input value={name} onChange={(e) => setName(e.target.value)} maxLength={40} required /></label>
+          <label>Name<input value={name} onChange={(e) => setName(e.target.value)} maxLength={40} required readOnly={!!existing.data?.is_public}
+            title={existing.data?.is_public ? 'Public players use their Riot name. Make the player private to rename it.' : undefined} />
+            {existing.data?.is_public && <span className="small muted">Public players use their Riot name.</span>}</label>
           <label>Primary role{baseline && role !== baseline.role && <span className="small muted"> (imported {LANE_LABEL[baseline.role]})</span>}
             <select value={role} onChange={(e) => { const l = e.target.value as Lane; setRole(l); if (l === secondary) setSecondary('') }}>{LANES.map((l) => <option key={l} value={l}>{LANE_LABEL[l]}</option>)}</select>
           </label>
@@ -678,10 +712,22 @@ export function CoachesPage({ scope = USER_SCOPE }: { scope?: Scope }) {
   const del = useMutation({ mutationFn: (id: number) => api(`${scope.api}/coaches/${id}`, { method: 'DELETE' }), onSuccess: invalidate })
   function reset() { setEditing(null); setName(''); setDraft(5); setSynergy(5) }
   function edit(c: Coach) { setEditing(c); setName(c.name); setDraft(c.draft); setSynergy(c.synergy) }
+  const defaultCoaches = (coaches.data ?? []).filter((c) => c.is_default)
+  const coachRow = (c: Coach) => (
+    <div key={c.id} className="list-row">
+      <span>{c.name} — Draft {c.draft}, Synergy {c.synergy} {c.is_default && !scope.defaults && <span className="badge">default</span>} <PublicBadge item={c} /></span>
+      {c.is_default === scope.defaults && <span className="row">
+        <button className="ghost small" onClick={() => edit(c)}>Edit</button>
+        {!scope.defaults && <ShareButton kind="coaches" item={c} />}
+        <button className="ghost small danger" onClick={() => confirmDelete(scope, c.name) && del.mutate(c.id)}>Delete</button>
+      </span>}
+    </div>
+  )
 
   return (
     <div className="stack">
       <h1>{scope.defaults ? 'Default coaches' : 'Coaches'}</h1>
+      {!scope.defaults && <PublicCoachesBrowser />}
       <p className="muted">Draft makes your favourable lane matchups stronger in the match simulation. Synergy strengthens team cohesion (lane assists and playstyle bonuses).</p>
       <form className="card stack" onSubmit={(e) => { e.preventDefault(); save.mutate() }}>
         <h2>{editing ? 'Edit' : 'New'}{scope.defaults ? ' default' : ''} coach</h2>
@@ -695,15 +741,12 @@ export function CoachesPage({ scope = USER_SCOPE }: { scope?: Scope }) {
           {editing && <button type="button" className="ghost" onClick={reset}>Cancel</button>}
         </div>
       </form>
-      {(coaches.data ?? []).filter((c) => !scope.defaults || c.is_default).map((c) => (
-        <div key={c.id} className="list-row">
-          <span>{c.name} — Draft {c.draft}, Synergy {c.synergy} {c.is_default && !scope.defaults && <span className="badge">default</span>}</span>
-          {c.is_default === scope.defaults && <span className="row">
-            <button className="ghost small" onClick={() => edit(c)}>Edit</button>
-            <button className="ghost small danger" onClick={() => confirmDelete(scope, c.name) && del.mutate(c.id)}>Delete</button>
-          </span>}
-        </div>
-      ))}
+      {(coaches.data ?? []).filter((c) => c.is_default === scope.defaults).map(coachRow)}
+      {!scope.defaults && defaultCoaches.length > 0 && (
+        <CollapsibleSection title={`Default coaches (${defaultCoaches.length})`} storageKey="ldm_defaults_coaches">
+          {defaultCoaches.map(coachRow)}
+        </CollapsibleSection>
+      )}
       <p><Link to={`${scope.home}/teams`}>← {scope.defaults ? 'Default teams' : 'Teams'}</Link></p>
     </div>
   )
