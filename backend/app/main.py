@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from app.api import admin, auth, games, lobbies, management, meta, public, series
+from app.api import admin, auth, games, lobbies, management, meta, public, seasons, series
 from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine
 from app.core.dependencies import user_from_token
@@ -43,7 +43,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="League Draft Manager", version="1.0.0", lifespan=lifespan)
     app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True,
                        allow_methods=["*"], allow_headers=["*"])
-    for module in (auth, management, public, meta, lobbies, games, series, admin):
+    for module in (auth, management, public, meta, lobbies, games, series, seasons, admin):
         app.include_router(module.router, prefix=API_PREFIX)
 
     @app.get("/health")

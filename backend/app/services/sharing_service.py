@@ -155,7 +155,7 @@ def _tier_range(rank_min: str | None, rank_max: str | None) -> list[str] | None:
 
 def _public(model, user_id: int):
     return select(model).where(model.is_public.is_(True), model.owner_user_id.is_not(None),
-                               model.owner_user_id != user_id)
+                               model.owner_user_id != user_id, model.season_id.is_(None))
 
 
 STATS = ("aggr", "aware", "pos", "dmg", "cs")
@@ -293,7 +293,7 @@ def search_teams(db: Session, user_id: int, *, q: str | None = None, style: str 
 # -------------------------------------------------------------------- copy
 def _get_public(db: Session, model, obj_id: int, user_id: int):
     obj = db.get(model, obj_id)
-    if obj is None or not obj.is_public or obj.owner_user_id is None:
+    if obj is None or not obj.is_public or obj.owner_user_id is None or obj.season_id is not None:
         raise not_found()
     if obj.owner_user_id == user_id:
         raise bad_request("That's already yours.")

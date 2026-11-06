@@ -588,6 +588,8 @@ export interface GameState {
   series: SeriesState | null
   /** set once the game is completed */
   rematch: RematchState | null
+  /** set when the game is a season fixture's */
+  season?: GameSeasonInfo | null
 }
 
 export interface LobbySummary {
@@ -854,3 +856,199 @@ export type PublicKind = 'players' | 'coaches' | 'teams'
 
 /** Search filters as query params: empty values are left out; arrays repeat the param. */
 export type SearchFilters = Record<string, string | number | (string | number)[] | null | undefined>
+
+// ---------------------------------------------------------------- seasons
+export type SeasonStatus = 'SETUP' | 'PLAYER_DRAFT' | 'REGULAR' | 'PLAYOFFS' | 'COMPLETED' | 'CANCELLED'
+export type CpuStrength = 'WEAKER' | 'EVEN' | 'STRONGER'
+export type SeasonFormat = 'ROUND_ROBIN' | 'SWISS'
+export type RosterMode = 'BYO' | 'DRAFT'
+
+/** How a season's competition runs (the match rules are its `rules`). */
+export interface SeasonOptions {
+  team_count: number
+  /** teams users manage; the CPU runs the rest */
+  human_slots: number
+  /** round robin: everyone plays everyone twice */
+  rr_double: boolean
+  regular_series: SeriesFormat
+  cpu_strength: CpuStrength
+  /** single elimination after the round robin (0: none); a Swiss stage always feeds a bracket of half the field */
+  playoff_size: number
+  playoff_series: SeriesFormat
+  final_series: SeriesFormat
+  /** Swiss only: wins to qualify / losses to go out */
+  swiss_wins?: number
+  swiss_losses?: number
+}
+
+export interface SeasonTeamRef {
+  /** the SeasonTeam id */
+  id: number
+  /** the season's frozen copy of the team */
+  team_id: number
+  name: string
+  logo: string
+  seed: number
+  is_cpu: boolean
+  is_you: boolean
+  manager: { id: number; username: string } | null
+}
+
+export interface SeasonTeamSummary extends SeasonTeamRef {
+  /** sum of the five players' stat totals */
+  rating: number
+}
+
+export interface StandingRecord {
+  seed: number
+  rank: number
+  played: number
+  wins: number
+  losses: number
+  game_wins: number
+  game_losses: number
+  game_diff: number
+  /** the current run: "W3", "L1" ("" before any match) */
+  streak: string
+  /** the last five results, oldest first */
+  form: ('W' | 'L')[]
+}
+
+export interface StandingRow extends StandingRecord {
+  team: SeasonTeamRef
+  /** Swiss stage: decided yet? */
+  swiss_status: 'QUALIFIED' | 'ELIMINATED' | null
+  /** out of the season: missed the playoffs, out of the Swiss stage or knocked out */
+  eliminated: boolean
+}
+
+export interface SeasonMatchGame {
+  game_id: number
+  game_number: number
+  status: GameStatus
+  winner_team_id: number | null
+}
+
+export interface SeasonMatch {
+  id: number
+  stage: SeasonStage
+  round: number
+  slot: number
+  format: SeriesFormat
+  status: 'SCHEDULED' | 'LIVE' | 'COMPLETED'
+  /** how it was decided: played through the draft, or by the CPU for both sides */
+  played_mode: 'LIVE' | 'AUTO' | null
+  home: SeasonTeamRef | null
+  away: SeasonTeamRef | null
+  home_score: number
+  away_score: number
+  winner_team_id: number | null
+  series_id: number | null
+  live_game_id: number | null
+  latest_game_id: number | null
+  games: SeasonMatchGame[]
+  /** a user manages one of the teams */
+  has_manager: boolean
+  /** you manage one of the teams */
+  yours: boolean
+  completed_at: string | null
+}
+
+export interface SeasonSummary {
+  id: number
+  name: string
+  code: string
+  status: SeasonStatus
+  roster_mode: RosterMode
+  format: SeasonFormat
+  team_count: number
+  teams_entered: number
+  current_round: number
+  /** rounds in the current stage (Swiss: the most it can take) */
+  total_rounds: number
+  /** the stage being played; null before the start and after the end */
+  stage: SeasonStage | null
+  created_by: { id: number; username: string } | null
+  is_creator: boolean
+  /** your SeasonTeam id */
+  my_team_id: number | null
+  winner_team_id: number | null
+  created_at: string | null
+  started_at: string | null
+  completed_at: string | null
+}
+
+/** GET /seasons/{id}: the season hub */
+export interface Season extends SeasonSummary {
+  rules: RulesetSettings & { ruleset: string }
+  options: SeasonOptions
+  ruleset_name: string
+  stage_label: string
+  bracket: SeasonBracket | null
+  my_team_eliminated: boolean
+  teams: SeasonTeamSummary[]
+  standings: StandingRow[]
+  /** the current round's matches */
+  round_matches: SeasonMatch[]
+  my_match: SeasonMatch | null
+  /** current round matches with a manager that are still unplayed */
+  waiting_on_managers: number
+  can_start: boolean
+  can_advance: boolean
+  champion: SeasonTeamRef | null
+}
+
+export type SeasonStage = 'REGULAR' | 'SWISS' | 'PLAYOFF'
+
+export interface SeasonBracketRound {
+  round: number
+  /** "Quarterfinals", "Semifinals", "Final" */
+  name: string
+  /** matches the round will have */
+  slots: number
+  format: SeriesFormat
+  /** drawn so far, in bracket order (empty until the round starts) */
+  matches: SeasonMatch[]
+}
+
+export interface SeasonBracket {
+  size: number
+  rounds: SeasonBracketRound[]
+}
+
+export interface SeasonSchedule {
+  current_round: number
+  stage: SeasonStage
+  rounds: { stage: SeasonStage; stage_label: string; round: number; name: string; current: boolean; matches: SeasonMatch[] }[]
+}
+
+export interface SeasonPlayerStats {
+  games: number
+  kills: number
+  deaths: number
+  assists: number
+  cs: number
+  gold: number
+  damage_dealt: number
+  mvps: number
+  kda: number
+}
+
+export interface SeasonTeamDetail {
+  team: SeasonTeamRef
+  view: Team
+  record: (StandingRecord & { team: number }) | null
+  matches: SeasonMatch[]
+  /** by player id; empty while the season hides player data */
+  player_stats: Record<string, SeasonPlayerStats>
+}
+
+/** On a game that belongs to a season fixture. */
+export interface GameSeasonInfo {
+  season_id: number
+  season_name: string
+  match_id: number
+  stage: string
+  round: number
+  format: SeriesFormat
+}

@@ -14,6 +14,8 @@ class Coach(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     owner_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    # set on the frozen copies a season owns (models/season.py); hidden from the normal management pages
+    season_id: Mapped[int | None] = mapped_column(ForeignKey("seasons.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(40))
     draft: Mapped[int] = mapped_column(Integer)
     synergy: Mapped[int] = mapped_column(Integer)
@@ -39,6 +41,8 @@ class Player(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     owner_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    # set on the frozen copies a season owns (models/season.py); hidden from the normal management pages
+    season_id: Mapped[int | None] = mapped_column(ForeignKey("seasons.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(40))
     role: Mapped[str] = mapped_column(String(10))
     secondary_role: Mapped[str | None] = mapped_column(String(10))   # optional second lane they can be rostered in
@@ -107,6 +111,8 @@ class Team(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     owner_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    # set on the frozen copies a season owns (models/season.py); hidden from the normal management pages
+    season_id: Mapped[int | None] = mapped_column(ForeignKey("seasons.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(40))
     logo: Mapped[str] = mapped_column(String(8), default="")
     region: Mapped[str] = mapped_column(String(16), default="")

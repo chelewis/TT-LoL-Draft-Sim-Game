@@ -42,9 +42,11 @@ export function useGameSocket(gameId: number | undefined, onEvent: (event: Socke
           /* ignore malformed frames */
         }
       }
-      socket.onclose = () => {
+      socket.onclose = (event) => {
         setConnected(false)
         window.clearInterval(ping)
+        // 4403: not a player in this game (a season member watching it); retrying won't change that
+        if (event.code === 4403) closed = true
         if (!closed) {
           retry += 1
           timer = window.setTimeout(connect, Math.min(1000 * 2 ** retry, 15000))

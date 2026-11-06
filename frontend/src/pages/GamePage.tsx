@@ -92,7 +92,17 @@ function GameScreen({ gameId }: { gameId: number }) {
 
   return (
     <div className="stack">
-      {!connected && game.status !== 'COMPLETED' && game.status !== 'CANCELLED' && (
+      {game.season && (
+        <div className="notice row between wrap season-strip">
+          <span>
+            <strong>{game.season.season_name}</strong>
+            <span className="muted small"> · Round {game.season.round}{game.series ? ` · Game ${game.series.game_number}` : ''}</span>
+          </span>
+          <Link to={`/seasons/${game.season.season_id}`}>← Back to the season</Link>
+        </div>
+      )}
+      {/* season members can watch games they don't play in: those have no live updates for them */}
+      {!connected && game.you.team && game.status !== 'COMPLETED' && game.status !== 'CANCELLED' && (
         <div className="notice">Reconnecting to live updates…</div>
       )}
       {game.status !== 'CANCELLED' && <SideBanner game={game} hideResult={replaying} />}

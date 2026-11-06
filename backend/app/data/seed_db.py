@@ -38,7 +38,8 @@ def seed_database(db: Session, data: SeedData | None = None) -> None:
     seed_tags(db)
 
     # seed defaults only into an empty database: admins may since have edited or deleted any of them
-    if any(db.scalar(select(func.count()).select_from(m).where(m.owner_user_id.is_(None)))
+    if any(db.scalar(select(func.count()).select_from(m).where(m.owner_user_id.is_(None),
+                                                                    m.season_id.is_(None)))
            for m in (Team, Player, Coach)):
         return
 

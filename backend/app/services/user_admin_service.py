@@ -12,7 +12,8 @@ from app.models import Game, Player, Team, User
 
 
 def _counts_by_owner(db: Session, model) -> dict[int, int]:
-    rows = db.execute(select(model.owner_user_id, func.count()).where(model.owner_user_id.is_not(None))
+    rows = db.execute(select(model.owner_user_id, func.count()).where(model.owner_user_id.is_not(None),
+                                                                    model.season_id.is_(None))
                       .group_by(model.owner_user_id))
     return {uid: n for uid, n in rows}
 

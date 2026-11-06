@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, object_session
 
 from app.core.clock import iso, utcnow
@@ -131,12 +131,13 @@ def team_view(db: Session, team: Team) -> dict:
 
 # ------------------------------------------------------------ access helpers
 def _visible(model, user_id: int):
-    return or_(model.owner_user_id == user_id, model.owner_user_id.is_(None))
+    # season copies (season_id set) belong to their season and never show up on the management pages
+    return and_(or_(model.owner_user_id == user_id, model.owner_user_id.is_(None)), model.season_id.is_(None))
 
 
 def get_visible(db: Session, model, obj_id: int, user_id: int | None):
     obj = db.get(model, obj_id)
-    if obj is None or (obj.owner_user_id is not None and obj.owner_user_id != user_id):
+    if obj is None or obj.season_id is not None or (obj.owner_user_id is not None and obj.owner_user_id != user_id):
         raise not_found()
     return obj
 
@@ -152,7 +153,8 @@ def get_owned(db: Session, model, obj_id: int, user_id: int | None):
 def check_limit(db: Session, model, user_id: int | None, limit: int, label: str) -> None:
     if user_id is None:   # default content has no per-user limit
         return
-    count = db.scalar(select(func.count()).select_from(model).where(model.owner_user_id == user_id))
+    count = db.scalar(select(func.count()).select_from(model).where(model.owner_user_id == user_id,
+                                                                    model.season_id.is_(None)))
     if count >= limit:
         raise conflict(f"You have reached the limit of {limit} {label}.")
 
@@ -333,7 +335,8 @@ def _validate_team(db: Session, user_id: int | None, body: TeamIn, team_id: int 
         if not player.plays(lane) and not CFG["allow_off_role_roster"]:
             roles = "/".join(r for r in (player.role, player.secondary_role) if r)
             raise bad_request(f"{player.name} is a {roles} player and cannot play {lane}.")
-    duplicate = db.scalar(select(Team).where(Team.owner_user_id == user_id, Team.name == body.name))
+    duplicate = db.scalar(select(Team).where(Team.owner_user_id == user_id, Team.name == body.name,
+                                               Team.season_id.is_(None)))
     if duplicate is not None and duplicate.id != team_id:
         raise conflict("You already have a team with that name.")
 
@@ -381,9 +384,10 @@ PLAYER_COPY_FIELDS = (
 )
 
 
-def copy_player(original: Player, user_id: int) -> Player:
-    """A private copy of a player for this user, Riot link and import seal included (so it stays verifiable)."""
-    copy = Player(owner_user_id=user_id, **{f: getattr(original, f) for f in PLAYER_COPY_FIELDS})
+def copy_player(original: Player, user_id: int | None, season_id: int | None = None) -> Player:
+    """A private copy of a player for this user, Riot link and import seal included (so it stays verifiable).
+    `season_id`: the copy is a season's frozen copy instead (models/season.py)."""
+    copy = Player(owner_user_id=user_id, season_id=season_id, **{f: getattr(original, f) for f in PLAYER_COPY_FIELDS})
     for field in ("riot_earned_tags", "playstyle_tags"):
         value = getattr(copy, field)
         setattr(copy, field, list(value) if value is not None else None)
@@ -410,7 +414,7 @@ def copy_team(db: Session, user_id: int, source: Team, name_suffix: str = " (cop
 
     base_name = f"{source.name}{name_suffix}"[:40]
     name, n = base_name, 2
-    while db.scalar(select(Team).where(Team.owner_user_id == user_id, Team.name == name)):
+    while db.scalar(select(Team).where(Team.owner_user_id == user_id, Team.name == name, Team.season_id.is_(None))):
         name, n = f"{base_name[:36]} {n}", n + 1
     team = Team(owner_user_id=user_id, name=name[:40], logo=source.logo, region=source.region,
                 fanbase=source.fanbase, style1=source.style1, style2=source.style2,
