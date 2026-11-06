@@ -26,7 +26,11 @@ def test_defaults(alice, bob, default_team_ids):
     lobby, gid = start(alice, bob, default_team_ids)
     assert lobby["settings"] == {"hide_player_data": False, "bans_enabled": True, "timers_enabled": True,
                                  "pick_seconds": 30, "ban_seconds": 30, "mode": "MULTI",
-                                 "series_format": "BO1", "fearless": False}
+                                 "series_format": "BO1", "fearless": False,
+                                 "max_rank": None, "max_player_total": None, "max_team_total": None,
+                                 "duplicate_clause": False, "mirror_clause": False,
+                                 "ruleset": "ANYTHING_GOES", "ruleset_name": "Anything Goes",
+                                 "ruleset_modified": False}
     assert lobby["series"] is None
     draft = alice.get(f"/games/{gid}/draft").json()
     assert len(draft["actions"]) == 20 and draft["timers_enabled"] and draft["expires_at"]

@@ -18,7 +18,8 @@ from sqlalchemy.orm import Session
 from app.core.clock import iso, utcnow
 from app.core.errors import bad_request, conflict, forbidden, not_found
 from app.game.comfort import comfort_modifier, comfort_tier
-from app.game.config import DRAFT_CONFIG, GAME_CONFIG, LANES, SIMULATION_CONFIG, simulation_config
+from app.game.config import (DEFAULT_RULESET, DRAFT_CONFIG, GAME_CONFIG, LANES, LOBBY_RULESETS_BY_KEY,
+                             SIMULATION_CONFIG, simulation_config)
 from app.game import draft_ai, lane_preview
 from app.game.lane_phase import BOT_LANE
 from app.game.draft_engine import DraftError, DraftState, new_draft, rebuild_draft
@@ -30,7 +31,7 @@ from app.game.state import damage_balance_penalty, damage_profile
 from app.game.win_rates import ally_delta
 from app.models import (ChatMessage, Champion, DraftActionRow, Game, GameTeamSnapshot, Lobby, MatchEventRow, MatchResultRow,
                         Series, Team, TeamLineup, User)
-from app.services import matchup_service, simulation_settings_service
+from app.services import lobby_rules, matchup_service, simulation_settings_service
 from app.services import team_management_service as teams
 from app.services.analytics import track
 
@@ -141,9 +142,7 @@ def _new_code(db: Session) -> str:
     raise RuntimeError("Could not generate a unique lobby code")
 
 
-DEFAULT_SETTINGS = {"hide_player_data": False, "bans_enabled": True, "timers_enabled": True,
-                    "pick_seconds": DRAFT_CONFIG["timer_seconds"], "ban_seconds": DRAFT_CONFIG["timer_seconds"],
-                    "series_format": "BO1", "fearless": False}
+DEFAULT_SETTINGS = {"ruleset": DEFAULT_RULESET, **LOBBY_RULESETS_BY_KEY[DEFAULT_RULESET]["settings"]}
 SERIES_WINS = {"BO3": 2, "BO5": 3}      # wins needed to take the series
 
 
@@ -267,6 +266,14 @@ def select_team(db: Session, game: Game, user: User, team_id: int, requested_sid
     issues = teams.team_issues(team)
     if issues:
         raise bad_request("That team cannot be used yet: " + "; ".join(issues))
+    settings = db.get(Lobby, game.lobby_id).settings or {}
+    view = teams.team_view(db, team)
+    other_id = game.red_team_id if side == "BLUE" else game.blue_team_id
+    other = db.get(Team, other_id) if other_id else None
+    broken = lobby_rules.team_rule_issues(view, settings)
+    broken += lobby_rules.mirror_issues(view, teams.team_view(db, other) if other else None, settings)
+    if broken:
+        raise bad_request("That team breaks this lobby's rules: " + "; ".join(broken))
     if side == "BLUE":
         game.blue_team_id, game.blue_ready = team.id, False
     else:
@@ -279,11 +286,31 @@ def select_team(db: Session, game: Game, user: User, team_id: int, requested_sid
     return [_event(game, "TEAM_SELECTED", team=side)]
 
 
+def _check_rules_before_draft(db: Session, game: Game) -> None:
+    """A team can be edited after it was chosen: check both again against the lobby's restrictions."""
+    settings = db.get(Lobby, game.lobby_id).settings or {}
+    views = {}
+    for side, team_id in (("Blue", game.blue_team_id), ("Red", game.red_team_id)):
+        team = db.get(Team, team_id) if team_id else None
+        if team is None:
+            continue
+        views[side] = teams.team_view(db, team)
+        broken = lobby_rules.team_rule_issues(views[side], settings)
+        if broken:
+            raise conflict(f"The {side} team no longer meets this lobby's rules: " + "; ".join(broken))
+    if len(views) == 2:
+        broken = lobby_rules.mirror_issues(views["Red"], views["Blue"], settings)
+        if broken:
+            raise conflict("The teams no longer meet this lobby's rules: " + "; ".join(broken))
+
+
 def set_ready(db: Session, game: Game, user: User, ready: bool = True) -> Events:
     side = side_of(game, user.id)
     if game.status != "READY_CHECK":
         raise conflict("Both players must choose a team before readying up." if not (game.is_solo or game.vs_cpu)
                        else "Choose a team for both sides before starting.")
+    if ready:
+        _check_rules_before_draft(db, game)
     if game.is_solo or game.vs_cpu:   # one person (and maybe the CPU): starting means both sides are ready
         game.blue_ready = game.red_ready = ready
         events = [_event(game, "PLAYER_READY", team="BLUE", ready=ready), _event(game, "PLAYER_READY", team="RED", ready=ready)]
@@ -1045,10 +1072,18 @@ def game_mode(game: Game) -> str:
 
 def _settings_view(db: Session, game: Game) -> dict:
     series = db.get(Series, game.series_id) if game.series_id else None
-    return {"hide_player_data": game.hide_player_data, "bans_enabled": game.bans_enabled,
+    stored = db.get(Lobby, game.lobby_id).settings or {}
+    view = {"hide_player_data": game.hide_player_data, "bans_enabled": game.bans_enabled,
             "timers_enabled": game.timers_enabled, "pick_seconds": game.pick_seconds,
             "ban_seconds": game.ban_seconds, "mode": game_mode(game),
-            "series_format": series.format if series else "BO1", "fearless": bool(series and series.fearless)}
+            "series_format": series.format if series else "BO1", "fearless": bool(series and series.fearless),
+            **lobby_rules.rules_of(stored)}
+    rs = lobby_rules.ruleset(stored.get("ruleset"))
+    # single player modes always show player data, so a preset's hidden data isn't an edit there
+    ignore = ("hide_player_data",) if game.is_solo or game.vs_cpu else ()
+    view.update(ruleset=rs["key"], ruleset_name=rs["name"],
+                ruleset_modified=lobby_rules.is_modified({**view, "ruleset": rs["key"]}, ignore))
+    return view
 
 
 def game_state(db: Session, game: Game, viewer: User) -> dict:

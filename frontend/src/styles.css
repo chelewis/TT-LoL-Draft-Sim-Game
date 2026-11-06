@@ -1037,3 +1037,14 @@ label:has(.field-help), h2:has(.field-help) { position: relative; }
 }
 .field-help .tip:hover .info-icon, .field-help .tip:focus-visible .info-icon { color: var(--gold); background: rgba(242, 193, 78, 0.15); }
 h2 .field-help .tip-body { font-weight: 400; }
+
+/* ---- public browser (Teams / Players / Coaches): expandable search of other users' shared items ---- */
+.grid.three { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.public-browser > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; }
+.public-browser > summary::-webkit-details-marker { display: none; }
+.public-browser > summary::before { content: '▸'; color: var(--muted); transition: transform 0.15s; }
+.public-browser[open] > summary::before { transform: rotate(90deg); }
+.public-browser > summary h2 { margin: 0; }
+.public-browser .row > label { flex: 1; min-width: 0; }
+.public-browser input[type='number'] { width: 100%; }
+@media (prefers-reduced-motion: reduce) { .public-browser > summary::before { transition: none; } }

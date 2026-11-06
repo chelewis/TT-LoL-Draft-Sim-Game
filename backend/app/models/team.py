@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.clock import utcnow
@@ -17,6 +17,9 @@ class Coach(Base):
     name: Mapped[str] = mapped_column(String(40))
     draft: Mapped[int] = mapped_column(Integer)
     synergy: Mapped[int] = mapped_column(Integer)
+    # shared publicly: other users can find it and copy it into their own account
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), index=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -67,6 +70,9 @@ class Player(Base):
     playstyle_tags: Mapped[list | None] = mapped_column(JSONType)
     # signed record of what the Riot import produced (services/import_seal.py); copy it with the player
     riot_seal: Mapped[str | None] = mapped_column(Text)
+    # shared publicly: other users can find it and copy it into their own account
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), index=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -110,6 +116,9 @@ class Team(Base):
     focus1: Mapped[str | None] = mapped_column(String(10))
     focus2: Mapped[str | None] = mapped_column(String(10))
     coach_id: Mapped[int | None] = mapped_column(ForeignKey("coaches.id", ondelete="SET NULL"))
+    # shared publicly: other users can find it and copy it into their own account
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), index=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 

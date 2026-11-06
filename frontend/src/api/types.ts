@@ -213,6 +213,10 @@ export interface Player {
   stat_budget: number             // this player's soft stat ceiling (higher for high-rank Riot imports)
   over_budget_by: number
   is_default: boolean
+  /** shared publicly (others can find and copy it) */
+  is_public?: boolean
+  /** why the owner can't make it public (empty when they can) */
+  share_issues?: string[]
   tags?: PlaystyleTag[]           // playstyle tags in effect (only on Riot imports)
   earned_tags?: PlaystyleTag[]    // every tag the Riot import earned, to choose from in the editor
   riot?: {
@@ -363,6 +367,7 @@ export interface Coach {
   draft: number
   synergy: number
   is_default: boolean
+  is_public?: boolean
 }
 
 export interface OverBudgetPlayer {
@@ -386,9 +391,15 @@ export interface Team {
   roster: Record<Lane, Player | HiddenPlayer | null>
   selectable?: boolean
   issues?: string[]
+  /** with ?game_id: why the team breaks that lobby's restrictions (empty when allowed) */
+  rule_issues?: string[]
+  /** with ?game_id: why the team can't be chosen for each side, given the other side's team (mirror clause) */
+  mirror_issues?: Record<Side, string[]>
   over_budget: boolean
   over_budget_players: OverBudgetPlayer[]
   is_default?: boolean
+  is_public?: boolean
+  share_issues?: string[]
   hidden?: boolean
 }
 
@@ -402,6 +413,50 @@ export interface LobbySettings {
   series_format: SeriesFormat
   /** fearless draft: champions picked earlier in a series can't be picked or banned again */
   fearless: boolean
+  /** team restrictions: every player a ranked Riot import at or below this tier; stat total caps */
+  max_rank: string | null
+  max_player_total: number | null
+  max_team_total: number | null
+  /** no Riot account (or hand-made player name) twice on one team */
+  duplicate_clause: boolean
+  /** no player on both teams */
+  mirror_clause: boolean
+  ruleset: string
+  ruleset_name: string
+  /** the creator changed some options from the ruleset's preset */
+  ruleset_modified: boolean
+}
+
+/** Options a ruleset fills in on the create-lobby form. */
+export interface RulesetSettings {
+  hide_player_data: boolean
+  bans_enabled: boolean
+  timers_enabled: boolean
+  pick_seconds: number
+  ban_seconds: number
+  series_format: SeriesFormat
+  fearless: boolean
+  max_rank: string | null
+  max_player_total: number | null
+  max_team_total: number | null
+  /** no Riot account (or hand-made player name) twice on one team */
+  duplicate_clause: boolean
+  /** no player on both teams */
+  mirror_clause: boolean
+}
+
+export interface Ruleset {
+  key: string
+  name: string
+  description: string
+  settings: RulesetSettings
+}
+
+/** GET /lobbies/rulesets */
+export interface RulesetList {
+  rulesets: Ruleset[]
+  rank_tiers: string[]
+  default: string
 }
 
 export type SeriesFormat = 'BO1' | 'BO3' | 'BO5'
@@ -770,3 +825,21 @@ export interface TeamInsightsRequest {
   coach_id: number | null
   roster: Partial<Record<Lane, number>>
 }
+
+/** A public item found by search: who shared it and when. */
+export type Shared<T> = T & { owner: string; published_at: string | null }
+
+/** Public team search results also carry the roster's stat total and average rank tier (0 = Iron). */
+export type SharedTeam = Shared<Team> & { stat_total: number; average_rank: number | null }
+
+export interface SearchPage<T> {
+  total: number
+  offset: number
+  limit: number
+  items: T[]
+}
+
+export type PublicKind = 'players' | 'coaches' | 'teams'
+
+/** Search filters as query params: empty values are left out; arrays repeat the param. */
+export type SearchFilters = Record<string, string | number | (string | number)[] | null | undefined>

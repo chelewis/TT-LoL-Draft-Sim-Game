@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { championRoles, comfortTier, isOffRole, editedFieldsText, importCheckBadge, draftRules, isSolo, formatDuration, formatMetric, isSoloSource, matchupText, overBudgetNotice, rankLabel, averageRank, rankValue, teamRating, remainingSeconds, riotSourceLabel, riotSourceTag, roleLabel, scalingLabel } from './format'
+import { championRoles, comfortTier, isOffRole, editedFieldsText, importCheckBadge, draftRules, isSolo, lobbyLimits, rulesetLabel, formatDuration, formatMetric, isSoloSource, matchupText, overBudgetNotice, rankLabel, averageRank, rankValue, teamRating, remainingSeconds, riotSourceLabel, riotSourceTag, roleLabel, scalingLabel } from './format'
 import type { Lane } from '../api/types'
 
 describe('scalingLabel', () => {
@@ -34,6 +34,22 @@ describe('draftRules', () => {
     expect(draftRules({ bans_enabled: true, timers_enabled: true, pick_seconds: 30, ban_seconds: 20 })).toBe('Bans and picks · 30s per pick, 20s per ban')
     expect(draftRules({ bans_enabled: false, timers_enabled: true, pick_seconds: 45, ban_seconds: 20 })).toBe('Picks only (no bans) · 45s per pick')
     expect(draftRules({ bans_enabled: true, timers_enabled: false, pick_seconds: 30, ban_seconds: 30 })).toBe('Bans and picks · no timers')
+  })
+})
+
+describe('lobby rulesets', () => {
+  it('labels the ruleset', () => {
+    expect(rulesetLabel({ ruleset_name: 'Pro', ruleset_modified: false })).toBe('Pro')
+    expect(rulesetLabel({ ruleset_name: 'Pro', ruleset_modified: true })).toBe('Pro (modified)')
+    expect(rulesetLabel({})).toBe('Anything Goes')
+  })
+  it('describes the team restrictions', () => {
+    expect(lobbyLimits({ max_rank: null, max_player_total: null, max_team_total: null })).toBe('No team restrictions')
+    expect(lobbyLimits({ max_rank: 'DIAMOND', max_player_total: 36, max_team_total: 170 })).toBe('Diamond and below · players ≤ 36 · team ≤ 170')
+    expect(lobbyLimits({ max_rank: 'CHALLENGER', max_player_total: null, max_team_total: null })).toBe('Ranked players only')
+    expect(lobbyLimits({ max_rank: null, max_player_total: 30, max_team_total: null })).toBe('Players ≤ 30')
+    expect(lobbyLimits({ max_rank: null, max_player_total: null, max_team_total: null, duplicate_clause: true, mirror_clause: true }))
+      .toBe('No duplicate players · no mirror players')
   })
 })
 

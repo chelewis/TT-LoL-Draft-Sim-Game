@@ -8,6 +8,7 @@ from app.core.dependencies import get_current_user
 from app.models import User
 from app.schemas.game import LobbyCreate, SideSelect, TeamSelect
 from app.services import game_service as svc
+from app.services import lobby_rules
 from app.websocket.manager import manager
 
 router = APIRouter(prefix="/lobbies", tags=["lobbies"])
@@ -20,6 +21,12 @@ async def create_lobby(body: LobbyCreate | None = None, db: Session = Depends(ge
     mode = (body or LobbyCreate()).mode
     lobby, game = svc.create_lobby(db, user, settings.model_dump(), mode)
     return svc.lobby_view(db, game, user)
+
+
+@router.get("/rulesets")
+def list_rulesets(_: User = Depends(get_current_user)):
+    """The ruleset presets for the create-lobby form, and the rank tiers in order."""
+    return lobby_rules.rulesets_view()
 
 
 @router.post("/{lobby_code}/join")

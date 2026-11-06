@@ -33,6 +33,42 @@ GAME_CONFIG: dict[str, Any] = {
     "draft": DRAFT_CONFIG,
 }
 
+def _ruleset(key: str, name: str, description: str, max_rank: str | None, max_player_total: int | None,
+             max_team_total: int | None, **draft: Any) -> dict[str, Any]:
+    settings = {"hide_player_data": False, "bans_enabled": True, "timers_enabled": True,
+                "pick_seconds": DRAFT_CONFIG["timer_seconds"], "ban_seconds": DRAFT_CONFIG["timer_seconds"],
+                "series_format": "BO1", "fearless": False,
+                "max_rank": max_rank, "max_player_total": max_player_total, "max_team_total": max_team_total,
+                "duplicate_clause": False, "mirror_clause": False}
+    return {"key": key, "name": name, "description": description, "settings": {**settings, **draft}}
+
+
+# Lobby rulesets: presets that fill in every lobby option. The creator can change any of them before creating
+# the lobby; the stored options are what's enforced, the ruleset key is only a label.
+# max_rank: every rostered player must be a ranked Riot import at or below this tier (unranked players fail).
+# max_player_total / max_team_total: caps on a player's stat total and on the five rostered players' sum.
+# duplicate_clause: a team can't roster the same Riot account twice (hand-made players: the same name).
+# mirror_clause: the two teams in a lobby can't both field the same player (same account, or same name).
+LOBBY_RULESETS: list[dict[str, Any]] = [
+    _ruleset("ANYTHING_GOES", "Anything Goes", "No team restrictions. Any team can play.", None, None, None),
+    _ruleset("PRO", "Pro", "Ranked players of any tier. Players up to 48 stats, teams up to 200.",
+             "CHALLENGER", 48, 200),
+    _ruleset("APEX", "Apex", "Grandmaster and below. Players up to 40 stats, teams up to 185.",
+             "GRANDMASTER", 40, 185),
+    _ruleset("HIGH_ELO", "High Elo", "Diamond and below. Players up to 36 stats, teams up to 170.",
+             "DIAMOND", 36, 170),
+    _ruleset("MID_ELO", "Mid Elo", "Platinum and below. Players up to 32 stats, teams up to 155.",
+             "PLATINUM", 32, 155),
+    _ruleset("LOW_ELO", "Low Elo", "Bronze and below. Players up to 28 stats, teams up to 135.",
+             "BRONZE", 28, 135),
+    _ruleset("TOURNAMENT", "Tournament", "Pro limits, played as a Fearless best of 3 with hidden player data. "
+             "No player twice on a team, and no player on both teams.",
+             "CHALLENGER", 48, 200, series_format="BO3", fearless=True, hide_player_data=True,
+             duplicate_clause=True, mirror_clause=True),
+]
+LOBBY_RULESETS_BY_KEY = {r["key"]: r for r in LOBBY_RULESETS}
+DEFAULT_RULESET = "ANYTHING_GOES"
+
 MANAGEMENT_CONFIG: dict[str, Any] = {
     "player_stat_budget": 32,        # soft ceiling for custom players
     # ceiling for players imported from a ranked Riot account, by tier; anyone else gets player_stat_budget

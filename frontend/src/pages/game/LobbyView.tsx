@@ -1,10 +1,11 @@
 import { useMutation } from '@tanstack/react-query'
+import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
-import type { GameState, Side } from '../../api/types'
+import type { GameState, Side, Team } from '../../api/types'
 import { ErrorNotice, Loading } from '../../components/common'
 import TeamCard from '../../components/TeamCard'
-import { draftRules, isCpu, isSolo, seriesLabel } from '../../lib/format'
+import { draftRules, isCpu, isSolo, lobbyLimits, rulesetLabel, seriesLabel } from '../../lib/format'
 import { useTeams } from '../../hooks/useData'
 
 /** Single player: pick a team for each side from your own teams and the defaults, then start the draft.
@@ -12,7 +13,8 @@ import { useTeams } from '../../hooks/useData'
 function SoloLobby({ game, onChange }: { game: GameState; onChange: () => void }) {
   const cpu = isCpu(game)
   const navigate = useNavigate()
-  const teams = useTeams(true)
+  const teams = useTeams(true, game.game_id)
+  useRefetchOnPicks(game, teams.refetch)
   const choose = useMutation({
     mutationFn: ({ side, teamId }: { side: Side; teamId: number }) =>
       api(`/lobbies/${game.lobby_id}/team`, { body: { team_id: teamId, side } }),
@@ -40,6 +42,7 @@ function SoloLobby({ game, onChange }: { game: GameState; onChange: () => void }
           Draft: {draftRules(game.settings)}.
           {seriesLabel(game.settings) && <> Format: {seriesLabel(game.settings)}.</>}
         </p>
+        <p className="small muted">Ruleset: {rulesetLabel(game.settings)} · {lobbyLimits(game.settings)}</p>
         {cpu && (
           <div className="row wrap side-choice" role="radiogroup" aria-label="Your side">
             {(['BLUE', 'RED'] as Side[]).map((side) => (
@@ -71,11 +74,13 @@ function SoloLobby({ game, onChange }: { game: GameState; onChange: () => void }
                     key={t.id}
                     className={`pick-card ${chosen[side] === t.id ? 'selected' : ''}`}
                     onClick={() => choose.mutate({ side, teamId: t.id })}
-                    disabled={choose.isPending}
+                    disabled={choose.isPending || (chosen[side] !== t.id && teamIssues(t, side).length > 0)}
                     aria-pressed={chosen[side] === t.id}
+                    title={teamIssues(t, side).join('; ') || undefined}
                   >
                     <strong>{t.name}</strong>
                     <span className="muted small">{t.is_default ? 'Default team' : 'Your team'}</span>
+                    <RuleBadge issues={teamIssues(t, side)} />
                   </button>
                 ))}
               </div>
@@ -98,6 +103,24 @@ function SoloLobby({ game, onChange }: { game: GameState; onChange: () => void }
   )
 }
 
+/** Why a team can't be chosen for this side: the lobby's restrictions, plus players already on the other team. */
+function teamIssues(team: Team, side: Side | null): string[] {
+  return [...(team.rule_issues ?? []), ...(side ? team.mirror_issues?.[side] ?? [] : [])]
+}
+
+/** Shown on a team that breaks the lobby's restrictions (the reasons are in the card's tooltip). */
+function RuleBadge({ issues }: { issues: string[] }) {
+  if (!issues.length) return null
+  return <span className="badge badge-warn">⚠ Not allowed: {issues[0]}{issues.length > 1 ? ` (+${issues.length - 1} more)` : ''}</span>
+}
+
+/** The mirror clause depends on the other side's team: refresh the team list whenever either side's pick changes. */
+function useRefetchOnPicks(game: GameState, refetch: () => unknown) {
+  const blue = game.players.blue?.team_id ?? null
+  const red = game.players.red?.team_id ?? null
+  useEffect(() => { refetch() }, [blue, red, refetch])
+}
+
 export default function LobbyView({ game, onChange }: { game: GameState; onChange: () => void }) {
   if (isSolo(game) || isCpu(game)) return <SoloLobby game={game} onChange={onChange} />
   return <MultiLobby game={game} onChange={onChange} />
@@ -105,7 +128,8 @@ export default function LobbyView({ game, onChange }: { game: GameState; onChang
 
 function MultiLobby({ game, onChange }: { game: GameState; onChange: () => void }) {
   const navigate = useNavigate()
-  const teams = useTeams(true)
+  const teams = useTeams(true, game.game_id)
+  useRefetchOnPicks(game, teams.refetch)
   const me = game.you.team
   const mine = me === 'BLUE' ? game.players.blue : game.players.red
   const myTeamId = mine?.team_id ?? null
@@ -148,6 +172,7 @@ function MultiLobby({ game, onChange }: { game: GameState; onChange: () => void 
             Draft: {draftRules(game.settings)}
           </p>
           {seriesLabel(game.settings) && <p className="small muted">Format: {seriesLabel(game.settings)}</p>}
+          <p className="small muted">Ruleset: {rulesetLabel(game.settings)} · {lobbyLimits(game.settings)}</p>
         </div>
         <div className="code-box" aria-label="Lobby code">
           <span className="muted small">Lobby code</span>
@@ -183,10 +208,12 @@ function MultiLobby({ game, onChange }: { game: GameState; onChange: () => void 
               key={t.id}
               className={`pick-card ${myTeamId === t.id ? 'selected' : ''}`}
               onClick={() => choose.mutate(t.id)}
-              disabled={choose.isPending}
+              disabled={choose.isPending || (myTeamId !== t.id && teamIssues(t, me).length > 0)}
+              title={teamIssues(t, me).join('; ') || undefined}
             >
               <strong>{t.name}</strong>
               <span className="muted small">{t.is_default ? 'Default team' : 'Your team'}</span>
+              <RuleBadge issues={teamIssues(t, me)} />
               {t.over_budget && <span className="badge badge-warn">⚠ over stat ceiling</span>}
             </button>
           ))}
