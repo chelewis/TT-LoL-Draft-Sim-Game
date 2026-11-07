@@ -563,19 +563,75 @@ def autoplay_game(db: Session, game: Game, lookups: CpuLookups | None = None) ->
         db.flush()
         picks = load_draft(db, game).picks
         for side in ("BLUE", "RED"):
-            if game.blue_lineup_ready if side == "BLUE" else game.red_lineup_ready:
-                continue                     # keep a lineup the player already confirmed
-            lanes = _CpuContext(db, game, side, lookups).lineup(picks[side]) or dict(zip(LANES, picks[side]))
-            roster = snapshot_of(db, game, side)["roster"]
-            db.execute(delete(TeamLineup).where(TeamLineup.game_id == game.id, TeamLineup.team == side))
-            for lane, cid in lanes.items():
-                db.add(TeamLineup(game_id=game.id, team=side, lane=lane, champion_id=cid,
-                                  player_id=roster[lane]["id"]))
+            if not (game.blue_lineup_ready if side == "BLUE" else game.red_lineup_ready):
+                _cpu_lineup(db, game, side, picks[side], lookups)   # keeps a lineup the player already confirmed
         db.flush()
-        game.blue_lineup_ready = game.red_lineup_ready = True
         _transition(game, "READY_TO_SIMULATE")
     if game.status == "READY_TO_SIMULATE":
         events += run_simulation(db, game)
+    return events
+
+
+def _cpu_lineup(db: Session, game: Game, side: str, picks: list[int], lookups: CpuLookups | None = None) -> None:
+    """The CPU puts `side`'s picks in their best lanes and confirms the lineup."""
+    lanes = _CpuContext(db, game, side, lookups).lineup(picks) or dict(zip(LANES, picks))
+    roster = snapshot_of(db, game, side)["roster"]
+    db.execute(delete(TeamLineup).where(TeamLineup.game_id == game.id, TeamLineup.team == side))
+    for lane, cid in lanes.items():
+        db.add(TeamLineup(game_id=game.id, team=side, lane=lane, champion_id=cid, player_id=roster[lane]["id"]))
+    if side == "BLUE":
+        game.blue_lineup_ready = True
+    else:
+        game.red_lineup_ready = True
+
+
+def cpu_takes_over(db: Session, game: Game, side: str) -> Events:
+    """A season manager left their team: the CPU plays `side` from here on. The seat empties and the game becomes
+    a vs CPU game, so the remaining manager carries on against the CPU from wherever the game is. With both seats
+    empty there's nobody to play it live, and the season auto-plays it. The caller commits."""
+    if side == "BLUE":
+        game.blue_player_id = None
+    else:
+        game.red_player_id = None
+    game.vs_cpu = True
+    events = [_event(game, "PLAYER_LEFT", team=side)]
+    if game.blue_player_id is None and game.red_player_id is None:
+        return events
+    if game.status == "READY_CHECK":
+        if side == "BLUE":
+            game.blue_ready = True
+        else:
+            game.red_ready = True
+        if game.blue_ready and game.red_ready:
+            events += _start_draft(db, game)
+    elif game.status == "DRAFTING":
+        if draft_actions(game)[game.current_action].startswith(side):
+            # the CPU plays the turn it just inherited after its usual short "thinking" delay
+            game.action_expires_at = utcnow() + timedelta(seconds=DRAFT_CONFIG["cpu_delay_seconds"])
+            events.append(_action_started_event(game))
+    elif game.status == "LANE_ASSIGNMENT":
+        if not (game.blue_lineup_ready if side == "BLUE" else game.red_lineup_ready):
+            db.flush()
+            _cpu_lineup(db, game, side, load_draft(db, game).picks[side])
+            db.flush()
+        if game.blue_lineup_ready and game.red_lineup_ready:
+            _transition(game, "READY_TO_SIMULATE")
+            events += run_simulation(db, game)
+    elif game.status == "COMPLETED" and game.series_id is not None:
+        # between games of a series: the CPU is ready for the next one, and keeps its side when it lost
+        series = db.get(Series, game.series_id)
+        games = series_games(db, series.id)
+        tally = series_score(db, series, games)
+        if not (tally["complete"] or tally["abandoned"]) and not any(g.game_number > game.game_number for g in games):
+            loser = _other(_game_winner(db, game))
+            if side == "BLUE":
+                game.blue_next_ready = True
+            else:
+                game.red_next_ready = True
+            if side == loser:
+                game.next_loser_side = loser
+            if game.blue_next_ready and game.red_next_ready:
+                events += _start_next_game(db, game, loser)
     return events
 
 
@@ -878,7 +934,7 @@ def run_simulation(db: Session, game: Game) -> Events:
     log.info("game_id=%s simulation_version=%s seed=%s winner=%s", game.id, cfg["version"], game.seed, result.winner)
     events.append(_event(game, "SIMULATION_COMPLETED", winner=result.winner))
     if game.season_match_id is not None:
-        _season_matches().on_game_completed(db, game)
+        events += _season_matches().on_game_completed(db, game)
     return events
 
 

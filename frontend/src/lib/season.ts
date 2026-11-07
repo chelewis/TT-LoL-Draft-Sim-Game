@@ -115,3 +115,48 @@ export function seriesSummary(format: SeasonFormat, o: Pick<SeasonOptions, 'regu
 export function bracketSlots(round: SeasonBracketRound): (SeasonMatch | null)[] {
   return Array.from({ length: round.slots }, (_, i) => round.matches[i] ?? null)
 }
+
+// ------------------------------------------------------------ multiplayer
+/** A match between two managers' teams (not against the CPU). */
+export function vsManager(match: SeasonMatch): boolean {
+  return !!match.home && !!match.away && !match.home.is_cpu && !match.away.is_cpu
+}
+
+/**
+ * Letting the CPU play a match between two managers needs both to agree. From your side:
+ * SOLO: against the CPU, no agreement needed; ASKED: you asked, waiting for them;
+ * OFFERED: they asked, waiting for you; NONE: nobody has asked.
+ */
+export function autoSimState(match: SeasonMatch, myTeamId: number): 'SOLO' | 'NONE' | 'ASKED' | 'OFFERED' {
+  if (!vsManager(match)) return 'SOLO'
+  const home = match.home?.id === myTeamId
+  const mine = home ? match.auto_requested.home : match.auto_requested.away
+  const theirs = home ? match.auto_requested.away : match.auto_requested.home
+  return mine ? 'ASKED' : theirs ? 'OFFERED' : 'NONE'
+}
+
+/** Round deadline choices on the create page, in hours (0: none). */
+export const DEADLINE_CHOICES = [0, 12, 24, 48, 72, 168] as const
+
+export function deadlineLabel(hours: number): string {
+  if (!hours) return 'No deadline'
+  if (hours % 168 === 0) return hours === 168 ? '1 week' : `${hours / 168} weeks`
+  if (hours % 24 === 0) return hours === 24 ? '1 day' : `${hours / 24} days`
+  return `${hours} hours`
+}
+
+/** "3h 20m", "2d 4h", "5m"; "now" once it has passed. */
+export function timeUntil(iso: string, now: number = Date.now()): string {
+  const minutes = Math.floor((new Date(iso).getTime() - now) / 60000)
+  if (minutes <= 0) return 'now'
+  const days = Math.floor(minutes / 1440)
+  const hours = Math.floor((minutes % 1440) / 60)
+  if (days) return `${days}d ${hours}h`
+  if (hours) return `${hours}h ${minutes % 60}m`
+  return `${minutes}m`
+}
+
+/** The link a friend opens to join the season (signing in first if they need to). */
+export function seasonInviteLink(code: string, origin: string, base = '/'): string {
+  return `${origin}${base}seasons/join/${code}`
+}

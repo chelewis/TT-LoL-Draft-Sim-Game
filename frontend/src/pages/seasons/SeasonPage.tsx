@@ -2,15 +2,19 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../api/client'
-import type { Season, SeasonBracket, SeasonMatch, SeasonTeamRef, StandingRow } from '../../api/types'
+import type { Season, SeasonBracket, SeasonMatch, SeasonTeamRef, SeasonTeamSummary, StandingRow } from '../../api/types'
 import { ErrorNotice, Loading } from '../../components/common'
 import { useTeams } from '../../hooks/useData'
-import { refreshSeason, useSeason, useSeasonSchedule } from '../../hooks/useSeasons'
+import { refreshSeason, useSeason, useSeasonSchedule, useSeasonSocket } from '../../hooks/useSeasons'
 import { lobbyLimits, seriesShort } from '../../lib/format'
 import {
-  bracketSlots, CPU_STRENGTH_LABELS, diffLabel, formatLabel, myMatchAction, opponentOf, recordLabel, resultFor,
-  roundLabel, scoreLine, SEASON_STATUS_LABELS, seriesSummary, sortStandings, type StandingsKey,
+  autoSimState, bracketSlots, CPU_STRENGTH_LABELS, diffLabel, formatLabel, myMatchAction, opponentOf,
+  recordLabel, resultFor, roundLabel, scoreLine, SEASON_STATUS_LABELS, seasonInviteLink, seriesSummary, sortStandings,
+  timeUntil, vsManager, type StandingsKey,
 } from '../../lib/season'
+import { CopyButton } from '../game/LobbyView'
+
+const playing = (s: Season) => s.status === 'REGULAR' || s.status === 'PLAYOFFS'
 
 /** "Swiss stage · Round 2 of 3", or the bracket round's name in the playoffs. */
 function roundTitle(season: Season): string {
@@ -30,6 +34,7 @@ const TABS: { key: Tab; label: string }[] = [
 export default function SeasonPage() {
   const seasonId = Number(useParams().seasonId)
   const season = useSeason(seasonId)
+  useSeasonSocket(seasonId)
   const [tab, setTab] = useState<Tab>('overview')
 
   if (season.isLoading) return <Loading label="Loading season…" />
@@ -61,7 +66,12 @@ export default function SeasonPage() {
           {tab === 'standings' && <StandingsTable season={s} rows={s.standings} />}
           {tab === 'bracket' && s.bracket && <Bracket season={s} bracket={s.bracket} />}
           {tab === 'schedule' && <Schedule season={s} />}
-          {tab === 'teams' && <TeamsGrid season={s} />}
+          {tab === 'teams' && (
+            <div className="stack">
+              {s.human_slots > 1 && <ManagersCard season={s} />}
+              <TeamsGrid season={s} />
+            </div>
+          )}
         </>
       )}
     </div>
@@ -84,7 +94,14 @@ function SeasonHeader({ season }: { season: Season }) {
         {limits ? ` (${limits})` : ''}
         {season.rules.fearless ? ' · Fearless' : ''}
         {' · '}{season.created_by ? `run by ${season.created_by.username}` : ''}
+        {season.human_slots > 1 ? ` · ${season.managers} of ${season.human_slots} managers` : ''}
       </p>
+      {playing(season) && season.round_deadline_at && (
+        <p className="small">
+          ⏱ This round closes in <strong>{timeUntil(season.round_deadline_at)}</strong>
+          <span className="muted"> ({new Date(season.round_deadline_at).toLocaleString()}). Unplayed matches are auto-simmed then.</span>
+        </p>
+      )}
       <Link className="small" to="/seasons">← All seasons</Link>
     </div>
   )
@@ -115,66 +132,147 @@ function SetupPanel({ season }: { season: Season }) {
     },
   })
   const cpuCount = season.options.team_count - season.teams.length
+  const openSlots = season.human_slots - season.managers
 
   return (
-    <div className="grid two">
-      <div className="card stack">
-        <h3>Your team</h3>
-        {mine ? (
-          <>
-            <div className="list-row">
-              <strong>{mine.name}</strong>
-              <span className="muted small">rating {mine.rating}</span>
-            </div>
-            <p className="muted small">
-              A frozen copy of your team is entered: changes you make to the original from now on won't affect the season.
-            </p>
-            <ErrorNotice error={withdraw.error} />
-            <button className="ghost" onClick={() => withdraw.mutate()} disabled={withdraw.isPending}>Withdraw team</button>
-          </>
-        ) : (
-          <>
-            <p className="muted small">Choose one of your complete teams (or a default team). It must meet the season's team restrictions.</p>
-            <label>
-              Team
-              <select value={teamId} onChange={(e) => setTeamId(e.target.value ? Number(e.target.value) : '')}>
-                <option value="">Choose a team…</option>
-                {(teams.data ?? []).map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}{t.is_default ? ' (default)' : ''}</option>
-                ))}
-              </select>
-            </label>
-            {teams.data && teams.data.length === 0 && (
-              <p className="muted small">You have no complete teams yet. <Link to="/teams/new">Build one →</Link></p>
-            )}
-            <ErrorNotice error={enter.error} />
-            <button className="primary" onClick={() => enter.mutate()} disabled={!teamId || enter.isPending}>Enter team</button>
-          </>
-        )}
+    <div className="stack">
+      {season.human_slots > 1 && <InviteCard season={season} openSlots={openSlots} />}
+      <div className="grid two">
+        <div className="card stack">
+          <h3>Your team</h3>
+          {!mine && season.managers >= season.human_slots ? (
+            <p className="muted small">Every manager slot is taken{season.is_creator ? ': you can run the season without a team of your own.' : '.'}</p>
+          ) : mine ? (
+            <>
+              <div className="list-row">
+                <strong>{mine.name}</strong>
+                <span className="muted small">rating {mine.rating}</span>
+              </div>
+              <p className="muted small">
+                A frozen copy of your team is entered: changes you make to the original from now on won't affect the season.
+              </p>
+              <ErrorNotice error={withdraw.error} />
+              <button className="ghost" onClick={() => withdraw.mutate()} disabled={withdraw.isPending}>Withdraw team</button>
+            </>
+          ) : (
+            <>
+              <p className="muted small">Choose one of your complete teams (or a default team). It must meet the season's team restrictions.</p>
+              <label>
+                Team
+                <select value={teamId} onChange={(e) => setTeamId(e.target.value ? Number(e.target.value) : '')}>
+                  <option value="">Choose a team…</option>
+                  {(teams.data ?? []).map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}{t.is_default ? ' (default)' : ''}</option>
+                  ))}
+                </select>
+              </label>
+              {teams.data && teams.data.length === 0 && (
+                <p className="muted small">You have no complete teams yet. <Link to="/teams/new">Build one →</Link></p>
+              )}
+              <ErrorNotice error={enter.error} />
+              <button className="primary" onClick={() => enter.mutate()} disabled={!teamId || enter.isPending}>Enter team</button>
+            </>
+          )}
+        </div>
+        <div className="card stack">
+          <h3>Start the season</h3>
+          <p className="muted small">
+            {cpuCount > 0
+              ? `Starting generates ${cpuCount} CPU team${cpuCount === 1 ? '' : 's'} to fill the league (${CPU_STRENGTH_LABELS[season.options.cpu_strength].split(':')[0].toLowerCase()} strength), seeds everyone at random and draws up the schedule.`
+              : 'Every place is filled. Starting seeds everyone at random and draws up the schedule.'}
+          </p>
+          {season.is_creator ? (
+            <>
+              <ErrorNotice error={start.error ?? cancel.error} />
+              <button className="primary" onClick={() => start.mutate()} disabled={!season.can_start || start.isPending}>
+                {start.isPending ? 'Building the league…' : 'Start season'}
+              </button>
+              {!season.can_start && <p className="muted small">At least one manager needs to enter a team first.</p>}
+              <button className="ghost danger" disabled={cancel.isPending}
+                onClick={() => window.confirm('Cancel this season? It cannot be restarted.') && cancel.mutate()}>
+                Cancel season
+              </button>
+            </>
+          ) : (
+            <p className="muted small">Waiting for {season.created_by?.username ?? 'the creator'} to start the season.</p>
+          )}
+        </div>
       </div>
-      <div className="card stack">
-        <h3>Start the season</h3>
+      {season.human_slots > 1 && <ManagersCard season={season} />}
+    </div>
+  )
+}
+
+function InviteCard({ season, openSlots }: { season: Season; openSlots: number }) {
+  const link = seasonInviteLink(season.code, window.location.origin, import.meta.env.BASE_URL)
+  return (
+    <div className="card row between wrap">
+      <div className="stack">
+        <h3>Invite managers</h3>
         <p className="muted small">
-          {cpuCount > 0
-            ? `Starting generates ${cpuCount} CPU team${cpuCount === 1 ? '' : 's'} to fill the league (${CPU_STRENGTH_LABELS[season.options.cpu_strength].split(':')[0].toLowerCase()} strength), seeds everyone at random and draws up the schedule.`
-            : 'Every place is filled. Starting seeds everyone at random and draws up the schedule.'}
+          {openSlots > 0
+            ? `${openSlots} manager slot${openSlots === 1 ? '' : 's'} open. Friends join with the code (Seasons → Join) or the link, and bring one of their own teams.`
+            : 'Every manager slot is taken.'}
         </p>
-        {season.is_creator ? (
-          <>
-            <ErrorNotice error={start.error ?? cancel.error} />
-            <button className="primary" onClick={() => start.mutate()} disabled={!season.can_start || start.isPending}>
-              {start.isPending ? 'Building the league…' : 'Start season'}
-            </button>
-            {!season.can_start && <p className="muted small">Enter your team first.</p>}
-            <button className="ghost danger" disabled={cancel.isPending}
-              onClick={() => window.confirm('Cancel this season? It cannot be restarted.') && cancel.mutate()}>
-              Cancel season
-            </button>
-          </>
-        ) : (
-          <p className="muted small">Waiting for the creator to start the season.</p>
-        )}
       </div>
+      <div className="code-box" aria-label="Season code">
+        <span className="muted small">Season code</span>
+        <strong>{season.code}</strong>
+        <div className="row wrap">
+          <CopyButton text={season.code} label="Copy code" />
+          <CopyButton text={link} label="Copy invite link" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** The managed teams, with leaving (your own) and removing (the creator, anyone's). */
+function ManagersCard({ season }: { season: Season }) {
+  const qc = useQueryClient()
+  const navigate = useNavigate()
+  const managed = season.teams.filter((t) => !t.is_cpu)
+  const release = useMutation({
+    mutationFn: (t: SeasonTeamSummary) => api<Season | null>(`/seasons/${season.id}/teams/${t.id}/release`, { method: 'POST' }),
+    onSuccess: (s) => {
+      if (s) refreshSeason(qc, s)
+      else {
+        qc.invalidateQueries({ queryKey: ['seasons'] })
+        navigate('/seasons')
+      }
+    },
+  })
+  const setup = season.status === 'SETUP'
+  const confirmText = (t: SeasonTeamSummary) => t.is_you
+    ? (setup ? `Withdraw ${t.name}?`
+      : season.is_creator ? `Hand ${t.name} to the CPU? You keep running the season, but the CPU manages the team from now on.`
+        : `Leave the season? The CPU manages ${t.name} for the rest of it, and you can't come back.`)
+    : setup ? `Remove ${t.manager?.username} and their team from the season?`
+      : `Remove ${t.manager?.username}? The CPU manages ${t.name} for the rest of the season, including a match in progress.`
+  return (
+    <div className="card stack">
+      <h3>Managers</h3>
+      {managed.length === 0 && <p className="muted small">No teams entered yet.</p>}
+      {managed.map((t) => {
+        const canRelease = (t.is_you || season.is_creator) && season.status !== 'COMPLETED' && season.status !== 'CANCELLED'
+        return (
+          <div key={t.id} className="list-row">
+            <span className="stack season-row-text">
+              <strong>{t.name}{t.is_you && <span className="badge you-badge">YOU</span>}</strong>
+              <span className="muted small">
+                {t.manager?.username}{t.manager?.id === season.created_by?.id ? ' (creator)' : ''} · rating {t.rating}
+              </span>
+            </span>
+            {canRelease && (
+              <button className="ghost small danger" disabled={release.isPending}
+                onClick={() => window.confirm(confirmText(t)) && release.mutate(t)}>
+                {t.is_you ? (setup ? 'Withdraw' : season.is_creator ? 'Hand to CPU' : 'Leave season') : setup ? 'Remove' : 'Hand to CPU'}
+              </button>
+            )}
+          </div>
+        )
+      })}
+      <ErrorNotice error={release.error} />
     </div>
   )
 }
@@ -221,7 +319,7 @@ function MyMatchCard({ season }: { season: Season }) {
     onSuccess: (r) => navigate(`/game/${r.game_id}`),
   })
   const auto = useMutation({
-    mutationFn: () => api<Season>(`/seasons/matches/${match!.id}/auto`, { method: 'POST' }),
+    mutationFn: (ready: boolean) => api<Season>(`/seasons/matches/${match!.id}/auto`, { body: { ready } }),
     onSuccess: (s) => refreshSeason(qc, s),
   })
   if (!match || season.my_team_id === null) {
@@ -240,13 +338,18 @@ function MyMatchCard({ season }: { season: Season }) {
   }
   const opponent = opponentOf(match, season.my_team_id)
   const result = resultFor(match, season.my_team_id)
+  const human = vsManager(match)
+  const autoState = autoSimState(match, season.my_team_id)
+  const latest = match.games[match.games.length - 1]
+  const atReadyCheck = human && latest?.status === 'READY_CHECK'
+  const playLabel = atReadyCheck ? 'Go to the ready check' : action === 'CONTINUE' ? 'Continue match' : human ? 'Play live (ready up)' : 'Play live (draft)'
   return (
     <div className="card stack my-match">
       <h3>Your match · {roundTitle(season)}</h3>
       <div className="row between wrap">
         <span>
           vs <TeamName team={opponent} seasonId={season.id} />
-          {opponent?.is_cpu && <span className="badge">CPU</span>}
+          {opponent?.is_cpu ? <span className="badge">CPU</span> : <span className="muted small"> managed by {opponent?.manager?.username}</span>}
         </span>
         <span className="muted small">{seriesShort(match.format)} · you are {match.home?.id === season.my_team_id ? 'Blue' : 'Red'} in game 1</span>
       </div>
@@ -257,16 +360,32 @@ function MyMatchCard({ season }: { season: Season }) {
         </div>
       ) : (
         <>
-          {match.status === 'LIVE' && <p className="muted small">Score {match.home_score} - {match.away_score}. Pick up where you left off, or let the CPU finish it.</p>}
+          {human && !match.games.length && (
+            <p className="muted small">
+              A live match against another manager: press Play and the draft starts once {opponent?.manager?.username} is ready too.
+            </p>
+          )}
+          {atReadyCheck && <p className="muted small">The match is waiting at the ready check.</p>}
+          {match.status === 'LIVE' && !atReadyCheck && (
+            <p className="muted small">
+              Score {match.home_score} - {match.away_score}. Pick up where you left off{human ? '.' : ', or let the CPU finish it.'}
+            </p>
+          )}
+          {autoState === 'ASKED' && <p className="notice small">You asked to auto-sim. Waiting for {opponent?.manager?.username} to agree.</p>}
+          {autoState === 'OFFERED' && <p className="notice small">{opponent?.manager?.username} asked to let the CPU play this match.</p>}
           <ErrorNotice error={play.error ?? auto.error} />
           <div className="row wrap">
             <button className="primary" onClick={() => play.mutate()} disabled={play.isPending || auto.isPending}>
-              {action === 'CONTINUE' ? 'Continue match' : 'Play live (draft)'}
+              {playLabel}
             </button>
-            <button onClick={() => auto.mutate()} disabled={play.isPending || auto.isPending}
-              title="The CPU drafts and sets the lineup for your team too">
-              {auto.isPending ? 'Simulating…' : 'Auto-sim'}
-            </button>
+            {autoState === 'ASKED' ? (
+              <button className="ghost" onClick={() => auto.mutate(false)} disabled={auto.isPending}>Take back the auto-sim request</button>
+            ) : (
+              <button onClick={() => auto.mutate(true)} disabled={play.isPending || auto.isPending}
+                title={human ? 'Both managers have to agree; the CPU then drafts for both teams' : 'The CPU drafts and sets the lineup for your team too'}>
+                {auto.isPending ? 'Simulating…' : autoState === 'OFFERED' ? 'Agree to auto-sim' : autoState === 'NONE' ? 'Ask to auto-sim' : 'Auto-sim'}
+              </button>
+            )}
           </div>
         </>
       )}
@@ -303,7 +422,7 @@ function AdvancePanel({ season }: { season: Season }) {
       </div>
       <p className="muted small">
         {waiting > 0
-          ? 'Play or auto-sim your match first. The CPU plays the other matches when the round closes.'
+          ? `${waiting} manager match${waiting === 1 ? ' is' : 'es are'} still to be played. The CPU plays the other matches when the round closes.`
           : 'The CPU plays the remaining matches of the round when you advance.'}
       </p>
     </div>
@@ -329,7 +448,12 @@ function Overview({ season, onStandings }: { season: Season; onStandings: () => 
             <h3>{roundTitle(season)}</h3>
             {season.round_matches.map((m) => <MatchRow key={m.id} match={m} seasonId={season.id} />)}
             {season.is_creator && <AdvancePanel season={season} />}
-            {!season.is_creator && <p className="muted small">The season's creator moves the season on to the next round.</p>}
+            {!season.is_creator && (
+              <p className="muted small">
+                {season.created_by?.username ?? 'The creator'} moves the season on to the next round
+                {season.round_deadline_at ? ', or it closes by itself at the deadline' : ''}.
+              </p>
+            )}
           </div>
         </div>
       )}

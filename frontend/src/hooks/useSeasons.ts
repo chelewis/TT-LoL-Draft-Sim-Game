@@ -1,12 +1,14 @@
-import { useQuery, type QueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { useCallback } from 'react'
 import { api } from '../api/client'
-import type { Season, SeasonSchedule, SeasonSummary, SeasonTeamDetail } from '../api/types'
+import type { Season, SeasonJoinPreview, SeasonSchedule, SeasonSummary, SeasonTeamDetail } from '../api/types'
+import { useSocket, type SocketEvent } from './useGameSocket'
 
 /** Every season query starts with this key, so one change can refresh the hub, schedule and team pages. */
 export const seasonKey = (id: number) => ['season', id]
 
-/** Season pages poll while a season is in play: other matches finish and rounds advance without this tab. */
-const POLL_MS = 15000
+/** The season socket says when anything changes; polling is only a safety net while a season is in play. */
+const POLL_MS = 60000
 const live = (status: string | undefined) => status === 'REGULAR' || status === 'PLAYOFFS' || status === 'SETUP'
 
 export const useSeasons = () => useQuery({ queryKey: ['seasons'], queryFn: () => api<SeasonSummary[]>('/seasons') })
@@ -38,4 +40,19 @@ export function refreshSeason(qc: QueryClient, season: Season) {
   qc.setQueryData(seasonKey(season.id), season)
   qc.invalidateQueries({ queryKey: seasonKey(season.id) })
   qc.invalidateQueries({ queryKey: ['seasons'] })
+}
+
+export const useSeasonInvite = (code: string) =>
+  useQuery({ queryKey: ['season-invite', code], queryFn: () => api<SeasonJoinPreview>(`/seasons/join/${code}`), retry: false })
+
+/** Live updates for a season hub: other managers' results, joins and round changes refetch the season. */
+export function useSeasonSocket(id: number): boolean {
+  const qc = useQueryClient()
+  // SEASON_UPDATED, or CONNECTED after a reconnect (something may have changed meanwhile)
+  const onEvent = useCallback((event: SocketEvent) => {
+    if (event.type === 'PONG') return
+    qc.invalidateQueries({ queryKey: seasonKey(id) })
+    qc.invalidateQueries({ queryKey: ['seasons'] })
+  }, [qc, id])
+  return useSocket(Number.isFinite(id) ? `/ws/seasons/${id}` : null, onEvent)
 }

@@ -21,6 +21,8 @@ class SeasonOptions(BaseModel):
     playoff_size: int = Field(default=0)
     playoff_series: str = Field(default="BO3", pattern=SERIES)
     final_series: str = Field(default="BO5", pattern=SERIES)
+    # a round closes by itself this many hours after it opens: the CPU plays what managers haven't (0: no deadline)
+    round_deadline_hours: int = Field(default=0, ge=0, le=336)
 
     @model_validator(mode="after")
     def _slots_fit(self) -> "SeasonOptions":
@@ -53,3 +55,11 @@ class SeasonTeamIn(BaseModel):
 
 class AdvanceIn(BaseModel):
     force: bool = False  # auto-sim matches managers haven't played yet
+
+
+class SeasonJoinIn(BaseModel):
+    team_id: int        # the team you bring (see SeasonTeamIn)
+
+
+class AutoSimIn(BaseModel):
+    ready: bool = True  # between two managers: ask for (or take back) letting the CPU play the match

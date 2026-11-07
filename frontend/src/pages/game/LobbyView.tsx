@@ -1,6 +1,6 @@
 import { useMutation } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import type { GameState, Side, Team } from '../../api/types'
 import { ErrorNotice, Loading } from '../../components/common'
@@ -154,7 +154,7 @@ async function copyText(text: string): Promise<boolean> {
 }
 
 /** A copy button that says "Copied!" for a moment. If copying fails, shows the text so it can be copied by hand. */
-function CopyButton({ text, label }: { text: string; label: string }) {
+export function CopyButton({ text, label }: { text: string; label: string }) {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
   useEffect(() => {
     if (state !== 'copied') return
@@ -175,7 +175,67 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 
 export default function LobbyView({ game, onChange }: { game: GameState; onChange: () => void }) {
   if (isSolo(game) || isCpu(game)) return <SoloLobby game={game} onChange={onChange} />
+  if (game.season) return <SeasonMatchLobby game={game} onChange={onChange} />
   return <MultiLobby game={game} onChange={onChange} />
+}
+
+/** Two managers' season match: the teams are fixed by the fixture, so all that's left is readying up. */
+function SeasonMatchLobby({ game, onChange }: { game: GameState; onChange: () => void }) {
+  const me = game.you.team
+  const mine = me === 'BLUE' ? game.players.blue : me === 'RED' ? game.players.red : null
+  const other = me === 'BLUE' ? game.players.red : game.players.blue
+  const ready = useMutation({
+    mutationFn: (value: boolean) => api(`/games/${game.game_id}/ready`, { body: { ready: value } }),
+    onSuccess: onChange,
+  })
+  const status = !me
+    ? 'Waiting for both managers to ready up.'
+    : !mine?.ready
+      ? 'Ready up to start the draft.'
+      : `Waiting for ${other?.username ?? 'the other manager'} to ready up. The draft starts as soon as they do.`
+  return (
+    <div className="stack">
+      <div className="card stack">
+        <h2>Season match</h2>
+        <p className="muted">{status}</p>
+        <p className="small muted">Draft: {draftRules(game.settings)}</p>
+        {seriesLabel(game.settings) && <p className="small muted">Format: {seriesLabel(game.settings)}</p>}
+        <p className="small muted">
+          Ruleset: {rulesetLabel(game.settings)} · {lobbyLimits(game.settings)} ·{' '}
+          {game.settings.hide_player_data ? 'Player data hidden' : 'Player data visible'}
+        </p>
+      </div>
+      <div className="grid two">
+        {(['BLUE', 'RED'] as const).map((side) => {
+          const p = side === 'BLUE' ? game.players.blue : game.players.red
+          return (
+            <div key={side} className="stack">
+              <p>
+                <strong>{side === 'BLUE' ? 'Blue' : 'Red'}:</strong> {p?.username ?? '—'}{' '}
+                {p?.ready ? <span className="badge ok">ready</span> : <span className="badge">not ready</span>}
+              </p>
+              <TeamCard team={game.teams[side]} side={side} you={me === side} />
+            </div>
+          )
+        })}
+      </div>
+      {me && (
+        <div className="card stack">
+          <ErrorNotice error={ready.error} />
+          <div className="row wrap">
+            <button className="primary" onClick={() => ready.mutate(!mine?.ready)} disabled={ready.isPending}>
+              {mine?.ready ? 'Not ready' : 'Ready'}
+            </button>
+            {game.season && <Link to={`/seasons/${game.season.season_id}`}>← Back to the season</Link>}
+          </div>
+          <p className="muted small">
+            You can leave this page and come back: the match waits here until you're both ready, or until the round
+            is closed (then the CPU plays it).
+          </p>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function MultiLobby({ game, onChange }: { game: GameState; onChange: () => void }) {

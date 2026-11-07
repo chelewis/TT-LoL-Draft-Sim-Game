@@ -1,4 +1,5 @@
-import { Link } from 'react-router-dom'
+import { useState, type FormEvent } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import type { SeasonSummary } from '../../api/types'
 import { ErrorNotice, Loading } from '../../components/common'
 import { useSeasons } from '../../hooks/useSeasons'
@@ -18,6 +19,7 @@ function SeasonRow({ season }: { season: SeasonSummary }) {
         <strong>{season.name}</strong>
         <span className="muted small">
           {season.format === 'SWISS' ? 'Swiss' : 'Round robin'} · Bring Your Own · {progress(season)}
+          {season.human_slots > 1 ? ` · ${season.managers} managers` : ''}
           {!season.is_creator && season.created_by ? ` · run by ${season.created_by.username}` : ''}
         </span>
       </span>
@@ -25,6 +27,24 @@ function SeasonRow({ season }: { season: SeasonSummary }) {
         {SEASON_STATUS_LABELS[season.status]}
       </span>
     </Link>
+  )
+}
+
+function JoinByCode() {
+  const navigate = useNavigate()
+  const [code, setCode] = useState('')
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    if (code.trim()) navigate(`/seasons/join/${code.trim().toUpperCase()}`)
+  }
+  return (
+    <form className="card row wrap" onSubmit={submit}>
+      <label>
+        Join a friend's season
+        <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Season code" maxLength={6} />
+      </label>
+      <button disabled={!code.trim()}>Join</button>
+    </form>
   )
 }
 
@@ -39,12 +59,15 @@ export default function SeasonsPage() {
         <div className="stack">
           <h2>Seasons</h2>
           <p className="muted">
-            Set up a league with the rules you like, enter one of your teams, and manage it through a full round robin.
-            The CPU builds and runs every other team. Play your matches through the draft or let the CPU sim them.
+            Set up a league or tournament with the rules you like, enter one of your teams, and manage it through the
+            season. Invite friends to manage teams too; the CPU builds and runs the rest. Play your matches through the
+            draft or let the CPU sim them.
           </p>
         </div>
         <Link className="button primary" to="/seasons/new">Create a season</Link>
       </div>
+
+      <JoinByCode />
 
       <div className="card stack">
         <h2>Your seasons</h2>

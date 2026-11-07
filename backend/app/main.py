@@ -14,10 +14,10 @@ from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine
 from app.core.dependencies import user_from_token
 from app.data.seed_db import seed_database
-from app.models import Game
-from app.services import game_service
+from app.models import Game, Season
+from app.services import game_service, season_match_service
 from app.services.timeouts import timeout_loop
-from app.websocket.manager import manager
+from app.websocket.manager import manager, season_channel
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -75,6 +75,28 @@ def create_app() -> FastAPI:
         finally:
             if manager.disconnect(game_id, user.id, websocket):
                 await manager.broadcast(game_id, {"type": "PLAYER_DISCONNECTED", "game_id": game_id, "team": side})
+
+    @app.websocket("/ws/seasons/{season_id}")
+    async def season_socket(websocket: WebSocket, season_id: int, token: str = ""):
+        """Season hub notifications (SEASON_UPDATED: refetch the season) for the creator and its managers."""
+        with SessionLocal() as db:
+            user = user_from_token(db, token)
+            season = db.get(Season, season_id)
+            allowed = bool(user and season and season_match_service.is_member(db, season, user.id))
+        if not allowed:
+            await websocket.close(code=4403)
+            return
+        channel = season_channel(season_id)
+        await manager.connect(channel, user.id, websocket)
+        await websocket.send_json({"type": "CONNECTED", "season_id": season_id})
+        try:
+            while True:
+                if await websocket.receive_text() == "ping":
+                    await websocket.send_json({"type": "PONG"})
+        except WebSocketDisconnect:
+            pass
+        finally:
+            manager.disconnect(channel, user.id, websocket)
 
     _serve_frontend(app)
     return app

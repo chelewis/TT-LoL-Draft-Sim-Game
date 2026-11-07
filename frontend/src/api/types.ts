@@ -879,6 +879,8 @@ export interface SeasonOptions {
   /** Swiss only: wins to qualify / losses to go out */
   swiss_wins?: number
   swiss_losses?: number
+  /** a round closes by itself this many hours after it opens (0 or missing: no deadline) */
+  round_deadline_hours?: number
 }
 
 export interface SeasonTeamRef {
@@ -951,6 +953,8 @@ export interface SeasonMatch {
   has_manager: boolean
   /** you manage one of the teams */
   yours: boolean
+  /** between two managers: which of them asked to let the CPU play it */
+  auto_requested: { home: boolean; away: boolean }
   completed_at: string | null
 }
 
@@ -963,6 +967,9 @@ export interface SeasonSummary {
   format: SeasonFormat
   team_count: number
   teams_entered: number
+  /** teams users manage, out of human_slots */
+  managers: number
+  human_slots: number
   current_round: number
   /** rounds in the current stage (Swiss: the most it can take) */
   total_rounds: number
@@ -973,6 +980,8 @@ export interface SeasonSummary {
   /** your SeasonTeam id */
   my_team_id: number | null
   winner_team_id: number | null
+  /** when the current round closes by itself (null: no deadline) */
+  round_deadline_at: string | null
   created_at: string | null
   started_at: string | null
   completed_at: string | null
@@ -995,7 +1004,28 @@ export interface Season extends SeasonSummary {
   waiting_on_managers: number
   can_start: boolean
   can_advance: boolean
+  /** the creator, while the season runs: may remove managers */
+  can_manage: boolean
   champion: SeasonTeamRef | null
+}
+
+/** GET /seasons/join/{code}: what an invite shows before joining */
+export interface SeasonJoinPreview {
+  id: number
+  name: string
+  code: string
+  status: SeasonStatus
+  roster_mode: RosterMode
+  format: SeasonFormat
+  rules: RulesetSettings & { ruleset: string }
+  options: SeasonOptions
+  ruleset_name: string
+  created_by: { id: number; username: string } | null
+  managers: number
+  open_slots: number
+  is_member: boolean
+  has_team: boolean
+  can_join: boolean
 }
 
 export type SeasonStage = 'REGULAR' | 'SWISS' | 'PLAYOFF'

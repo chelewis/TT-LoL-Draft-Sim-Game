@@ -1,5 +1,5 @@
-"""Playing season fixtures: live through the normal draft (a manager against the CPU), or auto-played with the CPU
-deciding for both sides. Every game is an ordinary Game row with `season_match_id` set, so results, replays and
+"""Playing season fixtures: live through the normal draft (a manager against the CPU, or two managers against each
+other), or auto-played with the CPU deciding for both sides. Every game is an ordinary Game row with `season_match_id` set, so results, replays and
 series all work as they do for lobbies.
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.clock import utcnow
-from app.core.errors import bad_request, conflict, forbidden
+from app.core.errors import conflict, forbidden
 from app.game.competition import wins_needed
 from app.models import Game, MatchResultRow, Season, SeasonMatch, SeasonTeam, User
 from app.services import game_service as gs
@@ -37,6 +37,11 @@ def simulating(season_id: int):
     finally:
         with _busy_lock:
             _busy.discard(season_id)
+
+
+def season_event(season_id: int) -> dict:
+    """Tells everyone on the season's hub to refetch it (sent on the season's WebSocket channel)."""
+    return {"type": "SEASON_UPDATED", "season_id": season_id}
 
 
 # ----------------------------------------------------------------- lookups
@@ -100,12 +105,12 @@ def _tally(db: Session, match: SeasonMatch, games: list[Game]) -> dict[int, int]
     return wins
 
 
-def on_game_completed(db: Session, game: Game) -> None:
+def on_game_completed(db: Session, game: Game) -> Events:
     """A season game finished (called by game_service.run_simulation): update the fixture's score, and decide it
     once a team has won enough games. The caller commits."""
     match = db.get(SeasonMatch, game.season_match_id)
     if match is None or match.status == "COMPLETED":
-        return
+        return []
     db.flush()
     wins = _tally(db, match, match_games(db, match))
     match.home_score, match.away_score = wins[match.home_team_id], wins[match.away_team_id]
@@ -115,28 +120,33 @@ def on_game_completed(db: Session, game: Game) -> None:
         match.winner_team_id = match.home_team_id if match.home_score > match.away_score else match.away_team_id
         match.completed_at = utcnow()
         track("season_match_completed", season_id=match.season_id, match_id=match.id, mode=match.played_mode)
+    return [season_event(match.season_id)]
 
 
 # -------------------------------------------------------------- new games
-def _lobby_settings(season: Season, match: SeasonMatch) -> dict:
+def _lobby_settings(season: Season, match: SeasonMatch, two_managers: bool) -> dict:
     rules = season.settings["rules"]
     return {**rules, "series_format": match.format,
             "fearless": bool(rules.get("fearless")) and match.format != "BO1",
-            "hide_player_data": False}       # against the CPU there is no opponent to hide anything from
+            # against the CPU there is no opponent to hide anything from
+            "hide_player_data": bool(rules.get("hide_player_data")) and two_managers}
 
 
 def _new_game(db: Session, season: Season, match: SeasonMatch, blue: SeasonTeam, red: SeasonTeam,
-              blue_user: int | None, red_user: int | None, owner_id: int) -> Game:
+              blue_user: int | None, red_user: int | None, owner_id: int,
+              ready: tuple[bool, bool] = (True, True)) -> Game:
     """A game of the fixture between `blue` and `red`, waiting at the ready check (flushed, so it has an id).
-    The first game also opens the fixture's series when it is a best of 3 or 5."""
-    settings = _lobby_settings(season, match)
+    With a manager on each side it's a multiplayer game and `ready` says who has readied up; otherwise the CPU
+    plays every empty seat. The first game also opens the fixture's series when it is a best of 3 or 5."""
+    two_managers = blue_user is not None and red_user is not None
+    settings = _lobby_settings(season, match, two_managers)
     lobby = gs._open_lobby(db, owner_id, settings)
     game = Game(lobby_id=lobby.id, status="READY_CHECK", blue_player_id=blue_user, red_player_id=red_user,
-                blue_team_id=blue.team_id, red_team_id=red.team_id, is_solo=False, vs_cpu=True,
-                hide_player_data=False, bans_enabled=bool(settings["bans_enabled"]),
+                blue_team_id=blue.team_id, red_team_id=red.team_id, is_solo=False, vs_cpu=not two_managers,
+                hide_player_data=bool(settings["hide_player_data"]), bans_enabled=bool(settings["bans_enabled"]),
                 timers_enabled=bool(settings["timers_enabled"]), pick_seconds=int(settings["pick_seconds"]),
                 ban_seconds=int(settings["ban_seconds"]), season_match_id=match.id,
-                blue_ready=True, red_ready=True, sides_swapped=blue.id != match.home_team_id)
+                blue_ready=ready[0], red_ready=ready[1], sides_swapped=blue.id != match.home_team_id)
     previous = match_games(db, match)
     if match.series_id is None:
         gs._open_series(db, game, settings, owner_id)
@@ -166,22 +176,29 @@ def _check_playable(season: Season, match: SeasonMatch) -> None:
 
 
 def play_match(db: Session, season: Season, match: SeasonMatch, user: User) -> tuple[Game, Events]:
-    """Play your fixture live: opens the first game straight in the draft (the CPU plays the other side).
+    """Play your fixture live. Against the CPU the first game opens straight in the draft. Against another manager
+    it opens at the ready check with you ready, and the draft starts once they press Play (or ready up) too.
     Calling it again returns the game in progress (or the latest one, between games of a series)."""
     _check_playable(season, match)
     mine = _my_team(db, match, user)
     games = match_games(db, match)
     if games:
-        return games[-1], []
+        last = games[-1]
+        side = gs.side_of(last, user.id)
+        if last.status == "READY_CHECK" and side and not (last.blue_ready if side == "BLUE" else last.red_ready):
+            return last, gs.set_ready(db, last, user, True) + [season_event(season.id)]   # both ready: the draft
+        return last, []
     home, away = _sides(db, match)
-    other = away if mine.id == home.id else home
-    if other.manager_user_id is not None:
-        raise bad_request("Matches between two managers arrive with multiplayer seasons.")
-    blue_user = user.id if mine.id == home.id else None
-    red_user = user.id if mine.id == away.id else None
-    game = _new_game(db, season, match, home, away, blue_user, red_user, user.id)
+    two_managers = home.manager_user_id is not None and away.manager_user_id is not None
+    if two_managers:
+        game = _new_game(db, season, match, home, away, home.manager_user_id, away.manager_user_id, user.id,
+                         ready=(mine.id == home.id, mine.id == away.id))
+        events = [gs._event(game, "PLAYER_READY", team="BLUE" if mine.id == home.id else "RED", ready=True)]
+    else:
+        game = _new_game(db, season, match, home, away, home.manager_user_id, away.manager_user_id, user.id)
+        events = gs._start_draft(db, game)
     match.status, match.played_mode = "LIVE", "LIVE"
-    events = gs._start_draft(db, game)
+    events.append(season_event(season.id))
     db.commit()
     track("season_match_live", season_id=season.id, match_id=match.id, game_id=game.id, user_id=user.id)
     return game, events
@@ -218,13 +235,22 @@ def auto_play_match(db: Session, season: Season, match: SeasonMatch,
     return events
 
 
-def auto_sim_my_match(db: Session, season: Season, match: SeasonMatch, user: User) -> Events:
-    """Let the CPU play your fixture for you (including the rest of one you started live)."""
+def auto_sim_my_match(db: Session, season: Season, match: SeasonMatch, user: User, ready: bool = True) -> Events:
+    """Let the CPU play your fixture for you (including the rest of one you started live). Between two managers
+    both have to ask for it: the first request waits for the other manager (`ready` False takes it back)."""
     _check_playable(season, match)
-    _my_team(db, match, user)
+    mine = _my_team(db, match, user)
     home, away = _sides(db, match)
     if home.manager_user_id is not None and away.manager_user_id is not None:
-        raise bad_request("Matches between two managers arrive with multiplayer seasons.")
+        if mine.id == home.id:
+            match.home_auto_ready = ready
+        else:
+            match.away_auto_ready = ready
+        if not (match.home_auto_ready and match.away_auto_ready):
+            db.commit()
+            return [season_event(season.id)]
+    elif not ready:
+        return []
     with simulating(season.id):
         db.refresh(match)
         if match.status == "COMPLETED":
@@ -232,4 +258,27 @@ def auto_sim_my_match(db: Session, season: Season, match: SeasonMatch, user: Use
         events = auto_play_match(db, season, match)
         db.commit()
     track("season_match_auto", season_id=season.id, match_id=match.id, user_id=user.id)
+    return events + [season_event(season.id)]
+
+
+def hand_to_cpu(db: Session, season: Season, st: SeasonTeam) -> Events:
+    """The team's manager is gone (they left, or the creator removed them): the CPU runs the team from now on,
+    including the game of this round's match they were in the middle of. The caller commits."""
+    user_id, st.manager_user_id = st.manager_user_id, None
+    events: Events = []
+    if season.status not in PLAYING:
+        return events
+    pending = db.scalars(select(SeasonMatch).where(
+        SeasonMatch.season_id == season.id, SeasonMatch.stage == current_stage(season),
+        SeasonMatch.round == season.current_round, SeasonMatch.status != "COMPLETED",
+        (SeasonMatch.home_team_id == st.id) | (SeasonMatch.away_team_id == st.id))).all()
+    for match in pending:
+        if match.home_team_id == st.id:
+            match.home_auto_ready = False
+        else:
+            match.away_auto_ready = False
+        games = match_games(db, match)
+        side = gs.side_of(games[-1], user_id) if games and user_id is not None else None
+        if side:
+            events += gs.cpu_takes_over(db, games[-1], side)
     return events

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { SeasonMatch, SeasonTeamRef, StandingRow } from '../api/types'
 import {
-  bracketSlots, formatLabel, playoffChoices, seriesSummary, swissWins,
+  autoSimState, bracketSlots, deadlineLabel, formatLabel, playoffChoices, seasonInviteLink, seriesSummary, swissWins,
+  timeUntil, vsManager,
   diffLabel, matchesPerTeam, myMatchAction, opponentOf, recordLabel, resultFor, roundLabel, roundRobinRounds,
   scoreLine, sortStandings,
 } from './season'
@@ -14,7 +15,7 @@ const match = (patch: Partial<SeasonMatch> = {}): SeasonMatch => ({
   id: 1, stage: 'REGULAR', round: 1, slot: 0, format: 'BO3', status: 'SCHEDULED', played_mode: null,
   home: team(1, 'Alpha'), away: team(2, 'Bravo'), home_score: 0, away_score: 0, winner_team_id: null,
   series_id: null, live_game_id: null, latest_game_id: null, games: [], has_manager: true, yours: true,
-  completed_at: null, ...patch,
+  auto_requested: { home: false, away: false }, completed_at: null, ...patch,
 })
 
 const row = (id: number, name: string, wins: number, losses: number, rank: number, gameDiff = 0): StandingRow => ({
@@ -106,5 +107,31 @@ describe('formats', () => {
     const m = match()
     expect(bracketSlots({ round: 1, name: 'Semifinals', slots: 2, format: 'BO3', matches: [m] })).toEqual([m, null])
     expect(bracketSlots({ round: 2, name: 'Final', slots: 1, format: 'BO5', matches: [] })).toEqual([null])
+  })
+})
+
+describe('multiplayer', () => {
+  const human = (id: number, name: string): SeasonTeamRef => ({ ...team(id, name), is_cpu: false, manager: { id, username: name } })
+  const pvp = (auto = { home: false, away: false }) => match({ home: human(1, 'Alpha'), away: human(2, 'Bravo'), auto_requested: auto })
+  it('tells manager matches from CPU ones', () => {
+    expect(vsManager(match())).toBe(false)
+    expect(vsManager(pvp())).toBe(true)
+  })
+  it('follows the auto-sim agreement from each side', () => {
+    expect(autoSimState(match(), 1)).toBe('SOLO')
+    expect(autoSimState(pvp(), 1)).toBe('NONE')
+    expect(autoSimState(pvp({ home: true, away: false }), 1)).toBe('ASKED')
+    expect(autoSimState(pvp({ home: true, away: false }), 2)).toBe('OFFERED')
+  })
+  it('labels deadlines', () => {
+    expect([0, 12, 24, 48, 168].map(deadlineLabel)).toEqual(['No deadline', '12 hours', '1 day', '2 days', '1 week'])
+    const now = Date.parse('2026-01-01T00:00:00Z')
+    expect(timeUntil('2026-01-01T00:05:30Z', now)).toBe('5m')
+    expect(timeUntil('2026-01-01T03:20:00Z', now)).toBe('3h 20m')
+    expect(timeUntil('2026-01-03T04:00:00Z', now)).toBe('2d 4h')
+    expect(timeUntil('2025-12-31T23:00:00Z', now)).toBe('now')
+  })
+  it('builds the invite link', () => {
+    expect(seasonInviteLink('ABC123', 'https://x.test')).toBe('https://x.test/seasons/join/ABC123')
   })
 })

@@ -5,6 +5,7 @@ import { wsUrl } from '../api/config'
 export interface SocketEvent {
   type: string
   game_id?: number
+  season_id?: number
   [key: string]: unknown
 }
 
@@ -14,12 +15,17 @@ export interface SocketEvent {
  * so a browser refresh or a dropped connection never loses the game.
  */
 export function useGameSocket(gameId: number | undefined, onEvent: (event: SocketEvent) => void): boolean {
+  return useSocket(gameId ? `/ws/games/${gameId}` : null, onEvent)
+}
+
+/** The same for a channel path such as /ws/seasons/3 (null: no socket). */
+export function useSocket(path: string | null, onEvent: (event: SocketEvent) => void): boolean {
   const [connected, setConnected] = useState(false)
   const handler = useRef(onEvent)
   handler.current = onEvent
 
   useEffect(() => {
-    if (!gameId) return
+    if (!path) return
     let closed = false
     let socket: WebSocket | null = null
     let retry = 0
@@ -29,7 +35,7 @@ export function useGameSocket(gameId: number | undefined, onEvent: (event: Socke
     const connect = () => {
       const token = tokenStore.get()
       if (!token || closed) return
-      socket = new WebSocket(wsUrl(`/ws/games/${gameId}?token=${encodeURIComponent(token)}`))
+      socket = new WebSocket(wsUrl(`${path}?token=${encodeURIComponent(token)}`))
       socket.onopen = () => {
         retry = 0
         setConnected(true)
@@ -45,7 +51,7 @@ export function useGameSocket(gameId: number | undefined, onEvent: (event: Socke
       socket.onclose = (event) => {
         setConnected(false)
         window.clearInterval(ping)
-        // 4403: not a player in this game (a season member watching it); retrying won't change that
+        // 4403: not allowed on this channel (a season member watching a game, or no longer in the season)
         if (event.code === 4403) closed = true
         if (!closed) {
           retry += 1
@@ -60,7 +66,7 @@ export function useGameSocket(gameId: number | undefined, onEvent: (event: Socke
       window.clearInterval(ping)
       socket?.close()
     }
-  }, [gameId])
+  }, [path])
 
   return connected
 }

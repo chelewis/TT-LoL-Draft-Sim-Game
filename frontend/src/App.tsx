@@ -14,6 +14,7 @@ import { META_NAV } from './pages/meta/nav'
 import RiotImportPage from './pages/RiotImportPage'
 import SeriesPage from './pages/SeriesPage'
 import SeasonCreatePage from './pages/seasons/SeasonCreatePage'
+import SeasonJoinPage from './pages/seasons/SeasonJoinPage'
 import SeasonPage from './pages/seasons/SeasonPage'
 import SeasonsPage from './pages/seasons/SeasonsPage'
 import SeasonTeamPage from './pages/seasons/SeasonTeamPage'
@@ -66,6 +67,7 @@ export default function App() {
                 <Route path="/series/:seriesId" element={<SeriesPage />} />
                 <Route path="/seasons" element={<SeasonsPage />} />
                 <Route path="/seasons/new" element={<SeasonCreatePage />} />
+                <Route path="/seasons/join/:code" element={<SeasonJoinPage />} />
                 <Route path="/seasons/:seasonId" element={<SeasonPage />} />
                 <Route path="/seasons/:seasonId/teams/:teamId" element={<SeasonTeamPage />} />
                 <Route path="/teams" element={<TeamsPage />} />

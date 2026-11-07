@@ -7,14 +7,15 @@ import { ErrorNotice } from '../../components/common'
 import DraftOptionsForm, { ANYTHING_GOES, draftSettingsPayload, type DraftOptions } from '../../components/DraftOptionsForm'
 import { refreshSeason } from '../../hooks/useSeasons'
 import {
-  CPU_STRENGTH_LABELS, formatLabel, matchesPerTeam, playoffChoices, roundRobinRounds, SWISS_TEAM_COUNTS, swissWins,
+  CPU_STRENGTH_LABELS, DEADLINE_CHOICES, deadlineLabel, formatLabel, matchesPerTeam, playoffChoices, roundRobinRounds,
+  SWISS_TEAM_COUNTS, swissWins,
 } from '../../lib/season'
 
 const TEAM_COUNTS = Array.from({ length: 13 }, (_, i) => i + 4)     // 4 to 16
 
 const DEFAULT_OPTIONS: SeasonOptions = {
   team_count: 8, human_slots: 1, rr_double: false, regular_series: 'BO1', cpu_strength: 'EVEN',
-  playoff_size: 4, playoff_series: 'BO3', final_series: 'BO5',
+  playoff_size: 4, playoff_series: 'BO3', final_series: 'BO5', round_deadline_hours: 0,
 }
 
 function SeriesSelect({ label, value, onChange }: { label: string; value: SeriesFormat; onChange: (v: SeriesFormat) => void }) {
@@ -50,13 +51,15 @@ export default function SeasonCreatePage() {
   function setFormat(next: SeasonFormat) {
     setFormatState(next)
     if (next === 'SWISS' && !(SWISS_TEAM_COUNTS as readonly number[]).includes(options.team_count)) {
-      set({ team_count: options.team_count > 8 ? 16 : 8 })
+      const n = options.team_count > 8 ? 16 : 8
+      set({ team_count: n, human_slots: Math.min(options.human_slots, n) })
     }
   }
 
   function setTeamCount(n: number) {
-    // keep the playoffs no bigger than the league
-    set({ team_count: n, playoff_size: Math.min(options.playoff_size, Math.max(0, ...playoffChoices(n))) })
+    // keep the playoffs no bigger than the league, and the managers no more than the teams
+    set({ team_count: n, playoff_size: Math.min(options.playoff_size, Math.max(0, ...playoffChoices(n))),
+      human_slots: Math.min(options.human_slots, n) })
   }
 
   const create = useMutation({
@@ -100,9 +103,29 @@ export default function SeasonCreatePage() {
             {teamCounts.map((n) => <option key={n} value={n}>{n} teams</option>)}
           </select>
         </label>
+        <label>
+          Managers
+          <select value={options.human_slots} onChange={(e) => set({ human_slots: Number(e.target.value) })}>
+            {Array.from({ length: options.team_count }, (_, i) => i + 1).map((n) => (
+              <option key={n} value={n}>{n === 1 ? 'Just me (single player)' : `Up to ${n} managers`}</option>
+            ))}
+          </select>
+        </label>
         <p className="muted small">
-          You manage one team; the CPU generates and runs the other {options.team_count - 1}. Inviting friends to manage teams
-          is coming with multiplayer seasons.
+          {options.human_slots === 1
+            ? `You manage one team; the CPU generates and runs the other ${options.team_count - 1}.`
+            : `Friends join with the season's invite code and bring a team each. The CPU generates and runs every team nobody manages (at least ${options.team_count - options.human_slots}).`}
+        </p>
+        <label>
+          Round deadline
+          <select value={options.round_deadline_hours ?? 0} onChange={(e) => set({ round_deadline_hours: Number(e.target.value) })}>
+            {DEADLINE_CHOICES.map((h) => <option key={h} value={h}>{deadlineLabel(h)}</option>)}
+          </select>
+        </label>
+        <p className="muted small">
+          {options.round_deadline_hours
+            ? `Each round closes by itself ${deadlineLabel(options.round_deadline_hours)} after it opens, and the CPU plays any match managers haven't. You can still advance sooner.`
+            : 'Rounds move on only when you advance them.'}
         </p>
       </div>
 
