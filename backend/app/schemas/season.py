@@ -23,6 +23,12 @@ class SeasonOptions(BaseModel):
     final_series: str = Field(default="BO5", pattern=SERIES)
     # a round closes by itself this many hours after it opens: the CPU plays what managers haven't (0: no deadline)
     round_deadline_hours: int = Field(default=0, ge=0, le=336)
+    # Player Draft: seconds each manager has per pick before the best available player is picked for them (0: none)
+    draft_pick_seconds: int = Field(default=0, ge=0, le=86400)
+    # free agency: players each manager may sign over the season (0: off), and free agents generated per lane at the
+    # start (in a Player Draft the undrafted pool players are free agents too)
+    max_signings: int = Field(default=3, ge=0, le=20)
+    free_agents_per_role: int = Field(default=2, ge=0, le=10)
 
     @model_validator(mode="after")
     def _slots_fit(self) -> "SeasonOptions":
@@ -50,16 +56,38 @@ class SeasonCreate(BaseModel):
 
 
 class SeasonTeamIn(BaseModel):
-    team_id: int        # one of your teams (or a default team): a frozen copy of it enters the season
+    """Bring Your Own: `team_id`, one of your teams (or a default team); a frozen copy of it enters the season.
+    Player Draft: the new team's identity (its roster is drafted); `coach_id` copies one of your coaches, else the
+    team gets a generated coach."""
+    team_id: int | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=40)
+    logo: str = Field(default="", max_length=8)
+    style1: str | None = None
+    style2: str | None = None
+    coach_id: int | None = None
 
 
 class AdvanceIn(BaseModel):
     force: bool = False  # auto-sim matches managers haven't played yet
 
 
-class SeasonJoinIn(BaseModel):
-    team_id: int        # the team you bring (see SeasonTeamIn)
+SeasonJoinIn = SeasonTeamIn       # joining with the invite code enters a team the same way
 
 
 class AutoSimIn(BaseModel):
     ready: bool = True  # between two managers: ask for (or take back) letting the CPU play the match
+
+
+class PoolAddIn(BaseModel):
+    player_ids: list[int] = Field(min_length=1, max_length=50)   # your players (or default players), copied in
+
+
+class PoolGenerateIn(BaseModel):
+    per_role: int = Field(default=2, ge=1, le=20)
+    strength: str = Field(default="EVEN", pattern="^(WEAKER|EVEN|STRONGER)$")
+
+
+class LanePickIn(BaseModel):
+    """A draft pick, or a free agent signing: the player and the roster lane they fill."""
+    player_id: int
+    lane: str = Field(pattern="^(TOP|JUNGLE|MID|BOT|SUPPORT)$")

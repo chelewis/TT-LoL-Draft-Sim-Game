@@ -881,6 +881,12 @@ export interface SeasonOptions {
   swiss_losses?: number
   /** a round closes by itself this many hours after it opens (0 or missing: no deadline) */
   round_deadline_hours?: number
+  /** Player Draft: seconds per pick before the best available player is picked automatically (0: no clock) */
+  draft_pick_seconds?: number
+  /** free agency: signings each manager may make over the season (0: off) */
+  max_signings?: number
+  /** free agents generated per lane when the competition starts */
+  free_agents_per_role?: number
 }
 
 export interface SeasonTeamRef {
@@ -1007,6 +1013,71 @@ export interface Season extends SeasonSummary {
   /** the creator, while the season runs: may remove managers */
   can_manage: boolean
   champion: SeasonTeamRef | null
+  /** Player Draft: the order, picks and who's on the clock (null before the draft and in Bring Your Own) */
+  draft: SeasonDraft | null
+  /** Player Draft setup: the pool so far */
+  pool: SeasonPoolSummary | null
+  free_agency: SeasonFreeAgency
+  /** latest signings and releases, newest first */
+  transactions: SeasonTransaction[]
+}
+
+export interface SeasonDraftPick {
+  pick_number: number
+  team: SeasonTeamRef | null
+  player_id: number | null
+  player_name: string
+  lane: Lane
+  /** made by the clock running out, the CPU or an auto-pick */
+  auto: boolean
+}
+
+export interface SeasonDraft {
+  order: (SeasonTeamRef | null)[]
+  picks: SeasonDraftPick[]
+  total_picks: number
+  current_pick: number | null
+  on_the_clock: SeasonTeamRef | null
+  pick_deadline_at: string | null
+  my_turn: boolean
+  my_open_lanes: Lane[]
+  complete: boolean
+}
+
+export interface SeasonPoolSummary {
+  count: number
+  /** players who can play each lane (a two-lane player counts in both) */
+  by_lane: Record<Lane, number>
+  /** what the pool can't fill for the managers entered so far */
+  shortfall: Partial<Record<Lane, number>>
+}
+
+export interface SeasonFreeAgency {
+  enabled: boolean
+  max_signings: number
+  /** the season is under way */
+  open: boolean
+  /** your team's, if you manage one */
+  signings_left: number | null
+}
+
+export interface SeasonTransaction {
+  id: number
+  team: SeasonTeamRef | null
+  type: 'SIGN' | 'RELEASE'
+  player_id: number | null
+  player_name: string
+  lane: Lane
+  stage: SeasonStage
+  round: number
+  created_at: string | null
+}
+
+/** GET /seasons/{id}/pool: the draft pool, or the free agents */
+export interface SeasonPoolPlayer extends Player {
+  lanes: Lane[]
+  /** made up by the season (no owner) */
+  generated: boolean
 }
 
 /** GET /seasons/join/{code}: what an invite shows before joining */

@@ -5,11 +5,11 @@ from .lobby import Lobby
 from .matchup import ChampionMatchup
 from .playstyle import PlaystyleTag
 from .result import MatchEventRow, MatchResultRow
-from .season import Season, SeasonMatch, SeasonTeam
+from .season import Season, SeasonDraftPick, SeasonMatch, SeasonTeam, SeasonTransaction
 from .series import Series
 from .settings import SimulationSettings
 from .team import Coach, Player, PlayerPoolEntry, Team, TeamRosterSlot
 from .user import User
 
 __all__ = ["ChatMessage", "Champion", "ChampionMatchup", "Coach", "DraftActionRow", "Game", "GameTeamSnapshot", "Lobby",
-           "MatchEventRow", "MatchResultRow", "PlaystyleTag", "Player", "PlayerPoolEntry", "Season", "SeasonMatch", "SeasonTeam", "Series", "SimulationSettings", "Team", "TeamLineup", "TeamRosterSlot", "User"]
+           "MatchEventRow", "MatchResultRow", "PlaystyleTag", "Player", "PlayerPoolEntry", "Season", "SeasonDraftPick", "SeasonMatch", "SeasonTeam", "SeasonTransaction", "Series", "SimulationSettings", "Team", "TeamLineup", "TeamRosterSlot", "User"]

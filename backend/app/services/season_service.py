@@ -1,8 +1,9 @@
 """Seasons: create a league, enter teams, fill the rest with CPU teams, play it round by round, and the views of
 the standings, schedule and teams. Playing individual fixtures lives in season_match_service.
 
-Bring Your Own: each manager enters one of their own teams (a frozen copy plays the season). Friends join with the
-season's invite code; the CPU generates and runs every team nobody manages. Rounds close when the creator advances
+Bring Your Own: each manager enters one of their own teams (a frozen copy plays the season). Player Draft: managers
+enter a team identity and draft its players from a pool (season_draft_service). Friends join with the season's
+invite code; the CPU generates and runs every team nobody manages. Rounds close when the creator advances
 them, or by themselves at the round deadline.
 """
 from __future__ import annotations
@@ -22,7 +23,7 @@ from app.core.errors import bad_request, conflict, forbidden, not_found
 from app.game import competition, player_generator
 from app.models import (Champion, Coach, Game, MatchResultRow, Player, PlayerPoolEntry, Season, SeasonMatch,
                         SeasonTeam, Team, TeamRosterSlot, User)
-from app.schemas.season import SeasonCreate
+from app.schemas.season import SeasonCreate, SeasonTeamIn
 from app.services import game_service as gs
 from app.services import lobby_rules
 from app.services import season_match_service as matches
@@ -61,6 +62,12 @@ def get_match(db: Session, match_id: int, user: User) -> tuple[Season, SeasonMat
     return get_season(db, match.season_id, user), match
 
 
+def _drafts():
+    """season_draft_service imports this module, so it's loaded on first use."""
+    from app.services import season_draft_service
+    return season_draft_service
+
+
 def _require_creator(season: Season, user: User) -> None:
     if season.created_by != user.id:
         raise forbidden("Only the season's creator can do that.")
@@ -86,8 +93,6 @@ def _new_code(db: Session) -> str:
 
 
 def create_season(db: Session, user: User, body: SeasonCreate) -> Season:
-    if body.roster_mode != "BYO":
-        raise bad_request("Player Draft seasons are coming soon. Choose Bring Your Own for now.")
     active = db.scalar(select(func.count()).select_from(Season).where(Season.created_by == user.id,
                                                                      Season.status.not_in(FINISHED)))
     if active >= MAX_ACTIVE_SEASONS:
@@ -137,29 +142,36 @@ def _copy_into_season(db: Session, season: Season, source: Team, owner_id: int) 
     return team
 
 
-def enter_team(db: Session, season: Season, user: User, team_id: int) -> SeasonTeam:
-    """Bring Your Own: enter one of your teams. A frozen copy plays in the season, so later edits to your team
-    don't change it. The team must be complete and meet the season's rules."""
+def enter_team(db: Session, season: Season, user: User, body: SeasonTeamIn) -> SeasonTeam:
+    """Bring Your Own: enter one of your teams (`team_id`). A frozen copy plays in the season, so later edits to
+    your team don't change it. The team must be complete and meet the season's rules.
+    Player Draft: enter a team identity (name, logo, playstyles, coach) whose roster you'll draft."""
     if season.status != "SETUP":
         raise conflict("Teams can only be entered before the season starts.")
-    if season.roster_mode != "BYO":
-        raise conflict("This season drafts its players; there's no team to bring.")
     existing = season_teams(db, season)
     if any(st.manager_user_id == user.id for st in existing):
         raise conflict("You already have a team in this season. Withdraw it first to enter another.")
     if sum(st.manager_user_id is not None for st in existing) >= _options(season)["human_slots"]:
         raise conflict("Every manager slot in this season is taken.")
-    source = teams.get_visible(db, Team, team_id, user.id)
     taken = {t.name.lower() for t in db.scalars(select(Team).where(Team.id.in_([st.team_id for st in existing])))}
-    if source.name.lower() in taken:
-        raise conflict(f"A team called {source.name} is already in this season. Enter a different team.")
-    issues = teams.team_issues(source)
-    if issues:
-        raise bad_request("That team can't be entered yet: " + "; ".join(issues))
-    broken = lobby_rules.team_rule_issues(teams.team_view(db, source), _rules(season))
-    if broken:
-        raise bad_request("That team breaks this season's rules: " + "; ".join(broken))
-    copy = _copy_into_season(db, season, source, user.id)
+    if season.roster_mode == "DRAFT":
+        name = (body.name or "").strip()
+        if name.lower() in taken:
+            raise conflict(f"A team called {name} is already in this season. Choose another name.")
+        copy = _drafts().create_draft_team(db, season, user, body)
+    else:
+        if body.team_id is None:
+            raise bad_request("Choose one of your teams to enter.")
+        source = teams.get_visible(db, Team, body.team_id, user.id)
+        if source.name.lower() in taken:
+            raise conflict(f"A team called {source.name} is already in this season. Enter a different team.")
+        issues = teams.team_issues(source)
+        if issues:
+            raise bad_request("That team can't be entered yet: " + "; ".join(issues))
+        broken = lobby_rules.team_rule_issues(teams.team_view(db, source), _rules(season))
+        if broken:
+            raise bad_request("That team breaks this season's rules: " + "; ".join(broken))
+        copy = _copy_into_season(db, season, source, user.id)
     st = SeasonTeam(season_id=season.id, team_id=copy.id, manager_user_id=user.id)
     db.add(st)
     db.commit()
@@ -206,10 +218,10 @@ def join_preview(db: Session, code: str, user: User) -> dict:
     }
 
 
-def join_season(db: Session, code: str, user: User, team_id: int) -> Season:
-    """Join with the invite code by entering one of your teams (the same checks as entering it from the hub)."""
+def join_season(db: Session, code: str, user: User, body: SeasonTeamIn) -> Season:
+    """Join with the invite code by entering a team (the same checks as entering it from the hub)."""
     season = _by_code(db, code)
-    enter_team(db, season, user, team_id)
+    enter_team(db, season, user, body)
     return season
 
 
@@ -238,6 +250,7 @@ def release_team(db: Session, season: Season, user: User, season_team_id: int) -
         with matches.simulating(season.id):
             db.refresh(season)
             events = matches.hand_to_cpu(db, season, st)
+            _drafts().after_manager_left(db, season)       # the CPU picks for them if they're on the clock
             db.commit()
     track("season_manager_released", season_id=season.id, user_id=manager_id, by=user.id)
     return events + [matches.season_event(season.id)]
@@ -257,16 +270,21 @@ def withdraw_team(db: Session, season: Season, user: User) -> None:
     db.commit()
 
 
+def _new_player(season: Season, p: dict) -> Player:
+    """A generated player (player_generator.generate_player) as a season row with no owner."""
+    player = Player(owner_user_id=None, season_id=season.id, name=p["name"], role=p["role"], age=p["age"],
+                    region=p["region"], aggr=p["aggr"], aware=p["aware"], pos=p["pos"], dmg=p["dmg"], cs=p["cs"])
+    player.pool_entries = [PlayerPoolEntry(position=i + 1, champion_id=cid) for i, cid in enumerate(p["pool"])]
+    return player
+
+
 def _create_cpu_team(db: Session, season: Season, data: dict) -> SeasonTeam:
     c = data["coach"]
     coach = Coach(owner_user_id=None, season_id=season.id, name=c["name"], draft=c["draft"], synergy=c["synergy"])
     db.add(coach)
     players: dict[str, Player] = {}
     for lane, p in data["roster"].items():
-        player = Player(owner_user_id=None, season_id=season.id, name=p["name"], role=p["role"], age=p["age"],
-                        region=p["region"], aggr=p["aggr"], aware=p["aware"], pos=p["pos"], dmg=p["dmg"],
-                        cs=p["cs"])
-        player.pool_entries = [PlayerPoolEntry(position=i + 1, champion_id=cid) for i, cid in enumerate(p["pool"])]
+        player = _new_player(season, p)
         db.add(player)
         players[lane] = player
     db.flush()
@@ -300,32 +318,45 @@ def _fill_with_cpu_teams(db: Session, season: Season, rng: random.Random) -> Non
 
 
 def start_season(db: Session, season: Season, user: User) -> None:
-    """Fill the empty places with CPU teams, seed everyone at random and draw up the schedule."""
+    """Fill the empty places with CPU teams, then either open the player draft (Player Draft) or seed everyone at
+    random and draw up the schedule."""
     _require_creator(season, user)
     if season.status != "SETUP":
         raise conflict("The season has already started.")
     if not any(st.manager_user_id is not None for st in season_teams(db, season)):
         raise conflict("Enter your team before starting the season.")
+    if season.roster_mode == "DRAFT":
+        _drafts().check_pool(db, season)
     rng = random.Random(secrets.randbits(64))
     _fill_with_cpu_teams(db, season, rng)
+    season.started_at = utcnow()
+    if season.roster_mode == "DRAFT":
+        _drafts().start_draft(db, season, rng)
+    else:
+        _begin_competition(db, season, rng)
+    db.commit()
+    track("season_started", season_id=season.id, teams=len(season_teams(db, season)), format=season.format,
+          roster_mode=season.roster_mode)
+
+
+def _begin_competition(db: Session, season: Season, rng: random.Random) -> None:
+    """Every roster is complete: add the free agents, seed the teams at random and draw up the first stage.
+    The caller commits."""
+    _drafts().add_free_agents(db, season, rng)
     entered = season_teams(db, season)
     rng.shuffle(entered)
     for i, st in enumerate(entered):
         st.seed = i + 1
     options = _options(season)
-    season.status, season.current_round, season.started_at = "REGULAR", 1, utcnow()
+    season.status, season.current_round = "REGULAR", 1
     _open_round(season)
     if season.format == "SWISS":
         db.flush()
         _draw_swiss_round(db, season, 1)
-        rounds = competition.swiss_rounds(options["swiss_wins"], options["swiss_losses"])
     else:
         schedule = competition.round_robin([st.id for st in entered], double=bool(options["rr_double"]))
         for r, pairs in enumerate(schedule):
             _add_round(db, season, "REGULAR", r + 1, pairs, options["regular_series"])
-        rounds = len(schedule)
-    db.commit()
-    track("season_started", season_id=season.id, teams=len(entered), rounds=rounds, format=season.format)
 
 
 def _add_round(db: Session, season: Season, stage: str, round_: int, pairs, series_format: str) -> None:
@@ -350,6 +381,7 @@ def cancel_season(db: Session, season: Season, user: User) -> None:
     if season.status in FINISHED:
         raise conflict("The season is already over.")
     season.status, season.completed_at, season.round_deadline_at = "CANCELLED", utcnow(), None
+    season.pick_deadline_at = None
     db.commit()
 
 
@@ -643,6 +675,11 @@ def season_view(db: Session, season: Season, viewer: User) -> dict:
         "can_start": season.status == "SETUP" and season.created_by == viewer.id
         and any(not r["is_cpu"] for r in refs.values()),
         "can_manage": season.created_by == viewer.id and season.status not in FINISHED,
+        "draft": _drafts().draft_view(db, season, refs, viewer) if season.roster_mode == "DRAFT" else None,
+        "pool": _drafts().pool_summary(db, season)
+        if season.roster_mode == "DRAFT" and season.status == "SETUP" else None,
+        "free_agency": _drafts().free_agency_view(db, season, viewer),
+        "transactions": _drafts().transactions_view(db, season, refs),
         "can_advance": playing and season.created_by == viewer.id,
         "champion": refs.get(season.winner_team_id) if season.winner_team_id else None,
     }

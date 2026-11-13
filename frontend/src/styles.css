@@ -1087,3 +1087,8 @@ h2 .field-help .tip-body { font-weight: 400; }
 .bracket-team a { color: var(--text); text-decoration: none; }
 .bracket-team.won a, .bracket-team.won strong { color: var(--gold); font-weight: 700; }
 .bracket-link { display: flex; gap: 6px; justify-content: flex-end; }
+
+/* seasons: player draft and free agency */
+.check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 12px; max-height: 320px; overflow-y: auto; }
+.pool-picker { border-top: 1px solid var(--line); padding-top: 8px; }
+.list-row.is-yours { border-color: var(--gold); }

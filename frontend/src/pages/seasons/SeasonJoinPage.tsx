@@ -8,6 +8,7 @@ import { useTeams } from '../../hooks/useData'
 import { refreshSeason, useSeasonInvite } from '../../hooks/useSeasons'
 import { lobbyLimits } from '../../lib/format'
 import { CPU_STRENGTH_LABELS, deadlineLabel, formatLabel, SEASON_STATUS_LABELS, seriesSummary } from '../../lib/season'
+import { DraftTeamForm, type DraftTeamBody } from './SeasonDraftParts'
 
 /** /seasons/join/:code: what the season is, then enter one of your teams to join it. */
 export default function SeasonJoinPage() {
@@ -18,7 +19,7 @@ export default function SeasonJoinPage() {
   const navigate = useNavigate()
   const [teamId, setTeamId] = useState<number | ''>('')
   const join = useMutation({
-    mutationFn: () => api<Season>(`/seasons/join/${code}`, { body: { team_id: teamId } }),
+    mutationFn: (body: { team_id: number } | DraftTeamBody) => api<Season>(`/seasons/join/${code}`, { body }),
     onSuccess: (season) => {
       refreshSeason(qc, season)
       navigate(`/seasons/${season.id}`)
@@ -47,7 +48,7 @@ export default function SeasonJoinPage() {
           <span className="badge">{SEASON_STATUS_LABELS[s.status]}</span>
         </div>
         <p className="muted small">
-          Run by {s.created_by?.username ?? '?'} · {s.options.team_count} teams · {formatLabel(s.format, s.options)} ·{' '}
+          Run by {s.created_by?.username ?? '?'} · {s.roster_mode === 'DRAFT' ? 'Player Draft' : 'Bring Your Own'} · {s.options.team_count} teams · {formatLabel(s.format, s.options)} ·{' '}
           {seriesSummary(s.format, { ...s.options, playoff_size: s.options.playoff_size ?? 0 })}
         </p>
         <p className="muted small">
@@ -60,11 +61,13 @@ export default function SeasonJoinPage() {
       </div>
 
       <div className="card stack">
-        <h3>Bring your team</h3>
+        <h3>{s.roster_mode === 'DRAFT' ? 'Your team' : 'Bring your team'}</h3>
         {!s.can_join ? (
           <p className="muted">
             {s.status !== 'SETUP' ? 'This season has already started, so it can no longer be joined.' : 'Every manager slot in this season is taken.'}
           </p>
+        ) : s.roster_mode === 'DRAFT' ? (
+          <DraftTeamForm onSubmit={(body) => join.mutate(body)} pending={join.isPending} error={join.error} label="Join the season" />
         ) : (
           <>
             <p className="muted small">
@@ -84,7 +87,7 @@ export default function SeasonJoinPage() {
               <p className="muted small">You have no complete teams yet. <Link to="/teams/new">Build one →</Link></p>
             )}
             <ErrorNotice error={join.error} />
-            <button className="primary" onClick={() => join.mutate()} disabled={!teamId || join.isPending}>Join the season</button>
+            <button className="primary" onClick={() => teamId && join.mutate({ team_id: teamId })} disabled={!teamId || join.isPending}>Join the season</button>
           </>
         )}
       </div>

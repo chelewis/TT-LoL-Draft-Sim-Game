@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useCallback } from 'react'
 import { api } from '../api/client'
-import type { Season, SeasonJoinPreview, SeasonSchedule, SeasonSummary, SeasonTeamDetail } from '../api/types'
+import type { Season, SeasonJoinPreview, SeasonPoolPlayer, SeasonSchedule, SeasonSummary, SeasonTeamDetail } from '../api/types'
 import { useSocket, type SocketEvent } from './useGameSocket'
 
 /** Every season query starts with this key, so one change can refresh the hub, schedule and team pages. */
@@ -9,7 +9,8 @@ export const seasonKey = (id: number) => ['season', id]
 
 /** The season socket says when anything changes; polling is only a safety net while a season is in play. */
 const POLL_MS = 60000
-const live = (status: string | undefined) => status === 'REGULAR' || status === 'PLAYOFFS' || status === 'SETUP'
+const live = (status: string | undefined) =>
+  status === 'REGULAR' || status === 'PLAYOFFS' || status === 'SETUP' || status === 'PLAYER_DRAFT'
 
 export const useSeasons = () => useQuery({ queryKey: ['seasons'], queryFn: () => api<SeasonSummary[]>('/seasons') })
 
@@ -41,6 +42,14 @@ export function refreshSeason(qc: QueryClient, season: Season) {
   qc.invalidateQueries({ queryKey: seasonKey(season.id) })
   qc.invalidateQueries({ queryKey: ['seasons'] })
 }
+
+/** The draft pool, or the free agents once the season is under way (both: season players on no roster). */
+export const useSeasonPool = (id: number, enabled = true) =>
+  useQuery({
+    queryKey: [...seasonKey(id), 'pool'],
+    queryFn: () => api<{ players: SeasonPoolPlayer[] }>(`/seasons/${id}/pool`),
+    enabled: enabled && Number.isFinite(id),
+  })
 
 export const useSeasonInvite = (code: string) =>
   useQuery({ queryKey: ['season-invite', code], queryFn: () => api<SeasonJoinPreview>(`/seasons/join/${code}`), retry: false })

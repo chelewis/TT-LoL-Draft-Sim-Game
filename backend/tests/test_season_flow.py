@@ -44,10 +44,6 @@ def test_create_season_starts_in_setup(alice):
     assert [s["id"] for s in alice.get("/seasons").json()] == [season["id"]]
 
 
-def test_unsupported_modes_are_refused_for_now(alice):
-    assert alice.post("/seasons", {"name": "x", "roster_mode": "DRAFT"}).status_code == 400
-
-
 def test_entering_a_team_copies_it_into_the_season(alice, default_team_ids):
     before_teams = alice.get("/teams").json()
     before_players = alice.get("/players").json()

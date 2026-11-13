@@ -32,6 +32,7 @@ class Season(Base):
     settings: Mapped[dict] = mapped_column(JSONType)
     current_round: Mapped[int] = mapped_column(Integer, default=0)
     round_deadline_at: Mapped[datetime | None] = mapped_column(DateTime)
+    pick_deadline_at: Mapped[datetime | None] = mapped_column(DateTime)       # Player Draft: the pick clock
     winner_team_id: Mapped[int | None] = mapped_column(Integer)               # the champion's SeasonTeam id
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime)
@@ -49,6 +50,7 @@ class SeasonTeam(Base):
     manager_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
     seed: Mapped[int] = mapped_column(Integer, default=0)
     eliminated: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    draft_position: Mapped[int | None] = mapped_column(Integer)               # Player Draft: 1 picks first
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -76,3 +78,34 @@ class SeasonMatch(Base):
     away_auto_ready: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class SeasonDraftPick(Base):
+    """Player Draft: one pick, in order. The player joins the team's roster in `lane`."""
+    __tablename__ = "season_draft_picks"
+    __table_args__ = (UniqueConstraint("season_id", "pick_number"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    season_id: Mapped[int] = mapped_column(ForeignKey("seasons.id", ondelete="CASCADE"), index=True)
+    pick_number: Mapped[int] = mapped_column(Integer)                         # 1, 2, 3...
+    season_team_id: Mapped[int] = mapped_column(ForeignKey("season_teams.id", ondelete="CASCADE"))
+    player_id: Mapped[int | None] = mapped_column(ForeignKey("players.id", ondelete="SET NULL"))
+    lane: Mapped[str] = mapped_column(String(10))
+    auto: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())   # clock ran out / CPU
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class SeasonTransaction(Base):
+    """Free agency: a signing (SIGN) and the player it replaced (RELEASE), logged per team."""
+    __tablename__ = "season_transactions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    season_id: Mapped[int] = mapped_column(ForeignKey("seasons.id", ondelete="CASCADE"), index=True)
+    season_team_id: Mapped[int] = mapped_column(ForeignKey("season_teams.id", ondelete="CASCADE"), index=True)
+    type: Mapped[str] = mapped_column(String(8))                              # SIGN | RELEASE
+    player_id: Mapped[int | None] = mapped_column(ForeignKey("players.id", ondelete="SET NULL"))
+    player_name: Mapped[str] = mapped_column(String(40))                      # kept for the log
+    lane: Mapped[str] = mapped_column(String(10))
+    stage: Mapped[str] = mapped_column(String(8))
+    round: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

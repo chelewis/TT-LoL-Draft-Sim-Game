@@ -1,4 +1,4 @@
-import type { CpuStrength, SeasonBracketRound, SeasonFormat, SeasonMatch, SeasonOptions, SeasonStatus, SeasonTeamRef, StandingRow } from '../api/types'
+import type { CpuStrength, Lane, SeasonBracketRound, SeasonDraftPick, SeasonPoolPlayer, SeasonFormat, SeasonMatch, SeasonOptions, SeasonStatus, SeasonTeamRef, StandingRow } from '../api/types'
 import { seriesShort } from './format'
 
 export const SEASON_STATUS_LABELS: Record<SeasonStatus, string> = {
@@ -159,4 +159,37 @@ export function timeUntil(iso: string, now: number = Date.now()): string {
 /** The link a friend opens to join the season (signing in first if they need to). */
 export function seasonInviteLink(code: string, origin: string, base = '/'): string {
   return `${origin}${base}seasons/join/${code}`
+}
+
+// ----------------------------------------------------------- player draft
+/** Pick clock choices on the create page, in seconds (0: none). */
+export const PICK_CLOCK_CHOICES = [0, 60, 120, 300, 3600, 43200, 86400] as const
+
+export function pickClockLabel(seconds: number): string {
+  if (!seconds) return 'No pick clock'
+  if (seconds < 3600) return `${seconds / 60} minute${seconds === 60 ? '' : 's'} per pick`
+  return `${seconds / 3600} hour${seconds === 3600 ? '' : 's'} per pick`
+}
+
+/** The draft's picks grouped by round ("Round 1": picks 1..teams). */
+export function draftRounds(picks: SeasonDraftPick[], teams: number): SeasonDraftPick[][] {
+  const rounds: SeasonDraftPick[][] = []
+  for (const p of picks) {
+    const r = Math.floor((p.pick_number - 1) / Math.max(1, teams))
+    ;(rounds[r] ??= []).push(p)
+  }
+  return rounds
+}
+
+/** The lanes a pool player could fill for you right now (their lanes that are still open on your roster). */
+export function pickableLanes(player: Pick<SeasonPoolPlayer, 'lanes'>, open: Lane[]): Lane[] {
+  return player.lanes.filter((l) => open.includes(l))
+}
+
+/** Pool players who play `lane` (all of them for null), best stat total first. */
+export function filterPool<T extends Pick<SeasonPoolPlayer, 'lanes' | 'stat_total' | 'name'>>(players: T[], lane: Lane | null, query = ''): T[] {
+  const q = query.trim().toLowerCase()
+  return players
+    .filter((p) => (lane === null || p.lanes.includes(lane)) && (!q || p.name.toLowerCase().includes(q)))
+    .sort((a, b) => b.stat_total - a.stat_total || a.name.localeCompare(b.name))
 }

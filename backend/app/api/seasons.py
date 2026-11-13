@@ -7,7 +7,9 @@ from starlette.concurrency import run_in_threadpool
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models import User
-from app.schemas.season import AdvanceIn, AutoSimIn, SeasonCreate, SeasonJoinIn, SeasonTeamIn
+from app.schemas.season import (AdvanceIn, AutoSimIn, LanePickIn, PoolAddIn, PoolGenerateIn, SeasonCreate,
+                                 SeasonJoinIn, SeasonTeamIn)
+from app.services import season_draft_service as drafts
 from app.services import season_match_service as matches
 from app.services import season_service as svc
 from app.websocket.manager import manager
@@ -34,7 +36,7 @@ def join_preview(code: str, db: Session = Depends(get_db), user: User = Depends(
 @router.post("/join/{code}", status_code=201)
 async def join_season(code: str, body: SeasonJoinIn, db: Session = Depends(get_db),
                       user: User = Depends(get_current_user)):
-    season = svc.join_season(db, code, user, body.team_id)
+    season = svc.join_season(db, code, user, body)
     await manager.publish([matches.season_event(season.id)])
     return svc.season_view(db, season, user)
 
@@ -48,7 +50,7 @@ def get_season(season_id: int, db: Session = Depends(get_db), user: User = Depen
 async def enter_team(season_id: int, body: SeasonTeamIn, db: Session = Depends(get_db),
                      user: User = Depends(get_current_user)):
     season = svc.get_season(db, season_id, user)
-    svc.enter_team(db, season, user, body.team_id)
+    svc.enter_team(db, season, user, body)
     await manager.publish([matches.season_event(season.id)])
     return svc.season_view(db, season, user)
 
@@ -123,4 +125,72 @@ async def auto_sim_match(match_id: int, body: AutoSimIn | None = None, db: Sessi
     season, match = svc.get_match(db, match_id, user)
     ready = (body or AutoSimIn()).ready
     await manager.publish(await run_in_threadpool(matches.auto_sim_my_match, db, season, match, user, ready))
+    return svc.season_view(db, season, user)
+
+
+# ------------------------------------------------------- player draft pool
+@router.get("/{season_id}/pool")
+def pool(season_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """The season's players on no roster: the draft pool, or (once the season is under way) the free agents."""
+    return drafts.pool_view(db, svc.get_season(db, season_id, user))
+
+
+@router.post("/{season_id}/pool/players", status_code=201)
+async def add_pool_players(season_id: int, body: PoolAddIn, db: Session = Depends(get_db),
+                           user: User = Depends(get_current_user)):
+    season = svc.get_season(db, season_id, user)
+    drafts.add_pool_players(db, season, user, body.player_ids)
+    await manager.publish([matches.season_event(season.id)])
+    return svc.season_view(db, season, user)
+
+
+@router.post("/{season_id}/pool/generate", status_code=201)
+async def generate_pool(season_id: int, body: PoolGenerateIn, db: Session = Depends(get_db),
+                        user: User = Depends(get_current_user)):
+    season = svc.get_season(db, season_id, user)
+    drafts.generate_pool(db, season, user, body.per_role, body.strength)
+    await manager.publish([matches.season_event(season.id)])
+    return svc.season_view(db, season, user)
+
+
+@router.delete("/{season_id}/pool")
+async def clear_pool(season_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    season = svc.get_season(db, season_id, user)
+    drafts.clear_pool(db, season, user)
+    await manager.publish([matches.season_event(season.id)])
+    return svc.season_view(db, season, user)
+
+
+@router.delete("/{season_id}/pool/{player_id}")
+async def remove_pool_player(season_id: int, player_id: int, db: Session = Depends(get_db),
+                             user: User = Depends(get_current_user)):
+    season = svc.get_season(db, season_id, user)
+    drafts.remove_pool_player(db, season, user, player_id)
+    await manager.publish([matches.season_event(season.id)])
+    return svc.season_view(db, season, user)
+
+
+# ----------------------------------------------------------- player draft
+@router.post("/{season_id}/draft/pick")
+async def draft_pick(season_id: int, body: LanePickIn, db: Session = Depends(get_db),
+                     user: User = Depends(get_current_user)):
+    season = svc.get_season(db, season_id, user)
+    await manager.publish(await run_in_threadpool(drafts.make_pick, db, season, user, body.player_id, body.lane))
+    return svc.season_view(db, season, user)
+
+
+@router.post("/{season_id}/draft/auto")
+async def draft_auto_pick(season_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """The best available player for the team on the clock (its manager, or the creator moving the draft on)."""
+    season = svc.get_season(db, season_id, user)
+    await manager.publish(await run_in_threadpool(drafts.auto_pick_now, db, season, user))
+    return svc.season_view(db, season, user)
+
+
+# ----------------------------------------------------------- free agency
+@router.post("/{season_id}/free-agents/sign")
+async def sign_free_agent(season_id: int, body: LanePickIn, db: Session = Depends(get_db),
+                          user: User = Depends(get_current_user)):
+    season = svc.get_season(db, season_id, user)
+    await manager.publish(drafts.sign_free_agent(db, season, user, body.player_id, body.lane))
     return svc.season_view(db, season, user)

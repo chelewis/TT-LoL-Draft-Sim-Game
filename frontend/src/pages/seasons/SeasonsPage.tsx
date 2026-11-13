@@ -7,6 +7,7 @@ import { roundLabel, SEASON_STATUS_LABELS } from '../../lib/season'
 
 function progress(s: SeasonSummary): string {
   if (s.status === 'SETUP') return `${s.teams_entered} of ${s.team_count} teams entered`
+  if (s.status === 'PLAYER_DRAFT') return 'Drafting players'
   if (s.status === 'PLAYOFFS') return `Playoffs, round ${s.current_round} of ${s.total_rounds}`
   if (s.status === 'REGULAR') return `${s.stage === 'SWISS' ? 'Swiss stage' : 'League'}, ${roundLabel(s.current_round, s.total_rounds).toLowerCase()}`
   return `${s.team_count} teams`
@@ -18,7 +19,7 @@ function SeasonRow({ season }: { season: SeasonSummary }) {
       <span className="stack season-row-text">
         <strong>{season.name}</strong>
         <span className="muted small">
-          {season.format === 'SWISS' ? 'Swiss' : 'Round robin'} · Bring Your Own · {progress(season)}
+          {season.format === 'SWISS' ? 'Swiss' : 'Round robin'} · {season.roster_mode === 'DRAFT' ? 'Player Draft' : 'Bring Your Own'} · {progress(season)}
           {season.human_slots > 1 ? ` · ${season.managers} managers` : ''}
           {!season.is_creator && season.created_by ? ` · run by ${season.created_by.username}` : ''}
         </span>

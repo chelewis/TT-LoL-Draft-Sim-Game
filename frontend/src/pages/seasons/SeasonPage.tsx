@@ -13,6 +13,7 @@ import {
   timeUntil, vsManager, type StandingsKey,
 } from '../../lib/season'
 import { CopyButton } from '../game/LobbyView'
+import { DraftBoard, DraftResults, DraftTeamForm, FreeAgents, PoolCard, type DraftTeamBody } from './SeasonDraftParts'
 
 const playing = (s: Season) => s.status === 'REGULAR' || s.status === 'PLAYOFFS'
 
@@ -22,14 +23,24 @@ function roundTitle(season: Season): string {
   return `${season.stage_label} · ${roundLabel(season.current_round, season.total_rounds)}`
 }
 
-type Tab = 'overview' | 'standings' | 'bracket' | 'schedule' | 'teams'
+type Tab = 'overview' | 'standings' | 'bracket' | 'schedule' | 'teams' | 'free_agents' | 'draft'
 const TABS: { key: Tab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'standings', label: 'Standings' },
   { key: 'bracket', label: 'Bracket' },
   { key: 'schedule', label: 'Schedule' },
   { key: 'teams', label: 'Teams' },
+  { key: 'free_agents', label: 'Free agents' },
+  { key: 'draft', label: 'Draft' },
 ]
+
+/** Tabs that only some seasons have: a bracket, free agency, a player draft. */
+function hasTab(s: Season, key: Tab): boolean {
+  if (key === 'bracket') return !!s.bracket
+  if (key === 'free_agents') return s.free_agency.enabled
+  if (key === 'draft') return !!s.draft
+  return true
+}
 
 export default function SeasonPage() {
   const seasonId = Number(useParams().seasonId)
@@ -52,10 +63,15 @@ export default function SeasonPage() {
       <SeasonHeader season={s} />
       {s.status === 'SETUP' ? (
         <SetupPanel season={s} />
+      ) : s.status === 'PLAYER_DRAFT' && s.draft ? (
+        <div className="stack">
+          <DraftBoard season={s} />
+          {s.human_slots > 1 && <ManagersCard season={s} />}
+        </div>
       ) : (
         <>
           <div className="tabs" role="tablist" aria-label="Season view">
-            {TABS.filter((t) => t.key !== 'bracket' || s.bracket).map((t) => (
+            {TABS.filter((t) => hasTab(s, t.key)).map((t) => (
               <button key={t.key} type="button" role="tab" aria-selected={tab === t.key}
                 className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
                 {t.label}
@@ -65,6 +81,8 @@ export default function SeasonPage() {
           {tab === 'overview' && <Overview season={s} onStandings={() => setTab('standings')} />}
           {tab === 'standings' && <StandingsTable season={s} rows={s.standings} />}
           {tab === 'bracket' && s.bracket && <Bracket season={s} bracket={s.bracket} />}
+          {tab === 'free_agents' && s.free_agency.enabled && <FreeAgents season={s} />}
+          {tab === 'draft' && <DraftResults season={s} />}
           {tab === 'schedule' && <Schedule season={s} />}
           {tab === 'teams' && (
             <div className="stack">
@@ -89,7 +107,8 @@ function SeasonHeader({ season }: { season: Season }) {
         </span>
       </div>
       <p className="muted small">
-        {season.options.team_count} teams · {formatLabel(season.format, season.options)} ·{' '}
+        {season.options.team_count} teams · {season.roster_mode === 'DRAFT' ? 'Player Draft' : 'Bring Your Own'} ·{' '}
+        {formatLabel(season.format, season.options)} ·{' '}
         {seriesSummary(season.format, { ...season.options, playoff_size: season.options.playoff_size ?? 0 })} · {season.ruleset_name} rules
         {limits ? ` (${limits})` : ''}
         {season.rules.fearless ? ' · Fearless' : ''}
@@ -116,9 +135,10 @@ function SetupPanel({ season }: { season: Season }) {
   const mine = season.teams.find((t) => t.is_you)
   const onDone = (s: Season) => refreshSeason(qc, s)
   const enter = useMutation({
-    mutationFn: () => api<Season>(`/seasons/${season.id}/teams`, { body: { team_id: teamId } }),
+    mutationFn: (body: { team_id: number } | DraftTeamBody) => api<Season>(`/seasons/${season.id}/teams`, { body }),
     onSuccess: onDone,
   })
+  const draftMode = season.roster_mode === 'DRAFT'
   const withdraw = useMutation({
     mutationFn: () => api<Season>(`/seasons/${season.id}/teams/mine`, { method: 'DELETE' }),
     onSuccess: onDone,
@@ -149,11 +169,15 @@ function SetupPanel({ season }: { season: Season }) {
                 <span className="muted small">rating {mine.rating}</span>
               </div>
               <p className="muted small">
-                A frozen copy of your team is entered: changes you make to the original from now on won't affect the season.
+                {draftMode
+                  ? 'Your players are drafted from the pool once the season starts.'
+                  : "A frozen copy of your team is entered: changes you make to the original from now on won't affect the season."}
               </p>
               <ErrorNotice error={withdraw.error} />
               <button className="ghost" onClick={() => withdraw.mutate()} disabled={withdraw.isPending}>Withdraw team</button>
             </>
+          ) : draftMode ? (
+            <DraftTeamForm onSubmit={(body) => enter.mutate(body)} pending={enter.isPending} error={enter.error} label="Enter team" />
           ) : (
             <>
               <p className="muted small">Choose one of your complete teams (or a default team). It must meet the season's team restrictions.</p>
@@ -170,7 +194,7 @@ function SetupPanel({ season }: { season: Season }) {
                 <p className="muted small">You have no complete teams yet. <Link to="/teams/new">Build one →</Link></p>
               )}
               <ErrorNotice error={enter.error} />
-              <button className="primary" onClick={() => enter.mutate()} disabled={!teamId || enter.isPending}>Enter team</button>
+              <button className="primary" onClick={() => teamId && enter.mutate({ team_id: teamId })} disabled={!teamId || enter.isPending}>Enter team</button>
             </>
           )}
         </div>
@@ -198,6 +222,7 @@ function SetupPanel({ season }: { season: Season }) {
           )}
         </div>
       </div>
+        {draftMode && <PoolCard season={season} />}
       {season.human_slots > 1 && <ManagersCard season={season} />}
     </div>
   )

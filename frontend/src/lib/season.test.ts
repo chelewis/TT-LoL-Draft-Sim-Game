@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { SeasonMatch, SeasonTeamRef, StandingRow } from '../api/types'
 import {
-  autoSimState, bracketSlots, deadlineLabel, formatLabel, playoffChoices, seasonInviteLink, seriesSummary, swissWins,
+  autoSimState, bracketSlots, draftRounds, filterPool, pickableLanes, pickClockLabel, deadlineLabel, formatLabel, playoffChoices, seasonInviteLink, seriesSummary, swissWins,
   timeUntil, vsManager,
   diffLabel, matchesPerTeam, myMatchAction, opponentOf, recordLabel, resultFor, roundLabel, roundRobinRounds,
   scoreLine, sortStandings,
@@ -133,5 +133,27 @@ describe('multiplayer', () => {
   })
   it('builds the invite link', () => {
     expect(seasonInviteLink('ABC123', 'https://x.test')).toBe('https://x.test/seasons/join/ABC123')
+  })
+})
+
+describe('player draft', () => {
+  it('labels pick clocks', () => {
+    expect([0, 60, 300, 3600, 86400].map(pickClockLabel))
+      .toEqual(['No pick clock', '1 minute per pick', '5 minutes per pick', '1 hour per pick', '24 hours per pick'])
+  })
+  it('groups picks by round', () => {
+    const pick = (n: number) => ({ pick_number: n, team: null, player_id: n, player_name: `P${n}`, lane: 'TOP' as const, auto: false })
+    expect(draftRounds([1, 2, 3, 4, 5].map(pick), 2).map((r) => r.map((p) => p.pick_number))).toEqual([[1, 2], [3, 4], [5]])
+  })
+  it('finds the lanes a player can fill and filters the pool', () => {
+    expect(pickableLanes({ lanes: ['MID', 'TOP'] }, ['TOP', 'BOT'])).toEqual(['TOP'])
+    const pool = [
+      { name: 'b', stat_total: 30, lanes: ['MID' as const] },
+      { name: 'a', stat_total: 30, lanes: ['TOP' as const, 'MID' as const] },
+      { name: 'c', stat_total: 40, lanes: ['BOT' as const] },
+    ]
+    expect(filterPool(pool, null).map((p) => p.name)).toEqual(['c', 'a', 'b'])
+    expect(filterPool(pool, 'MID').map((p) => p.name)).toEqual(['a', 'b'])
+    expect(filterPool(pool, null, 'C').map((p) => p.name)).toEqual(['c'])
   })
 })

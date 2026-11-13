@@ -2,13 +2,13 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
-import type { CpuStrength, Season, SeasonFormat, SeasonOptions, SeriesFormat } from '../../api/types'
+import type { CpuStrength, RosterMode, Season, SeasonFormat, SeasonOptions, SeriesFormat } from '../../api/types'
 import { ErrorNotice } from '../../components/common'
 import DraftOptionsForm, { ANYTHING_GOES, draftSettingsPayload, type DraftOptions } from '../../components/DraftOptionsForm'
 import { refreshSeason } from '../../hooks/useSeasons'
 import {
-  CPU_STRENGTH_LABELS, DEADLINE_CHOICES, deadlineLabel, formatLabel, matchesPerTeam, playoffChoices, roundRobinRounds,
-  SWISS_TEAM_COUNTS, swissWins,
+  CPU_STRENGTH_LABELS, DEADLINE_CHOICES, deadlineLabel, formatLabel, matchesPerTeam, PICK_CLOCK_CHOICES, pickClockLabel,
+  playoffChoices, roundRobinRounds, SWISS_TEAM_COUNTS, swissWins,
 } from '../../lib/season'
 
 const TEAM_COUNTS = Array.from({ length: 13 }, (_, i) => i + 4)     // 4 to 16
@@ -16,6 +16,7 @@ const TEAM_COUNTS = Array.from({ length: 13 }, (_, i) => i + 4)     // 4 to 16
 const DEFAULT_OPTIONS: SeasonOptions = {
   team_count: 8, human_slots: 1, rr_double: false, regular_series: 'BO1', cpu_strength: 'EVEN',
   playoff_size: 4, playoff_series: 'BO3', final_series: 'BO5', round_deadline_hours: 0,
+  draft_pick_seconds: 0, max_signings: 3, free_agents_per_role: 2,
 }
 
 function SeriesSelect({ label, value, onChange }: { label: string; value: SeriesFormat; onChange: (v: SeriesFormat) => void }) {
@@ -36,6 +37,7 @@ export default function SeasonCreatePage() {
   const qc = useQueryClient()
   const [name, setName] = useState('')
   const [format, setFormatState] = useState<SeasonFormat>('ROUND_ROBIN')
+  const [rosterMode, setRosterMode] = useState<RosterMode>('BYO')
   const [options, setOptions] = useState<SeasonOptions>(DEFAULT_OPTIONS)
   // a season of many matches defaults to no draft timers, like single player
   const [rules, setRules] = useState<DraftOptions>({ ...ANYTHING_GOES, timers_enabled: false })
@@ -66,7 +68,7 @@ export default function SeasonCreatePage() {
     mutationFn: () => api<Season>('/seasons', {
       body: {
         name: name.trim(),
-        roster_mode: 'BYO',
+        roster_mode: rosterMode,
         format,
         // fearless is kept even though the rules' own series format is unused: it applies to BO3 / BO5 fixtures
         rules: { ...draftSettingsPayload(rules, true), series_format: 'BO1', fearless: rules.fearless },
@@ -185,14 +187,39 @@ export default function SeasonCreatePage() {
         <h3>4. Teams</h3>
         <label>
           Rosters
-          <select value="BYO" disabled>
-            <option value="BYO">Bring Your Own: enter one of your teams</option>
+          <select value={rosterMode} onChange={(e) => setRosterMode(e.target.value as RosterMode)}>
+            <option value="BYO">Bring Your Own: each manager enters one of their teams</option>
+            <option value="DRAFT">Player Draft: managers draft their players from a pool</option>
           </select>
         </label>
         <p className="muted small">
-          A frozen copy of your team plays the season, so editing it later won't change the season. A Player Draft mode
-          (draft your roster from a pool) is coming soon.
+          {rosterMode === 'DRAFT'
+            ? "Managers enter a team name, playstyles and coach. You fill the pool (your own players or generated ones) before the start; then everyone snake-drafts five players."
+            : "A frozen copy of each manager's team plays the season, so editing it later won't change the season."}
         </p>
+        {rosterMode === 'DRAFT' && (
+          <label>
+            Pick clock
+            <select value={options.draft_pick_seconds ?? 0} onChange={(e) => set({ draft_pick_seconds: Number(e.target.value) })}>
+              {PICK_CLOCK_CHOICES.map((s) => <option key={s} value={s}>{pickClockLabel(s)}</option>)}
+            </select>
+          </label>
+        )}
+        <label>
+          Free agency
+          <select value={options.max_signings ?? 0} onChange={(e) => set({ max_signings: Number(e.target.value) })}>
+            <option value={0}>Off</option>
+            {[1, 2, 3, 5, 10].map((n) => <option key={n} value={n}>{n} signing{n === 1 ? '' : 's'} per team</option>)}
+          </select>
+        </label>
+        {!!options.max_signings && (
+          <label>
+            Generated free agents
+            <select value={options.free_agents_per_role ?? 0} onChange={(e) => set({ free_agents_per_role: Number(e.target.value) })}>
+              {[0, 1, 2, 3, 5].map((n) => <option key={n} value={n}>{n ? `${n} per lane` : 'None'}{rosterMode === 'DRAFT' ? ' (plus the undrafted pool)' : ''}</option>)}
+            </select>
+          </label>
+        )}
         <label>
           CPU team strength
           <select value={options.cpu_strength} onChange={(e) => set({ cpu_strength: e.target.value as CpuStrength })}>
