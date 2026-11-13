@@ -32,6 +32,7 @@ class Season(Base):
     settings: Mapped[dict] = mapped_column(JSONType)
     current_round: Mapped[int] = mapped_column(Integer, default=0)
     round_deadline_at: Mapped[datetime | None] = mapped_column(DateTime)
+    deadline_warned: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())  # this round's
     pick_deadline_at: Mapped[datetime | None] = mapped_column(DateTime)       # Player Draft: the pick clock
     winner_team_id: Mapped[int | None] = mapped_column(Integer)               # the champion's SeasonTeam id
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

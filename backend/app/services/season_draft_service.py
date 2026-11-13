@@ -29,6 +29,7 @@ from app.models import (Champion, Coach, Player, Season, SeasonDraftPick, Season
                         SeasonTransaction, Team, TeamRosterSlot, User)
 from app.schemas.season import SeasonTeamIn
 from app.services import lobby_rules
+from app.services import notification_service as notes
 from app.services import season_match_service as matches
 from app.services import season_service as ss
 from app.services import team_management_service as teams
@@ -304,8 +305,21 @@ def _advance_draft(db: Session, season: Season) -> None:
         number, st = nxt
         if st.manager_user_id is not None:
             _set_clock(season, st)
+            _tell_on_the_clock(db, season, number, st)
             return
         _auto_pick_for(db, season, number, st)
+
+
+def _tell_on_the_clock(db: Session, season: Season, number: int, st: SeasonTeam) -> None:
+    """Tell a manager it's their pick, unless they made the pick just before too (the turn of the snake)."""
+    order = [t.id for t in draft_teams(db, season)]
+    if number > 1 and snake_order(order, number - 1) == st.id:
+        return
+    seconds = ss._options(season).get("draft_pick_seconds") or 0
+    clock = f" You have {ss._in_words(timedelta(seconds=seconds))}." if seconds else ""
+    notes.notify(db, st.manager_user_id, "ON_THE_CLOCK", f"{season.name}: you're on the clock",
+                 f"Pick {number} of the player draft is yours.{clock}", ss.season_link(season), season.id,
+                 key=f"season:{season.id}:pick:{number}")
 
 
 def _require_drafting(season: Season) -> None:

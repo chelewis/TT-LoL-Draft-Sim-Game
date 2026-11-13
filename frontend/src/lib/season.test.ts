@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import type { SeasonMatch, SeasonTeamRef, StandingRow } from '../api/types'
+import type { SeasonMatch, SeasonOptions, SeasonPlayerStats, SeasonTeamRef, StandingRow } from '../api/types'
 import {
   autoSimState, bracketSlots, draftRounds, filterPool, pickableLanes, pickClockLabel, deadlineLabel, formatLabel, playoffChoices, seasonInviteLink, seriesSummary, swissWins,
   timeUntil, vsManager,
   diffLabel, matchesPerTeam, myMatchAction, opponentOf, recordLabel, resultFor, roundLabel, roundRobinRounds,
   scoreLine, sortStandings,
+  applyTemplate, matchingTemplate, SEASON_TEMPLATES, sortPlayerStats, statValue, timeAgo,
 } from './season'
 
 const team = (id: number, name: string): SeasonTeamRef => ({
@@ -155,5 +156,56 @@ describe('player draft', () => {
     expect(filterPool(pool, null).map((p) => p.name)).toEqual(['c', 'a', 'b'])
     expect(filterPool(pool, 'MID').map((p) => p.name)).toEqual(['a', 'b'])
     expect(filterPool(pool, null, 'C').map((p) => p.name)).toEqual(['c'])
+  })
+})
+
+describe('templates', () => {
+  const base: SeasonOptions = {
+    team_count: 8, human_slots: 6, rr_double: false, regular_series: 'BO1', cpu_strength: 'EVEN', playoff_size: 4,
+    playoff_series: 'BO3', final_series: 'BO5', round_deadline_hours: 24, draft_pick_seconds: 0, max_signings: 3,
+    free_agents_per_role: 2,
+  }
+  it('applies the competition format and keeps the rest', () => {
+    const quick = SEASON_TEMPLATES.find((t) => t.key === 'quick')!
+    const out = applyTemplate(base, quick)
+    expect(out.team_count).toBe(4)
+    expect(out.human_slots).toBe(4)                    // no more managers than teams
+    expect(out.round_deadline_hours).toBe(24)
+    expect(matchingTemplate(quick.format, out)?.key).toBe('quick')
+    expect(matchingTemplate('SWISS', out)).toBeNull()
+    expect(matchingTemplate('ROUND_ROBIN', base)).toBeNull()
+  })
+  it('only uses sizes the server accepts', () => {
+    for (const t of SEASON_TEMPLATES) {
+      if (t.format === 'SWISS') expect([8, 16]).toContain(t.options.team_count)
+      expect([0, 2, 4, 8]).toContain(t.options.playoff_size)
+      expect(t.options.playoff_size).toBeLessThanOrEqual(t.options.team_count)
+    }
+  })
+})
+
+describe('season stats', () => {
+  const p = (id: number, name: string, rating: number, kda: number): SeasonPlayerStats => ({
+    player_id: id, name, team_id: 1, team: null, lane: 'MID', games: 4, wins: 2, mvps: 0, kills: 0, deaths: 0,
+    assists: 0, cs: 0, gold: 0, damage_dealt: 0, kda, rating, kills_pg: 0, assists_pg: 0, deaths_pg: 0, cs_pg: 0,
+    damage_pg: 0, champions: [],
+  })
+  const rows = [p(1, 'Zed', 50, 3), p(2, 'Ahri', 60, 2), p(3, 'Brand', 55, 3)]
+  it('sorts by any column, ties by rating', () => {
+    expect(sortPlayerStats(rows, 'rating', true).map((r) => r.player_id)).toEqual([2, 3, 1])
+    expect(sortPlayerStats(rows, 'kda', true).map((r) => r.player_id)).toEqual([3, 1, 2])
+    expect(sortPlayerStats(rows, 'name', false).map((r) => r.name)).toEqual(['Ahri', 'Brand', 'Zed'])
+  })
+  it('formats values', () => {
+    expect(statValue(12345, 0)).toBe('12,345')
+    expect(statValue(3.5, 2)).toBe('3.50')
+  })
+  it('says how long ago', () => {
+    const now = Date.parse('2026-01-02T12:00:00Z')
+    expect(timeAgo('2026-01-02T11:59:40Z', now)).toBe('just now')
+    expect(timeAgo('2026-01-02T11:15:00Z', now)).toBe('45m ago')
+    expect(timeAgo('2026-01-02T09:00:00Z', now)).toBe('3h ago')
+    expect(timeAgo('2025-12-30T12:00:00Z', now)).toBe('3d ago')
+    expect(timeAgo(null, now)).toBe('')
   })
 })

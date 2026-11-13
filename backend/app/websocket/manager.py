@@ -1,10 +1,12 @@
 """WebSocket connection registry (spec section 25).
 
 WebSockets only *notify* clients; REST stays authoritative for every mutation and for full state.
-Channels are a game id (the players of one game) or season_channel(id) (everyone on a season's hub).
+Channels are a game id (the players of one game), season_channel(id) (everyone on a season's hub) or
+user_channel(id) (each of one user's open tabs: their notifications).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import defaultdict
 from typing import Union
@@ -19,9 +21,33 @@ def season_channel(season_id: int) -> str:
     return f"season:{season_id}"
 
 
+def user_channel(user_id: int) -> str:
+    return f"user:{user_id}"
+
+
 class ConnectionManager:
     def __init__(self) -> None:
         self._connections: dict[Channel, list[tuple[WebSocket, int]]] = defaultdict(list)
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def bind_loop(self, loop: asyncio.AbstractEventLoop | None) -> None:
+        """The server's event loop, so code running in worker threads can push notifications (notify_users)."""
+        self._loop = loop
+
+    def notify_users(self, user_ids) -> None:
+        """Tell each user's open tabs they have a new notification. Safe from any thread; a no-op without a
+        running server loop (scripts, most tests)."""
+        loop, ids = self._loop, sorted(user_ids)
+        if loop is None or loop.is_closed() or not ids:
+            return
+
+        def send() -> None:
+            for uid in ids:
+                loop.create_task(self.broadcast(user_channel(uid), {"type": "NOTIFICATION"}))
+        try:
+            loop.call_soon_threadsafe(send)
+        except RuntimeError:          # the loop shut down meanwhile
+            pass
 
     def online_users(self, game_id: Channel) -> set[int]:
         return {uid for _, uid in self._connections.get(game_id, [])}

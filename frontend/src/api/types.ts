@@ -1153,3 +1153,86 @@ export interface GameSeasonInfo {
   round: number
   format: SeriesFormat
 }
+
+// ------------------------------------------------------------ season stats
+/** One player's season line, summed from the box scores of every game they played. */
+export interface SeasonPlayerStats {
+  player_id: number
+  name: string
+  team_id: number
+  team: SeasonTeamRef | null
+  /** the lane they played most */
+  lane: Lane | ''
+  games: number
+  wins: number
+  mvps: number
+  kills: number
+  deaths: number
+  assists: number
+  cs: number
+  gold: number
+  damage_dealt: number
+  kda: number
+  /** average rank score: the same score that picks each game's MVP */
+  rating: number
+  kills_pg: number
+  assists_pg: number
+  deaths_pg: number
+  cs_pg: number
+  damage_pg: number
+  champions: string[]
+}
+
+export interface SeasonLeaderRow {
+  player_id: number
+  name: string
+  team_id: number
+  team: SeasonTeamRef | null
+  lane: Lane | ''
+  games: number
+  value: number
+}
+
+export interface SeasonLeaderCategory {
+  key: 'rating' | 'kda' | 'kills_pg' | 'assists_pg' | 'cs_pg' | 'damage_pg' | 'mvps'
+  label: string
+  decimals: number
+  rows: SeasonLeaderRow[]
+}
+
+export interface SeasonStats {
+  games: number
+  /** games a player needs to lead a stat or win an award (half the most anyone has played) */
+  min_games: number
+  /** the season is over: the awards are final (before that they show who leads the race) */
+  final: boolean
+  players: SeasonPlayerStats[]
+  leaders: SeasonLeaderCategory[]
+  awards: {
+    season_mvp: SeasonPlayerStats | null
+    finals_mvp: SeasonPlayerStats | null
+    all_pro: { lane: Lane; player: SeasonPlayerStats | null }[]
+  }
+}
+
+// ------------------------------------------------------------ notifications
+export type NotificationKind =
+  | 'MATCH_READY' | 'OPPONENT_READY' | 'AUTO_SIM_ASKED' | 'ON_THE_CLOCK' | 'DEADLINE'
+  | 'SEASON_STARTED' | 'SEASON_OVER' | 'SEASON_JOINED' | 'SEASON_REMOVED'
+
+export interface AppNotification {
+  id: number
+  kind: NotificationKind
+  title: string
+  body: string
+  /** a path in the app, e.g. /seasons/3 */
+  link: string
+  season_id: number | null
+  created_at: string | null
+  read: boolean
+}
+
+export interface NotificationInbox {
+  unread: number
+  items: AppNotification[]
+}

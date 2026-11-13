@@ -194,3 +194,8 @@ async def sign_free_agent(season_id: int, body: LanePickIn, db: Session = Depend
     season = svc.get_season(db, season_id, user)
     await manager.publish(drafts.sign_free_agent(db, season, user, body.player_id, body.lane))
     return svc.season_view(db, season, user)
+
+
+@router.get("/{season_id}/stats")
+def season_stats(season_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return svc.stats_view(db, svc.get_season(db, season_id, user), user)

@@ -15,6 +15,7 @@ from app.core.errors import conflict, forbidden
 from app.game.competition import wins_needed
 from app.models import Game, MatchResultRow, Season, SeasonMatch, SeasonTeam, User
 from app.services import game_service as gs
+from app.services import notification_service as notes
 from app.services.analytics import track
 
 Events = list[dict]
@@ -166,6 +167,14 @@ def _my_team(db: Session, match: SeasonMatch, user: User) -> SeasonTeam:
     return mine
 
 
+def _tell_opponent(db: Session, season: Season, match: SeasonMatch, mine: SeasonTeam, kind: str, title: str,
+                   body: str, key: str) -> None:
+    other = next((st for st in _sides(db, match) if st.id != mine.id), None)
+    if other is not None:
+        notes.notify(db, other.manager_user_id, kind, f"{season.name}: {title}", body, f"/seasons/{season.id}",
+                     season.id, key=f"match:{match.id}:{key}")
+
+
 def _check_playable(season: Season, match: SeasonMatch) -> None:
     if season.status not in PLAYING:
         raise conflict("The season isn't in progress.")
@@ -194,6 +203,8 @@ def play_match(db: Session, season: Season, match: SeasonMatch, user: User) -> t
         game = _new_game(db, season, match, home, away, home.manager_user_id, away.manager_user_id, user.id,
                          ready=(mine.id == home.id, mine.id == away.id))
         events = [gs._event(game, "PLAYER_READY", team="BLUE" if mine.id == home.id else "RED", ready=True)]
+        _tell_opponent(db, season, match, mine, "OPPONENT_READY", f"{user.username} is ready to play",
+                       "Press Play on your match to start the draft.", "opponent_ready")
     else:
         game = _new_game(db, season, match, home, away, home.manager_user_id, away.manager_user_id, user.id)
         events = gs._start_draft(db, game)
@@ -247,6 +258,10 @@ def auto_sim_my_match(db: Session, season: Season, match: SeasonMatch, user: Use
         else:
             match.away_auto_ready = ready
         if not (match.home_auto_ready and match.away_auto_ready):
+            if ready:
+                _tell_opponent(db, season, match, mine, "AUTO_SIM_ASKED",
+                               f"{user.username} asked to let the CPU play your match",
+                               "Agree on the season page and the CPU plays it for both of you.", f"auto:{mine.id}")
             db.commit()
             return [season_event(season.id)]
     elif not ready:

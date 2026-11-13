@@ -14,6 +14,7 @@ import {
 } from '../../lib/season'
 import { CopyButton } from '../game/LobbyView'
 import { DraftBoard, DraftResults, DraftTeamForm, FreeAgents, PoolCard, type DraftTeamBody } from './SeasonDraftParts'
+import { AwardsCard, SeasonStatsTab } from './SeasonStatsParts'
 
 const playing = (s: Season) => s.status === 'REGULAR' || s.status === 'PLAYOFFS'
 
@@ -23,12 +24,13 @@ function roundTitle(season: Season): string {
   return `${season.stage_label} · ${roundLabel(season.current_round, season.total_rounds)}`
 }
 
-type Tab = 'overview' | 'standings' | 'bracket' | 'schedule' | 'teams' | 'free_agents' | 'draft'
+type Tab = 'overview' | 'standings' | 'bracket' | 'schedule' | 'stats' | 'teams' | 'free_agents' | 'draft'
 const TABS: { key: Tab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'standings', label: 'Standings' },
   { key: 'bracket', label: 'Bracket' },
   { key: 'schedule', label: 'Schedule' },
+  { key: 'stats', label: 'Stats' },
   { key: 'teams', label: 'Teams' },
   { key: 'free_agents', label: 'Free agents' },
   { key: 'draft', label: 'Draft' },
@@ -84,6 +86,7 @@ export default function SeasonPage() {
           {tab === 'free_agents' && s.free_agency.enabled && <FreeAgents season={s} />}
           {tab === 'draft' && <DraftResults season={s} />}
           {tab === 'schedule' && <Schedule season={s} />}
+          {tab === 'stats' && <SeasonStatsTab season={s} />}
           {tab === 'teams' && (
             <div className="stack">
               {s.human_slots > 1 && <ManagersCard season={s} />}
@@ -465,6 +468,7 @@ function Overview({ season, onStandings }: { season: Season; onStandings: () => 
           {season.champion.is_you && <p>Your team won the season!</p>}
         </div>
       )}
+      {season.status === 'COMPLETED' && <AwardsCard season={season} />}
       {season.status === 'CANCELLED' && <div className="notice">This season was cancelled.</div>}
       {(season.status === 'REGULAR' || season.status === 'PLAYOFFS') && (
         <div className="grid two">

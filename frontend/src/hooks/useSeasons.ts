@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useCallback } from 'react'
 import { api } from '../api/client'
-import type { Season, SeasonJoinPreview, SeasonPoolPlayer, SeasonSchedule, SeasonSummary, SeasonTeamDetail } from '../api/types'
+import type { Season, SeasonJoinPreview, SeasonPoolPlayer, SeasonSchedule, SeasonStats, SeasonSummary, SeasonTeamDetail } from '../api/types'
 import { useSocket, type SocketEvent } from './useGameSocket'
 
 /** Every season query starts with this key, so one change can refresh the hub, schedule and team pages. */
@@ -65,3 +65,11 @@ export function useSeasonSocket(id: number): boolean {
   }, [qc, id])
   return useSocket(Number.isFinite(id) ? `/ws/seasons/${id}` : null, onEvent)
 }
+
+/** Stat leaders, every player's season line and the awards (refetched with the rest of the season). */
+export const useSeasonStats = (id: number, enabled = true) =>
+  useQuery({
+    queryKey: [...seasonKey(id), 'stats'],
+    queryFn: () => api<SeasonStats>(`/seasons/${id}/stats`),
+    enabled: enabled && Number.isFinite(id),
+  })

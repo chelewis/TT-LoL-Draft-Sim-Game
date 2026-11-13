@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from app.api import admin, auth, games, lobbies, management, meta, public, seasons, series
+from app.api import admin, auth, games, lobbies, management, meta, notifications, public, seasons, series
 from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine
 from app.core.dependencies import user_from_token
@@ -17,7 +17,7 @@ from app.data.seed_db import seed_database
 from app.models import Game, Season
 from app.services import game_service, season_match_service
 from app.services.timeouts import timeout_loop
-from app.websocket.manager import manager, season_channel
+from app.websocket.manager import manager, season_channel, user_channel
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -31,10 +31,12 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(engine)  # development convenience; production uses Alembic migrations
     with SessionLocal() as db:
         seed_database(db)
+    manager.bind_loop(asyncio.get_running_loop())       # so worker threads can push notifications
     task = None
     if settings.run_timeout_task:
         task = asyncio.create_task(timeout_loop(SessionLocal, settings.timeout_poll_seconds))
     yield
+    manager.bind_loop(None)
     if task:
         task.cancel()
 
@@ -43,7 +45,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="League Draft Manager", version="1.0.0", lifespan=lifespan)
     app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True,
                        allow_methods=["*"], allow_headers=["*"])
-    for module in (auth, management, public, meta, lobbies, games, series, seasons, admin):
+    for module in (auth, management, public, meta, lobbies, games, series, seasons, notifications, admin):
         app.include_router(module.router, prefix=API_PREFIX)
 
     @app.get("/health")
@@ -89,6 +91,26 @@ def create_app() -> FastAPI:
         channel = season_channel(season_id)
         await manager.connect(channel, user.id, websocket)
         await websocket.send_json({"type": "CONNECTED", "season_id": season_id})
+        try:
+            while True:
+                if await websocket.receive_text() == "ping":
+                    await websocket.send_json({"type": "PONG"})
+        except WebSocketDisconnect:
+            pass
+        finally:
+            manager.disconnect(channel, user.id, websocket)
+
+    @app.websocket("/ws/me")
+    async def user_socket(websocket: WebSocket, token: str = ""):
+        """Your notifications (NOTIFICATION: refetch the inbox), in every tab you have open."""
+        with SessionLocal() as db:
+            user = user_from_token(db, token)
+        if user is None:
+            await websocket.close(code=4403)
+            return
+        channel = user_channel(user.id)
+        await manager.connect(channel, user.id, websocket)
+        await websocket.send_json({"type": "CONNECTED"})
         try:
             while True:
                 if await websocket.receive_text() == "ping":

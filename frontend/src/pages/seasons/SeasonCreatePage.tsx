@@ -7,8 +7,9 @@ import { ErrorNotice } from '../../components/common'
 import DraftOptionsForm, { ANYTHING_GOES, draftSettingsPayload, type DraftOptions } from '../../components/DraftOptionsForm'
 import { refreshSeason } from '../../hooks/useSeasons'
 import {
-  CPU_STRENGTH_LABELS, DEADLINE_CHOICES, deadlineLabel, formatLabel, matchesPerTeam, PICK_CLOCK_CHOICES, pickClockLabel,
-  playoffChoices, roundRobinRounds, SWISS_TEAM_COUNTS, swissWins,
+  applyTemplate, CPU_STRENGTH_LABELS, DEADLINE_CHOICES, deadlineLabel, formatLabel, matchesPerTeam, matchingTemplate,
+  PICK_CLOCK_CHOICES, pickClockLabel, playoffChoices, roundRobinRounds, SEASON_TEMPLATES, SWISS_TEAM_COUNTS, swissWins,
+  type SeasonTemplate,
 } from '../../lib/season'
 
 const TEAM_COUNTS = Array.from({ length: 13 }, (_, i) => i + 4)     // 4 to 16
@@ -64,6 +65,12 @@ export default function SeasonCreatePage() {
       human_slots: Math.min(options.human_slots, n) })
   }
 
+  function pickTemplate(t: SeasonTemplate) {
+    setFormatState(t.format)
+    setOptions(applyTemplate(options, t))
+  }
+  const chosen = matchingTemplate(format, { ...options, playoff_size: swiss ? 0 : options.playoff_size })
+
   const create = useMutation({
     mutationFn: () => api<Season>('/seasons', {
       body: {
@@ -91,6 +98,20 @@ export default function SeasonCreatePage() {
       <div className="row between wrap">
         <h2>Create a season</h2>
         <Link to="/seasons">← All seasons</Link>
+      </div>
+
+      <div className="card stack">
+        <h3>Start from a format</h3>
+        <div className="template-grid">
+          {SEASON_TEMPLATES.map((t) => (
+            <button key={t.key} type="button" className={`template${chosen?.key === t.key ? ' active' : ''}`}
+              aria-pressed={chosen?.key === t.key} onClick={() => pickTemplate(t)}>
+              <strong>{t.name}</strong>
+              <span className="muted small">{t.description}</span>
+            </button>
+          ))}
+        </div>
+        <p className="muted small">Sets the teams, format and match lengths below; change anything afterwards.</p>
       </div>
 
       <div className="card stack">

@@ -3,6 +3,7 @@ import { Link, NavLink, Route, Routes } from 'react-router-dom'
 import { useAuth } from './auth/AuthContext'
 import { AdminMenu } from './components/AdminMenu'
 import { NavMenu } from './components/NavMenu'
+import { NotificationBell } from './components/NotificationBell'
 import { RequireAdmin, RequireAuth } from './components/common'
 import AdminPage from './pages/admin/AdminPage'
 import GamePage from './pages/GamePage'
@@ -37,6 +38,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           {user?.is_admin && <AdminMenu />}
         </nav>
         <div className="row">
+          <NotificationBell />
           <span className="muted small">{user?.username}</span>
           <button className="ghost small" onClick={() => { logout(); qc.clear() }}>Log out</button>
         </div>

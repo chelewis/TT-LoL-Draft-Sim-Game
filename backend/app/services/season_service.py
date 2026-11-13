@@ -20,12 +20,13 @@ from sqlalchemy.orm import Session
 
 from app.core.clock import iso, utcnow
 from app.core.errors import bad_request, conflict, forbidden, not_found
-from app.game import competition, player_generator
+from app.game import competition, player_generator, season_awards
 from app.models import (Champion, Coach, Game, MatchResultRow, Player, PlayerPoolEntry, Season, SeasonMatch,
                         SeasonTeam, Team, TeamRosterSlot, User)
 from app.schemas.season import SeasonCreate, SeasonTeamIn
 from app.services import game_service as gs
 from app.services import lobby_rules
+from app.services import notification_service as notes
 from app.services import season_match_service as matches
 from app.services import team_management_service as teams
 from app.services.analytics import track
@@ -37,6 +38,9 @@ MAX_ACTIVE_SEASONS = 10          # seasons a user can have created that haven't 
 IN_PLAY = ("DRAFTING", "LANE_ASSIGNMENT", "READY_TO_SIMULATE", "SIMULATING")
 # at the round deadline a match managers are still drafting gets this long to finish before the CPU takes over
 DEADLINE_GRACE = timedelta(minutes=30)
+# managers with a match still to play are warned this long before the round deadline (a quarter of the round's
+# time, for short rounds)
+DEADLINE_WARNING = timedelta(hours=2)
 
 
 # ----------------------------------------------------------------- access
@@ -221,7 +225,12 @@ def join_preview(db: Session, code: str, user: User) -> dict:
 def join_season(db: Session, code: str, user: User, body: SeasonTeamIn) -> Season:
     """Join with the invite code by entering a team (the same checks as entering it from the hub)."""
     season = _by_code(db, code)
-    enter_team(db, season, user, body)
+    st = enter_team(db, season, user, body)
+    if user.id != season.created_by:
+        name = db.scalar(select(Team.name).where(Team.id == st.team_id))
+        notes.notify(db, season.created_by, "SEASON_JOINED", f"{user.username} joined {season.name}",
+                     f"They manage {name}.", season_link(season), season.id)
+        db.commit()
     return season
 
 
@@ -252,6 +261,12 @@ def release_team(db: Session, season: Season, user: User, season_team_id: int) -
             events = matches.hand_to_cpu(db, season, st)
             _drafts().after_manager_left(db, season)       # the CPU picks for them if they're on the clock
             db.commit()
+    if user.id != manager_id:
+        notes.notify(db, manager_id, "SEASON_REMOVED", f"You were removed from {season.name}",
+                     "The season's creator took you off your team." + ("" if season.status == "SETUP"
+                                                                         else " The CPU runs it from now on."),
+                     season_link(season), season.id)
+        db.commit()
     track("season_manager_released", season_id=season.id, user_id=manager_id, by=user.id)
     return events + [matches.season_event(season.id)]
 
@@ -331,17 +346,22 @@ def start_season(db: Session, season: Season, user: User) -> None:
     _fill_with_cpu_teams(db, season, rng)
     season.started_at = utcnow()
     if season.roster_mode == "DRAFT":
+        for st in season_teams(db, season):
+            if st.manager_user_id != user.id:
+                notes.notify(db, st.manager_user_id, "SEASON_STARTED", f"{season.name}: the player draft has started",
+                             "Draft your five players from the pool.", season_link(season), season.id,
+                             key=f"season:{season.id}:started")
         _drafts().start_draft(db, season, rng)
     else:
-        _begin_competition(db, season, rng)
+        _begin_competition(db, season, rng, actor_id=user.id)
     db.commit()
     track("season_started", season_id=season.id, teams=len(season_teams(db, season)), format=season.format,
           roster_mode=season.roster_mode)
 
 
-def _begin_competition(db: Session, season: Season, rng: random.Random) -> None:
-    """Every roster is complete: add the free agents, seed the teams at random and draw up the first stage.
-    The caller commits."""
+def _begin_competition(db: Session, season: Season, rng: random.Random, actor_id: int | None = None) -> None:
+    """Every roster is complete: add the free agents, seed the teams at random and draw up the first stage, and
+    tell the managers their first match is ready. The caller commits."""
     _drafts().add_free_agents(db, season, rng)
     entered = season_teams(db, season)
     rng.shuffle(entered)
@@ -357,6 +377,7 @@ def _begin_competition(db: Session, season: Season, rng: random.Random) -> None:
         schedule = competition.round_robin([st.id for st in entered], double=bool(options["rr_double"]))
         for r, pairs in enumerate(schedule):
             _add_round(db, season, "REGULAR", r + 1, pairs, options["regular_series"])
+    _notify_round(db, season, actor_id)
 
 
 def _add_round(db: Session, season: Season, stage: str, round_: int, pairs, series_format: str) -> None:
@@ -391,6 +412,91 @@ def _open_round(season: Season) -> None:
     hours = _options(season).get("round_deadline_hours") or 0
     playing = season.status in matches.PLAYING
     season.round_deadline_at = utcnow() + timedelta(hours=hours) if hours and playing else None
+    season.deadline_warned = False
+
+
+def season_link(season: Season) -> str:
+    return f"/seasons/{season.id}"
+
+
+def _team_names(db: Session, season: Season) -> dict[int, str]:
+    sts = season_teams(db, season)
+    names = dict(db.execute(select(Team.id, Team.name).where(Team.id.in_([st.team_id for st in sts]))).all())
+    return {st.id: names.get(st.team_id, "?") for st in sts}
+
+
+def _round_name(season: Season, stage: str, round_: int) -> str:
+    if stage == "PLAYOFF":
+        return competition.bracket_round_name(round_, _options(season).get("playoff_size") or 0)
+    return f"Swiss round {round_}" if stage == "SWISS" else f"Round {round_}"
+
+
+def _in_words(delta: timedelta) -> str:
+    minutes = max(1, round(delta.total_seconds() / 60))
+    if minutes < 90:
+        return f"{minutes} minute{'s' if minutes != 1 else ''}"
+    hours = round(minutes / 60)
+    return f"{hours} hours" if hours < 48 else f"{round(hours / 24)} days"
+
+
+def _members(db: Session, season: Season) -> set[int]:
+    return {season.created_by} | {st.manager_user_id for st in season_teams(db, season) if st.manager_user_id}
+
+
+def _notify_round(db: Session, season: Season, actor_id: int | None = None) -> None:
+    """A round has opened: tell each manager with a match in it (not `actor_id`, who just opened it). Once the
+    season is over, tell everyone who won instead."""
+    if season.status == "COMPLETED":
+        champion = _team_names(db, season).get(season.winner_team_id or -1)
+        for uid in _members(db, season):
+            notes.notify(db, uid, "SEASON_OVER", f"{season.name} is over",
+                         f"{champion} are the champions." if champion else "The final standings are in.",
+                         season_link(season), season.id, key=f"season:{season.id}:over")
+        return
+    if season.status not in matches.PLAYING:
+        return
+    db.flush()
+    stage = matches.current_stage(season)
+    sts = {st.id: st for st in season_teams(db, season)}
+    names = _team_names(db, season)
+    due = f" Due in {_in_words(season.round_deadline_at - utcnow())}." if season.round_deadline_at else ""
+    for m in _round_matches(db, season, season.current_round, stage):
+        if m.status == "COMPLETED":
+            continue
+        for mine, other in ((m.home_team_id, m.away_team_id), (m.away_team_id, m.home_team_id)):
+            uid = sts[mine].manager_user_id if mine in sts else None
+            if uid is None or uid == actor_id:
+                continue
+            notes.notify(db, uid, "MATCH_READY", f"{season.name}: your match is ready",
+                         f"{_round_name(season, stage, m.round)}: {names.get(mine)} vs {names.get(other)}.{due}",
+                         season_link(season), season.id, key=f"match:{m.id}:ready")
+
+
+def _warn_deadlines(db: Session, now) -> None:
+    """Warn managers who still have a match to play that the round deadline is close (once per round)."""
+    soon = db.scalars(select(Season).where(Season.status.in_(matches.PLAYING), Season.round_deadline_at.is_not(None),
+                                           Season.deadline_warned.is_(False),
+                                           Season.round_deadline_at <= now + DEADLINE_WARNING)).all()
+    for season in soon:
+        hours = _options(season).get("round_deadline_hours") or 0
+        left = season.round_deadline_at - now
+        if left > min(DEADLINE_WARNING, timedelta(hours=hours) / 4):
+            continue
+        season.deadline_warned = True
+        stage = matches.current_stage(season)
+        if left > timedelta(0):
+            sts = {st.id: st for st in season_teams(db, season)}
+            for m in _round_matches(db, season, season.current_round, stage):
+                if m.status == "COMPLETED":
+                    continue
+                for tid in (m.home_team_id, m.away_team_id):
+                    st = sts.get(tid)
+                    notes.notify(db, st.manager_user_id if st else None, "DEADLINE",
+                                 f"{season.name}: the round closes in {_in_words(left)}",
+                                 f"Play your {_round_name(season, stage, season.current_round)} match, or the CPU "
+                                 "will play it for you.", season_link(season), season.id,
+                                 key=f"season:{season.id}:{stage}:{season.current_round}:deadline")
+        db.commit()
 
 
 def _stage_rounds(db: Session, season: Season, stage: str) -> int:
@@ -422,7 +528,7 @@ def advance_round(db: Session, season: Season, user: User, force: bool = False) 
     _require_creator(season, user)
     with matches.simulating(season.id):
         db.refresh(season)
-        return _advance_round(db, season, force)
+        return _advance_round(db, season, force, actor_id=user.id)
 
 
 def _drafts_in_play(db: Session, season: Season) -> bool:
@@ -439,6 +545,7 @@ def process_deadlines(db: Session, now=None) -> Events:
     """Close every round whose deadline has passed, as a forced advance: the CPU plays whatever managers haven't.
     A game managers are drafting right then gets DEADLINE_GRACE to finish first. Run by the background loop."""
     now = now or utcnow()
+    _warn_deadlines(db, now)
     due = db.scalars(select(Season).where(Season.status.in_(matches.PLAYING), Season.round_deadline_at.is_not(None),
                                           Season.round_deadline_at <= now)).all()
     events: Events = []
@@ -457,7 +564,7 @@ def process_deadlines(db: Session, now=None) -> Events:
     return events
 
 
-def _advance_round(db: Session, season: Season, force: bool) -> Events:
+def _advance_round(db: Session, season: Season, force: bool, actor_id: int | None = None) -> Events:
     if season.status not in matches.PLAYING:
         raise conflict("The season isn't in progress.")
     pending = [m for m in _round_matches(db, season, season.current_round) if m.status != "COMPLETED"]
@@ -478,6 +585,7 @@ def _advance_round(db: Session, season: Season, force: bool) -> Events:
     else:
         _after_playoff_round(db, season)
     _open_round(season)
+    _notify_round(db, season, actor_id)
     db.commit()
     track("season_round_advanced", season_id=season.id, round=season.current_round, forced=bool(waiting))
     return events + [matches.season_event(season.id)]
@@ -731,12 +839,55 @@ def team_detail(db: Session, season: Season, season_team_id: int, viewer: User) 
     team = db.get(Team, st.team_id)
     refs = _team_refs(db, season, viewer)
     view = teams.team_view(db, team)
-    hidden = (_rules(season).get("hide_player_data") and st.manager_user_id != viewer.id
-              and season.status != "COMPLETED")
-    if hidden:
-        view = gs._mask_team(view)
+    if (_rules(season).get("hide_player_data") and st.manager_user_id != viewer.id
+            and season.status != "COMPLETED"):
+        view = gs._mask_team(view)          # their stats; how they've played (the box scores) is public
     row = next((r for r in standings(db, season) if r.team == st.id), None)
     fixtures = [_match_view(db, m, refs) for m in _season_matches(db, season)
                 if st.id in (m.home_team_id, m.away_team_id)]
     return {"team": refs[st.id], "view": view, "record": row.to_dict() if row else None, "matches": fixtures,
-            "player_stats": {} if hidden else {str(k): v for k, v in _player_stats(db, season, team).items()}}
+            "player_stats": {str(k): v for k, v in _player_stats(db, season, team).items()}}
+
+
+# ------------------------------------------------------------ stats, awards
+def _season_games(db: Session, season: Season) -> list[season_awards.GameLine]:
+    """Every finished game of the season, oldest first, as box scores for the stats and awards."""
+    by_team = {st.team_id: st.id for st in season_teams(db, season)}
+    final_round = competition.bracket_rounds(_options(season).get("playoff_size") or 0)
+    rows = db.execute(select(Game, MatchResultRow, SeasonMatch)
+                      .join(MatchResultRow, MatchResultRow.game_id == Game.id)
+                      .join(SeasonMatch, SeasonMatch.id == Game.season_match_id)
+                      .where(SeasonMatch.season_id == season.id, Game.status == "COMPLETED")
+                      .order_by(Game.completed_at, Game.id)).all()
+    out = []
+    for game, result, match in rows:
+        sides = {side: by_team[tid] for side, tid in (("BLUE", game.blue_team_id), ("RED", game.red_team_id))
+                 if tid in by_team}
+        out.append(season_awards.GameLine(
+            game_id=game.id, stage=match.stage, final=match.stage == "PLAYOFF" and match.round == final_round,
+            winner=result.winner, mvp_player_id=result.mvp_player_id, sides=sides,
+            players=tuple((result.data or {}).get("players", []))))
+    return out
+
+
+def stats_view(db: Session, season: Season, viewer: User) -> dict:
+    """Stat leaders and every player's season line; the awards once the season is over (before that, who leads
+    the race for them)."""
+    refs = _team_refs(db, season, viewer)
+    games = _season_games(db, season)
+    stats = season_awards.aggregate(games)
+
+    def with_team(d: dict | None) -> dict | None:
+        return {**d, "team": refs.get(d["team_id"])} if d else None
+
+    awards = season_awards.awards(games, season.winner_team_id if season.status == "COMPLETED" else None)
+    return {
+        "games": len(games),
+        "min_games": season_awards.min_games(stats),
+        "final": season.status == "COMPLETED",
+        "players": sorted((with_team(s.to_dict()) for s in stats.values()),
+                          key=lambda d: (-d["rating"], -d["games"], d["player_id"])),
+        "leaders": [{**cat, "rows": [with_team(r) for r in cat["rows"]]} for cat in season_awards.leaders(stats)],
+        "awards": {"season_mvp": with_team(awards["season_mvp"]), "finals_mvp": with_team(awards["finals_mvp"]),
+                   "all_pro": [{"lane": a["lane"], "player": with_team(a["player"])} for a in awards["all_pro"]]},
+    }

@@ -1,4 +1,4 @@
-import type { CpuStrength, Lane, SeasonBracketRound, SeasonDraftPick, SeasonPoolPlayer, SeasonFormat, SeasonMatch, SeasonOptions, SeasonStatus, SeasonTeamRef, StandingRow } from '../api/types'
+import type { CpuStrength, Lane, SeasonBracketRound, SeasonDraftPick, SeasonPlayerStats, SeasonPoolPlayer, SeasonFormat, SeasonMatch, SeasonOptions, SeasonStatus, SeasonTeamRef, StandingRow } from '../api/types'
 import { seriesShort } from './format'
 
 export const SEASON_STATUS_LABELS: Record<SeasonStatus, string> = {
@@ -192,4 +192,75 @@ export function filterPool<T extends Pick<SeasonPoolPlayer, 'lanes' | 'stat_tota
   return players
     .filter((p) => (lane === null || p.lanes.includes(lane)) && (!q || p.name.toLowerCase().includes(q)))
     .sort((a, b) => b.stat_total - a.stat_total || a.name.localeCompare(b.name))
+}
+
+// --------------------------------------------------------------- templates
+export interface SeasonTemplate {
+  key: string
+  name: string
+  description: string
+  format: SeasonFormat
+  options: Pick<SeasonOptions, 'team_count' | 'rr_double' | 'regular_series' | 'playoff_size' | 'playoff_series' | 'final_series'>
+}
+
+/** One-click competition formats for the create page (the rules, rosters and managers are left as they are). */
+export const SEASON_TEMPLATES: SeasonTemplate[] = [
+  {
+    key: 'split', name: 'League split', format: 'ROUND_ROBIN',
+    description: '10 teams, double round robin of best-of-1s, then the top 4 play best-of-5 playoffs (LCS / LEC style).',
+    options: { team_count: 10, rr_double: true, regular_series: 'BO1', playoff_size: 4, playoff_series: 'BO5', final_series: 'BO5' },
+  },
+  {
+    key: 'midseason', name: 'Mid-season cup', format: 'SWISS',
+    description: '8 teams in a best-of-3 Swiss stage (2 wins in, 2 losses out), then a best-of-5 bracket of 4 (MSI style).',
+    options: { team_count: 8, rr_double: false, regular_series: 'BO3', playoff_size: 0, playoff_series: 'BO5', final_series: 'BO5' },
+  },
+  {
+    key: 'worlds', name: 'World championship', format: 'SWISS',
+    description: '16 teams in a best-of-1 Swiss stage (3 wins in, 3 losses out), then a best-of-5 bracket of 8 (Worlds style).',
+    options: { team_count: 16, rr_double: false, regular_series: 'BO1', playoff_size: 0, playoff_series: 'BO5', final_series: 'BO5' },
+  },
+  {
+    key: 'quick', name: 'Quick cup', format: 'ROUND_ROBIN',
+    description: '4 teams play each other once, then the top 2 meet in a best-of-3 final. Done in an evening.',
+    options: { team_count: 4, rr_double: false, regular_series: 'BO1', playoff_size: 2, playoff_series: 'BO3', final_series: 'BO3' },
+  },
+]
+
+/** The options with a template's competition format applied; the managers are kept, as far as the teams allow. */
+export function applyTemplate(options: SeasonOptions, template: SeasonTemplate): SeasonOptions {
+  return { ...options, ...template.options, human_slots: Math.min(options.human_slots, template.options.team_count) }
+}
+
+/** The template the current settings match exactly, if any (so the create page can show it as chosen). */
+export function matchingTemplate(format: SeasonFormat, options: SeasonOptions): SeasonTemplate | null {
+  return SEASON_TEMPLATES.find((t) => t.format === format
+    && (Object.keys(t.options) as (keyof SeasonTemplate['options'])[]).every((k) => options[k] === t.options[k])) ?? null
+}
+
+// ------------------------------------------------------------------- stats
+export type PlayerStatsKey = 'name' | 'games' | 'rating' | 'kda' | 'kills_pg' | 'deaths_pg' | 'assists_pg' | 'cs_pg' | 'damage_pg' | 'mvps'
+
+export function sortPlayerStats(rows: SeasonPlayerStats[], key: PlayerStatsKey, descending: boolean): SeasonPlayerStats[] {
+  const dir = descending ? -1 : 1
+  return [...rows].sort((a, b) => {
+    const cmp = key === 'name' ? a.name.localeCompare(b.name) : a[key] - b[key]
+    return cmp !== 0 ? cmp * dir : b.rating - a.rating || a.player_id - b.player_id
+  })
+}
+
+/** "1,234" / "3.25": a stat with its category's decimals. */
+export function statValue(value: number, decimals: number): string {
+  return value.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+}
+
+// ----------------------------------------------------------- notifications
+/** "just now", "5m ago", "3h ago", "2d ago". */
+export function timeAgo(iso: string | null, now: number = Date.now()): string {
+  if (!iso) return ''
+  const minutes = Math.floor((now - Date.parse(iso)) / 60000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`
 }
