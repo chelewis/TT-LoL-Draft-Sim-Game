@@ -45,6 +45,8 @@ class Game(Base):
     blue_rematch_ready: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
     red_rematch_ready: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
     rematch_game_id: Mapped[int | None] = mapped_column(ForeignKey("games.id", name="fk_games_rematch_game_id_games"))
+    # a game played for a season fixture (models/season.py)
+    season_match_id: Mapped[int | None] = mapped_column(ForeignKey("season_matches.id"), index=True)
     blue_ready: Mapped[bool] = mapped_column(Boolean, default=False)
     red_ready: Mapped[bool] = mapped_column(Boolean, default=False)
     blue_lineup_ready: Mapped[bool] = mapped_column(Boolean, default=False)

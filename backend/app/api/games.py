@@ -13,9 +13,10 @@ from app.websocket.manager import manager
 router = APIRouter(prefix="/games", tags=["games"])
 
 
-async def _load(db: Session, game_id: int, user: User) -> Game:
-    """Fetch the caller's game, first applying any expired lobby / draft timers."""
-    game = svc.get_game(db, game_id, user.id)
+async def _load(db: Session, game_id: int, user: User, spectate: bool = False) -> Game:
+    """Fetch the caller's game, first applying any expired lobby / draft timers. `spectate`: a read-only request,
+    which members of the game's season may also make."""
+    game = svc.get_game(db, game_id, user.id, spectate)
     events = svc.expire_if_needed(db, game)
     events += svc.advance_timeouts(db, game)
     await manager.publish(events)
@@ -29,12 +30,12 @@ async def my_games(active: bool = False, db: Session = Depends(get_db), user: Us
 
 @router.get("/{game_id}")
 async def get_game(game_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    return svc.game_state(db, await _load(db, game_id, user), user)
+    return svc.game_state(db, await _load(db, game_id, user, spectate=True), user)
 
 
 @router.get("/{game_id}/state")
 async def get_state(game_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    return svc.game_state(db, await _load(db, game_id, user), user)
+    return svc.game_state(db, await _load(db, game_id, user, spectate=True), user)
 
 
 @router.post("/{game_id}/ready")
@@ -48,7 +49,7 @@ async def ready(game_id: int, body: ReadyIn | None = None, db: Session = Depends
 # ------------------------------------------------------------------ draft
 @router.get("/{game_id}/draft")
 async def get_draft(game_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    game = await _load(db, game_id, user)
+    game = await _load(db, game_id, user, spectate=True)
     return svc.draft_view(db, game)
 
 
@@ -109,13 +110,13 @@ async def lineup_ready(game_id: int, side: str | None = None, db: Session = Depe
 # ---------------------------------------------------------------- results
 @router.get("/{game_id}/result")
 async def result(game_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    return svc.game_result(db, await _load(db, game_id, user))
+    return svc.game_result(db, await _load(db, game_id, user, spectate=True))
 
 
 @router.get("/{game_id}/result/events")
 async def result_events(game_id: int, after: int = 0, limit: int = 200, db: Session = Depends(get_db),
                         user: User = Depends(get_current_user)):
-    game = await _load(db, game_id, user)
+    game = await _load(db, game_id, user, spectate=True)
     return svc.result_events(db, game, after, max(1, min(limit, 500)))
 
 
@@ -146,7 +147,7 @@ async def rematch(game_id: int, body: ReadyIn | None = None, db: Session = Depen
 # ------------------------------------------------------------------- chat
 @router.get("/{game_id}/chat")
 async def get_chat(game_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    return svc.chat_history(db, await _load(db, game_id, user))
+    return svc.chat_history(db, await _load(db, game_id, user, spectate=True))
 
 
 @router.post("/{game_id}/chat", status_code=201)

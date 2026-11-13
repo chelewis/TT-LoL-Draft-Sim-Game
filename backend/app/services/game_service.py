@@ -93,11 +93,26 @@ def acting_side(game: Game, user: User, requested: str | None = None) -> str:
     return requested
 
 
-def get_game(db: Session, game_id: int, user_id: int) -> Game:
+def _season_matches():
+    """season_match_service imports this module, so it's loaded on first use."""
+    from app.services import season_match_service
+    return season_match_service
+
+
+def get_game(db: Session, game_id: int, user_id: int, spectate: bool = False) -> Game:
+    """The game if the user plays in it. `spectate`: members of the game's season may also see it (read only)."""
     game = db.get(Game, game_id)
-    if game is None or side_of(game, user_id) is None:
+    if game is None:
+        raise not_found("Game not found.")
+    if side_of(game, user_id) is None and not (spectate and game.season_match_id is not None
+                                               and _season_matches().can_view_game(db, game, user_id)):
         raise not_found("Game not found.")
     return game
+
+
+def _not_in_season(game: Game, what: str) -> None:
+    if game.season_match_id is not None:
+        raise conflict(f"{what} is not possible in a season match.")
 
 
 def get_lobby(db: Session, lobby_id: int) -> Lobby:
@@ -122,8 +137,9 @@ def user_games(db: Session, user_id: int, active_only: bool = False) -> list[Gam
 
 
 def expire_if_needed(db: Session, game: Game) -> Events:
-    """Lobbies that never started the draft are cancelled once they pass their expiry."""
-    if game.status in PRE_DRAFT:
+    """Lobbies that never started the draft are cancelled once they pass their expiry (season games never expire:
+    the season decides when they are played)."""
+    if game.status in PRE_DRAFT and game.season_match_id is None:
         lobby = db.get(Lobby, game.lobby_id)
         if lobby.expires_at <= utcnow():
             game.status = "CANCELLED"
@@ -226,6 +242,7 @@ def leave_lobby(db: Session, game: Game, user: User) -> Events:
     side = side_of(game, user.id)
     if game.status in ("COMPLETED", "CANCELLED"):
         return []
+    _not_in_season(game, "Leaving")
     owner_id = db.get(Lobby, game.lobby_id).created_by
     if user.id != owner_id and game.status in PRE_DRAFT:
         # the joiner leaves before the draft: their side opens up again
@@ -250,6 +267,7 @@ def set_side(db: Session, game: Game, user: User, side: str) -> Events:
         raise bad_request("Side must be BLUE or RED.")
     if game.is_solo:
         raise conflict("Sides cannot be changed in a single player game.")
+    _not_in_season(game, "Changing sides")
     if db.get(Lobby, game.lobby_id).created_by != user.id:
         raise forbidden("Only the lobby owner can change sides.")
     if game.status not in PRE_DRAFT:
@@ -274,6 +292,7 @@ def select_team(db: Session, game: Game, user: User, team_id: int, requested_sid
         side = acting_side(game, user, requested_side)
     if game.status not in ("WAITING_FOR_PLAYERS", "TEAM_SELECTION", "READY_CHECK"):
         raise conflict("Teams can no longer be changed.")
+    _not_in_season(game, "Changing teams")
     team = teams.get_visible(db, Team, team_id, user.id)
     issues = teams.team_issues(team)
     if issues:
@@ -321,7 +340,7 @@ def set_ready(db: Session, game: Game, user: User, ready: bool = True) -> Events
     if game.status != "READY_CHECK":
         raise conflict("Both players must choose a team before readying up." if not (game.is_solo or game.vs_cpu)
                        else "Choose a team for both sides before starting.")
-    if ready:
+    if ready and game.season_match_id is None:
         _check_rules_before_draft(db, game)
     if game.is_solo or game.vs_cpu:   # one person (and maybe the CPU): starting means both sides are ready
         game.blue_ready = game.red_ready = ready
@@ -467,15 +486,24 @@ def _record_action(db: Session, game: Game, draft: DraftState, team: str, action
     return events
 
 
-class _CpuContext:
-    """What the CPU reads to make its decisions: both frozen teams, the enabled champions, the win rate
-    matrices and the live simulation settings."""
+class CpuLookups:
+    """The live simulation settings, enabled champions and win rate matrices the CPU decides with. Built once and
+    shared when the CPU plays many games in a row (auto-played season matches)."""
 
-    def __init__(self, db: Session, game: Game):
-        side = cpu_side(game)
+    def __init__(self, db: Session):
         self.config = simulation_settings_service.current_config(db)
         self.champions = {c.id: c.to_engine() for c in db.scalars(select(Champion).where(Champion.enabled.is_(True)))}
         self.table = matchup_service.engine_table(db, self.champions)
+
+
+class _CpuContext:
+    """What the CPU reads to make its decisions: both frozen teams, the enabled champions, the win rate
+    matrices and the live simulation settings. `side`: the side it plays (default: the vs CPU game's CPU seat)."""
+
+    def __init__(self, db: Session, game: Game, side: str | None = None, lookups: CpuLookups | None = None):
+        side = side or cpu_side(game)
+        lookups = lookups or CpuLookups(db)
+        self.config, self.champions, self.table = lookups.config, lookups.champions, lookups.table
         self.own = _snapshot_to_setup(snapshot_of(db, game, side), {})
         self.enemy = _snapshot_to_setup(snapshot_of(db, game, _other(side)), {})
 
@@ -509,6 +537,101 @@ def advance_timeouts(db: Session, game: Game, now=None) -> Events:
                                  auto, game.action_expires_at)
     if events:
         db.commit()
+    return events
+
+
+def autoplay_game(db: Session, game: Game, lookups: CpuLookups | None = None) -> Events:
+    """Play the rest of a game with the CPU deciding for both sides: every remaining pick and ban, any lineup not
+    yet confirmed, then the simulation. Used for auto-played season matches, and to finish a live season game that
+    is still unfinished when the round is forced on. The caller commits.
+    (Sessions don't autoflush, so each step is flushed before the next one reads it back.)"""
+    events: Events = []
+    if game.status in PRE_DRAFT:
+        game.blue_ready = game.red_ready = True
+        events += _start_draft(db, game)
+        db.flush()
+    lookups = lookups or CpuLookups(db)
+    if game.status == "DRAFTING":
+        draft = load_draft(db, game)
+        rng = random.Random(secrets.randbits(64))
+        cpus = {side: _CpuContext(db, game, side, lookups) for side in ("BLUE", "RED")}
+        while game.status == "DRAFTING":
+            action = draft.current
+            champion_id = cpus[action.team].choose(draft, rng)
+            events += _record_action(db, game, draft, action.team, action.action_type, champion_id, False, utcnow())
+    if game.status == "LANE_ASSIGNMENT":
+        db.flush()
+        picks = load_draft(db, game).picks
+        for side in ("BLUE", "RED"):
+            if not (game.blue_lineup_ready if side == "BLUE" else game.red_lineup_ready):
+                _cpu_lineup(db, game, side, picks[side], lookups)   # keeps a lineup the player already confirmed
+        db.flush()
+        _transition(game, "READY_TO_SIMULATE")
+    if game.status == "READY_TO_SIMULATE":
+        events += run_simulation(db, game)
+    return events
+
+
+def _cpu_lineup(db: Session, game: Game, side: str, picks: list[int], lookups: CpuLookups | None = None) -> None:
+    """The CPU puts `side`'s picks in their best lanes and confirms the lineup."""
+    lanes = _CpuContext(db, game, side, lookups).lineup(picks) or dict(zip(LANES, picks))
+    roster = snapshot_of(db, game, side)["roster"]
+    db.execute(delete(TeamLineup).where(TeamLineup.game_id == game.id, TeamLineup.team == side))
+    for lane, cid in lanes.items():
+        db.add(TeamLineup(game_id=game.id, team=side, lane=lane, champion_id=cid, player_id=roster[lane]["id"]))
+    if side == "BLUE":
+        game.blue_lineup_ready = True
+    else:
+        game.red_lineup_ready = True
+
+
+def cpu_takes_over(db: Session, game: Game, side: str) -> Events:
+    """A season manager left their team: the CPU plays `side` from here on. The seat empties and the game becomes
+    a vs CPU game, so the remaining manager carries on against the CPU from wherever the game is. With both seats
+    empty there's nobody to play it live, and the season auto-plays it. The caller commits."""
+    if side == "BLUE":
+        game.blue_player_id = None
+    else:
+        game.red_player_id = None
+    game.vs_cpu = True
+    events = [_event(game, "PLAYER_LEFT", team=side)]
+    if game.blue_player_id is None and game.red_player_id is None:
+        return events
+    if game.status == "READY_CHECK":
+        if side == "BLUE":
+            game.blue_ready = True
+        else:
+            game.red_ready = True
+        if game.blue_ready and game.red_ready:
+            events += _start_draft(db, game)
+    elif game.status == "DRAFTING":
+        if draft_actions(game)[game.current_action].startswith(side):
+            # the CPU plays the turn it just inherited after its usual short "thinking" delay
+            game.action_expires_at = utcnow() + timedelta(seconds=DRAFT_CONFIG["cpu_delay_seconds"])
+            events.append(_action_started_event(game))
+    elif game.status == "LANE_ASSIGNMENT":
+        if not (game.blue_lineup_ready if side == "BLUE" else game.red_lineup_ready):
+            db.flush()
+            _cpu_lineup(db, game, side, load_draft(db, game).picks[side])
+            db.flush()
+        if game.blue_lineup_ready and game.red_lineup_ready:
+            _transition(game, "READY_TO_SIMULATE")
+            events += run_simulation(db, game)
+    elif game.status == "COMPLETED" and game.series_id is not None:
+        # between games of a series: the CPU is ready for the next one, and keeps its side when it lost
+        series = db.get(Series, game.series_id)
+        games = series_games(db, series.id)
+        tally = series_score(db, series, games)
+        if not (tally["complete"] or tally["abandoned"]) and not any(g.game_number > game.game_number for g in games):
+            loser = _other(_game_winner(db, game))
+            if side == "BLUE":
+                game.blue_next_ready = True
+            else:
+                game.red_next_ready = True
+            if side == loser:
+                game.next_loser_side = loser
+            if game.blue_next_ready and game.red_next_ready:
+                events += _start_next_game(db, game, loser)
     return events
 
 
@@ -810,6 +933,8 @@ def run_simulation(db: Session, game: Game) -> Events:
           win_condition=result.win_condition, simulation_version=cfg["version"])
     log.info("game_id=%s simulation_version=%s seed=%s winner=%s", game.id, cfg["version"], game.seed, result.winner)
     events.append(_event(game, "SIMULATION_COMPLETED", winner=result.winner))
+    if game.season_match_id is not None:
+        events += _season_matches().on_game_completed(db, game)
     return events
 
 
@@ -820,6 +945,7 @@ def rerun_simulation(db: Session, game: Game, user: User) -> Events:
         raise conflict("Only a finished match can be re-run.")
     if game.series_id is not None:
         raise conflict("Matches in a series can't be re-run.")
+    _not_in_season(game, "Re-running a match")
     if db.get(Lobby, game.lobby_id).created_by != user.id:
         raise forbidden("Only the lobby owner can re-run the match.")
     # bulk deletes run immediately, so the new result does not collide with the unique game_id
@@ -968,7 +1094,8 @@ def _start_next_game(db: Session, prev: Game, loser: str) -> Events:
                 hide_player_data=prev.hide_player_data, bans_enabled=prev.bans_enabled,
                 timers_enabled=prev.timers_enabled, pick_seconds=prev.pick_seconds, ban_seconds=prev.ban_seconds,
                 series_id=prev.series_id, game_number=prev.game_number + 1,
-                sides_swapped=prev.sides_swapped != swap, blue_ready=True, red_ready=True)
+                sides_swapped=prev.sides_swapped != swap, blue_ready=True, red_ready=True,
+                season_match_id=prev.season_match_id)
     db.add(game)
     db.flush()
     events = _start_draft(db, game, {"BLUE": blue_snap, "RED": red_snap})
@@ -981,7 +1108,8 @@ def series_result(db: Session, series_id: int, user: User) -> dict:
     `blue_team`/`red_team`/`winner`) name the side that team played in game 1."""
     series = db.get(Series, series_id)
     games = series_games(db, series_id) if series else []
-    if not games or side_of(games[0], user.id) is None:
+    if not games or (side_of(games[0], user.id) is None and not (
+            games[0].season_match_id is not None and _season_matches().can_view_game(db, games[0], user.id))):
         raise not_found("Series not found.")
     results = {r.game_id: r for r in db.scalars(
         select(MatchResultRow).where(MatchResultRow.game_id.in_([g.id for g in games])))}
@@ -1013,7 +1141,7 @@ def series_result(db: Session, series_id: int, user: User) -> dict:
 # After a finished match (or the last game of a finished series) both sides ready up for a rematch: a new
 # lobby with the same settings, owner, players, teams and sides, waiting at the ready check.
 def _rematch_available(db: Session, game: Game) -> bool:
-    if game.status != "COMPLETED":
+    if game.status != "COMPLETED" or game.season_match_id is not None:
         return False
     if game.series_id is None:
         return True
@@ -1201,11 +1329,12 @@ def game_state(db: Session, game: Game, viewer: User) -> dict:
         "simulation_version": game.simulation_version if game.status == "COMPLETED" else None,
         "series": series_state(db, game),
         "rematch": rematch_state(db, game),
+        "season": _season_matches().game_season_info(db, game) if game.season_match_id else None,
     }
     if game.status in ("DRAFTING", "LANE_ASSIGNMENT", "READY_TO_SIMULATE", "SIMULATING", "COMPLETED"):
         state["draft"] = draft_view(db, game)
-        lineups = {"yours": _own_lineup(db, game, side)}
-        visible = [side]
+        lineups = {"yours": _own_lineup(db, game, side) if side else {}}
+        visible = [side] if side else []
         if game.is_solo:        # one person sees (and edits) both lineups
             lineups["blue"] = _own_lineup(db, game, "BLUE")
             lineups["red"] = _own_lineup(db, game, "RED")

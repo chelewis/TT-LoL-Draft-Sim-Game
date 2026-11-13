@@ -25,6 +25,14 @@ export default function SideBanner({ game, hideResult = false }: { game: GameSta
     )
   }
   const side = game.you.team
+  if (!side) {             // a season member watching a game they don't play in
+    return (
+      <div className="side-banner solo" role="status">
+        <span>Watching {game.teams.BLUE?.name ?? 'Blue'} vs {game.teams.RED?.name ?? 'Red'}</span>
+        {tag && <span className="sub">· {tag}</span>}
+      </div>
+    )
+  }
   const name = game.teams[side]?.name
   const label = side === 'BLUE' ? 'Blue' : 'Red'
   return (

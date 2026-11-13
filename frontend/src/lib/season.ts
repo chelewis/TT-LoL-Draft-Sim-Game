@@ -1,0 +1,266 @@
+import type { CpuStrength, Lane, SeasonBracketRound, SeasonDraftPick, SeasonPlayerStats, SeasonPoolPlayer, SeasonFormat, SeasonMatch, SeasonOptions, SeasonStatus, SeasonTeamRef, StandingRow } from '../api/types'
+import { seriesShort } from './format'
+
+export const SEASON_STATUS_LABELS: Record<SeasonStatus, string> = {
+  SETUP: 'Setting up',
+  PLAYER_DRAFT: 'Player draft',
+  REGULAR: 'In progress',
+  PLAYOFFS: 'Playoffs',
+  COMPLETED: 'Finished',
+  CANCELLED: 'Cancelled',
+}
+
+export const CPU_STRENGTH_LABELS: Record<CpuStrength, string> = {
+  WEAKER: 'Weaker: CPU teams sit well below the rules\' stat limits',
+  EVEN: 'Even: CPU teams sit a little below the limits',
+  STRONGER: 'Stronger: CPU teams are built right up to the limits',
+}
+
+/** Rounds in a round robin of `teams` teams (an odd count gives every team one bye). */
+export function roundRobinRounds(teams: number, double: boolean): number {
+  if (teams < 2) return 0
+  const rounds = teams % 2 === 0 ? teams - 1 : teams
+  return double ? rounds * 2 : rounds
+}
+
+/** Matches each team plays in a round robin of `teams` teams. */
+export function matchesPerTeam(teams: number, double: boolean): number {
+  return Math.max(0, teams - 1) * (double ? 2 : 1)
+}
+
+export function roundLabel(round: number, total: number): string {
+  return total > 0 ? `Round ${round} of ${total}` : `Round ${round}`
+}
+
+export function recordLabel(row: { wins: number; losses: number }): string {
+  return `${row.wins}-${row.losses}`
+}
+
+/** Game differential with its sign ("+3", "0", "-2"). */
+export function diffLabel(diff: number): string {
+  return diff > 0 ? `+${diff}` : String(diff)
+}
+
+/** The other team in a match, from `teamId`'s point of view. */
+export function opponentOf(match: SeasonMatch, teamId: number): SeasonTeamRef | null {
+  if (match.home?.id === teamId) return match.away
+  if (match.away?.id === teamId) return match.home
+  return null
+}
+
+/** "W 2-1" / "L 0-1" from `teamId`'s point of view; null until the match is decided or if the team isn't in it. */
+export function resultFor(match: SeasonMatch, teamId: number): string | null {
+  if (match.status !== 'COMPLETED') return null
+  const home = match.home?.id === teamId
+  if (!home && match.away?.id !== teamId) return null
+  const mine = home ? match.home_score : match.away_score
+  const theirs = home ? match.away_score : match.home_score
+  return `${match.winner_team_id === teamId ? 'W' : 'L'} ${mine}-${theirs}`
+}
+
+/** The score line of a match ("2 - 1"), or "vs" before it's played. */
+export function scoreLine(match: SeasonMatch): string {
+  return match.status === 'SCHEDULED' ? 'vs' : `${match.home_score} - ${match.away_score}`
+}
+
+export type StandingsKey = 'rank' | 'name' | 'wins' | 'losses' | 'game_diff' | 'played'
+
+/** The table re-sorted by a column; ties keep the official order (rank). */
+export function sortStandings(rows: StandingRow[], key: StandingsKey, descending: boolean): StandingRow[] {
+  const value = (r: StandingRow): number | string => (key === 'name' ? r.team.name.toLowerCase() : r[key])
+  return [...rows].sort((a, b) => {
+    const va = value(a)
+    const vb = value(b)
+    if (va !== vb) {
+      const order = va < vb ? -1 : 1
+      return descending ? -order : order
+    }
+    return a.rank - b.rank
+  })
+}
+
+/** What to do next with your match, for the main button. */
+export function myMatchAction(match: SeasonMatch | null): 'PLAY' | 'CONTINUE' | 'DONE' | null {
+  if (!match) return null
+  if (match.status === 'COMPLETED') return 'DONE'
+  return match.games.length ? 'CONTINUE' : 'PLAY'
+}
+
+/** Swiss sizes the server accepts, with wins to qualify (= losses to go out). */
+export const SWISS_TEAM_COUNTS = [8, 16] as const
+export const swissWins = (teams: number): number => Math.max(1, Math.log2(teams) - 1)
+
+/** Playoff sizes that fit a league of `teams`. */
+export function playoffChoices(teams: number): number[] {
+  return [2, 4, 8].filter((n) => n <= teams)
+}
+
+/** "Round robin + top 4 playoffs", "Swiss stage + 8-team bracket". */
+export function formatLabel(format: SeasonFormat, options: Pick<SeasonOptions, 'playoff_size' | 'rr_double'>): string {
+  if (format === 'SWISS') return `Swiss stage + ${options.playoff_size}-team bracket`
+  const league = options.rr_double ? 'Double round robin' : 'Round robin'
+  if (!options.playoff_size) return league
+  return options.playoff_size === 2 ? `${league} + final` : `${league} + top ${options.playoff_size} playoffs`
+}
+
+/** "Bo1 league · Bo3 playoffs · Bo5 final" (playoffs left out when there are none). */
+export function seriesSummary(format: SeasonFormat, o: Pick<SeasonOptions, 'regular_series' | 'playoff_size' | 'playoff_series' | 'final_series'>): string {
+  const parts = [`${seriesShort(o.regular_series)} ${format === 'SWISS' ? 'Swiss' : 'league'}`]
+  if (o.playoff_size > 2) parts.push(`${seriesShort(o.playoff_series)} playoffs`)
+  if (o.playoff_size >= 2) parts.push(`${seriesShort(o.final_series)} final`)
+  return parts.join(' · ')
+}
+
+/** A bracket round's boxes: the drawn matches, then empty (TBD) slots up to the round's size. */
+export function bracketSlots(round: SeasonBracketRound): (SeasonMatch | null)[] {
+  return Array.from({ length: round.slots }, (_, i) => round.matches[i] ?? null)
+}
+
+// ------------------------------------------------------------ multiplayer
+/** A match between two managers' teams (not against the CPU). */
+export function vsManager(match: SeasonMatch): boolean {
+  return !!match.home && !!match.away && !match.home.is_cpu && !match.away.is_cpu
+}
+
+/**
+ * Letting the CPU play a match between two managers needs both to agree. From your side:
+ * SOLO: against the CPU, no agreement needed; ASKED: you asked, waiting for them;
+ * OFFERED: they asked, waiting for you; NONE: nobody has asked.
+ */
+export function autoSimState(match: SeasonMatch, myTeamId: number): 'SOLO' | 'NONE' | 'ASKED' | 'OFFERED' {
+  if (!vsManager(match)) return 'SOLO'
+  const home = match.home?.id === myTeamId
+  const mine = home ? match.auto_requested.home : match.auto_requested.away
+  const theirs = home ? match.auto_requested.away : match.auto_requested.home
+  return mine ? 'ASKED' : theirs ? 'OFFERED' : 'NONE'
+}
+
+/** Round deadline choices on the create page, in hours (0: none). */
+export const DEADLINE_CHOICES = [0, 12, 24, 48, 72, 168] as const
+
+export function deadlineLabel(hours: number): string {
+  if (!hours) return 'No deadline'
+  if (hours % 168 === 0) return hours === 168 ? '1 week' : `${hours / 168} weeks`
+  if (hours % 24 === 0) return hours === 24 ? '1 day' : `${hours / 24} days`
+  return `${hours} hours`
+}
+
+/** "3h 20m", "2d 4h", "5m"; "now" once it has passed. */
+export function timeUntil(iso: string, now: number = Date.now()): string {
+  const minutes = Math.floor((new Date(iso).getTime() - now) / 60000)
+  if (minutes <= 0) return 'now'
+  const days = Math.floor(minutes / 1440)
+  const hours = Math.floor((minutes % 1440) / 60)
+  if (days) return `${days}d ${hours}h`
+  if (hours) return `${hours}h ${minutes % 60}m`
+  return `${minutes}m`
+}
+
+/** The link a friend opens to join the season (signing in first if they need to). */
+export function seasonInviteLink(code: string, origin: string, base = '/'): string {
+  return `${origin}${base}seasons/join/${code}`
+}
+
+// ----------------------------------------------------------- player draft
+/** Pick clock choices on the create page, in seconds (0: none). */
+export const PICK_CLOCK_CHOICES = [0, 60, 120, 300, 3600, 43200, 86400] as const
+
+export function pickClockLabel(seconds: number): string {
+  if (!seconds) return 'No pick clock'
+  if (seconds < 3600) return `${seconds / 60} minute${seconds === 60 ? '' : 's'} per pick`
+  return `${seconds / 3600} hour${seconds === 3600 ? '' : 's'} per pick`
+}
+
+/** The draft's picks grouped by round ("Round 1": picks 1..teams). */
+export function draftRounds(picks: SeasonDraftPick[], teams: number): SeasonDraftPick[][] {
+  const rounds: SeasonDraftPick[][] = []
+  for (const p of picks) {
+    const r = Math.floor((p.pick_number - 1) / Math.max(1, teams))
+    ;(rounds[r] ??= []).push(p)
+  }
+  return rounds
+}
+
+/** The lanes a pool player could fill for you right now (their lanes that are still open on your roster). */
+export function pickableLanes(player: Pick<SeasonPoolPlayer, 'lanes'>, open: Lane[]): Lane[] {
+  return player.lanes.filter((l) => open.includes(l))
+}
+
+/** Pool players who play `lane` (all of them for null), best stat total first. */
+export function filterPool<T extends Pick<SeasonPoolPlayer, 'lanes' | 'stat_total' | 'name'>>(players: T[], lane: Lane | null, query = ''): T[] {
+  const q = query.trim().toLowerCase()
+  return players
+    .filter((p) => (lane === null || p.lanes.includes(lane)) && (!q || p.name.toLowerCase().includes(q)))
+    .sort((a, b) => b.stat_total - a.stat_total || a.name.localeCompare(b.name))
+}
+
+// --------------------------------------------------------------- templates
+export interface SeasonTemplate {
+  key: string
+  name: string
+  description: string
+  format: SeasonFormat
+  options: Pick<SeasonOptions, 'team_count' | 'rr_double' | 'regular_series' | 'playoff_size' | 'playoff_series' | 'final_series'>
+}
+
+/** One-click competition formats for the create page (the rules, rosters and managers are left as they are). */
+export const SEASON_TEMPLATES: SeasonTemplate[] = [
+  {
+    key: 'split', name: 'League split', format: 'ROUND_ROBIN',
+    description: '10 teams, double round robin of best-of-1s, then the top 4 play best-of-5 playoffs (LCS / LEC style).',
+    options: { team_count: 10, rr_double: true, regular_series: 'BO1', playoff_size: 4, playoff_series: 'BO5', final_series: 'BO5' },
+  },
+  {
+    key: 'midseason', name: 'Mid-season cup', format: 'SWISS',
+    description: '8 teams in a best-of-3 Swiss stage (2 wins in, 2 losses out), then a best-of-5 bracket of 4 (MSI style).',
+    options: { team_count: 8, rr_double: false, regular_series: 'BO3', playoff_size: 0, playoff_series: 'BO5', final_series: 'BO5' },
+  },
+  {
+    key: 'worlds', name: 'World championship', format: 'SWISS',
+    description: '16 teams in a best-of-1 Swiss stage (3 wins in, 3 losses out), then a best-of-5 bracket of 8 (Worlds style).',
+    options: { team_count: 16, rr_double: false, regular_series: 'BO1', playoff_size: 0, playoff_series: 'BO5', final_series: 'BO5' },
+  },
+  {
+    key: 'quick', name: 'Quick cup', format: 'ROUND_ROBIN',
+    description: '4 teams play each other once, then the top 2 meet in a best-of-3 final. Done in an evening.',
+    options: { team_count: 4, rr_double: false, regular_series: 'BO1', playoff_size: 2, playoff_series: 'BO3', final_series: 'BO3' },
+  },
+]
+
+/** The options with a template's competition format applied; the managers are kept, as far as the teams allow. */
+export function applyTemplate(options: SeasonOptions, template: SeasonTemplate): SeasonOptions {
+  return { ...options, ...template.options, human_slots: Math.min(options.human_slots, template.options.team_count) }
+}
+
+/** The template the current settings match exactly, if any (so the create page can show it as chosen). */
+export function matchingTemplate(format: SeasonFormat, options: SeasonOptions): SeasonTemplate | null {
+  return SEASON_TEMPLATES.find((t) => t.format === format
+    && (Object.keys(t.options) as (keyof SeasonTemplate['options'])[]).every((k) => options[k] === t.options[k])) ?? null
+}
+
+// ------------------------------------------------------------------- stats
+export type PlayerStatsKey = 'name' | 'games' | 'rating' | 'kda' | 'kills_pg' | 'deaths_pg' | 'assists_pg' | 'cs_pg' | 'damage_pg' | 'mvps'
+
+export function sortPlayerStats(rows: SeasonPlayerStats[], key: PlayerStatsKey, descending: boolean): SeasonPlayerStats[] {
+  const dir = descending ? -1 : 1
+  return [...rows].sort((a, b) => {
+    const cmp = key === 'name' ? a.name.localeCompare(b.name) : a[key] - b[key]
+    return cmp !== 0 ? cmp * dir : b.rating - a.rating || a.player_id - b.player_id
+  })
+}
+
+/** "1,234" / "3.25": a stat with its category's decimals. */
+export function statValue(value: number, decimals: number): string {
+  return value.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+}
+
+// ----------------------------------------------------------- notifications
+/** "just now", "5m ago", "3h ago", "2d ago". */
+export function timeAgo(iso: string | null, now: number = Date.now()): string {
+  if (!iso) return ''
+  const minutes = Math.floor((now - Date.parse(iso)) / 60000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`
+}

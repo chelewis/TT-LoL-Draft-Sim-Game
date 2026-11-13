@@ -3,6 +3,7 @@ import { Link, NavLink, Route, Routes } from 'react-router-dom'
 import { useAuth } from './auth/AuthContext'
 import { AdminMenu } from './components/AdminMenu'
 import { NavMenu } from './components/NavMenu'
+import { NotificationBell } from './components/NotificationBell'
 import { RequireAdmin, RequireAuth } from './components/common'
 import AdminPage from './pages/admin/AdminPage'
 import GamePage from './pages/GamePage'
@@ -13,6 +14,11 @@ import MetaPage from './pages/meta/MetaPage'
 import { META_NAV } from './pages/meta/nav'
 import RiotImportPage from './pages/RiotImportPage'
 import SeriesPage from './pages/SeriesPage'
+import SeasonCreatePage from './pages/seasons/SeasonCreatePage'
+import SeasonJoinPage from './pages/seasons/SeasonJoinPage'
+import SeasonPage from './pages/seasons/SeasonPage'
+import SeasonsPage from './pages/seasons/SeasonsPage'
+import SeasonTeamPage from './pages/seasons/SeasonTeamPage'
 import { CoachesPage, PlayerEditorPage, PlayersPage, TeamEditorPage, TeamsPage } from './pages/ManagementPages'
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -24,6 +30,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         <Link to="/" className="brand">League Draft Manager</Link>
         <nav>
           <NavLink to="/" end>Play</NavLink>
+          <NavLink to="/seasons">Seasons</NavLink>
           <NavLink to="/teams">Teams</NavLink>
           <NavLink to="/players">Players</NavLink>
           <NavLink to="/coaches">Coaches</NavLink>
@@ -31,6 +38,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           {user?.is_admin && <AdminMenu />}
         </nav>
         <div className="row">
+          <NotificationBell />
           <span className="muted small">{user?.username}</span>
           <button className="ghost small" onClick={() => { logout(); qc.clear() }}>Log out</button>
         </div>
@@ -59,6 +67,11 @@ export default function App() {
                 <Route path="/join/:code" element={<JoinPage />} />
                 <Route path="/game/:gameId" element={<GamePage />} />
                 <Route path="/series/:seriesId" element={<SeriesPage />} />
+                <Route path="/seasons" element={<SeasonsPage />} />
+                <Route path="/seasons/new" element={<SeasonCreatePage />} />
+                <Route path="/seasons/join/:code" element={<SeasonJoinPage />} />
+                <Route path="/seasons/:seasonId" element={<SeasonPage />} />
+                <Route path="/seasons/:seasonId/teams/:teamId" element={<SeasonTeamPage />} />
                 <Route path="/teams" element={<TeamsPage />} />
                 <Route path="/teams/new" element={<TeamEditorPage />} />
                 <Route path="/teams/:teamId" element={<TeamEditorPage />} />

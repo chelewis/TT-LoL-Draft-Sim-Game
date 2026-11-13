@@ -171,7 +171,8 @@ def preview(db: Session, client: RiotClient, user_id: int, riot_id: str | None =
     if challenge_data is None:
         notes.append("Riot's challenge data could not be loaded, so no challenge-based playstyle tags were checked.")
     existing = None if refreshing else db.scalar(
-        select(Player).where(Player.owner_user_id == user_id, Player.riot_puuid == puuid))
+        select(Player).where(Player.owner_user_id == user_id, Player.riot_puuid == puuid,
+                            Player.season_id.is_(None)))
     if existing:
         notes.append(f"You already imported this account as \"{existing.name}\".")
 

@@ -588,6 +588,8 @@ export interface GameState {
   series: SeriesState | null
   /** set once the game is completed */
   rematch: RematchState | null
+  /** set when the game is a season fixture's */
+  season?: GameSeasonInfo | null
 }
 
 export interface LobbySummary {
@@ -854,3 +856,383 @@ export type PublicKind = 'players' | 'coaches' | 'teams'
 
 /** Search filters as query params: empty values are left out; arrays repeat the param. */
 export type SearchFilters = Record<string, string | number | (string | number)[] | null | undefined>
+
+// ---------------------------------------------------------------- seasons
+export type SeasonStatus = 'SETUP' | 'PLAYER_DRAFT' | 'REGULAR' | 'PLAYOFFS' | 'COMPLETED' | 'CANCELLED'
+export type CpuStrength = 'WEAKER' | 'EVEN' | 'STRONGER'
+export type SeasonFormat = 'ROUND_ROBIN' | 'SWISS'
+export type RosterMode = 'BYO' | 'DRAFT'
+
+/** How a season's competition runs (the match rules are its `rules`). */
+export interface SeasonOptions {
+  team_count: number
+  /** teams users manage; the CPU runs the rest */
+  human_slots: number
+  /** round robin: everyone plays everyone twice */
+  rr_double: boolean
+  regular_series: SeriesFormat
+  cpu_strength: CpuStrength
+  /** single elimination after the round robin (0: none); a Swiss stage always feeds a bracket of half the field */
+  playoff_size: number
+  playoff_series: SeriesFormat
+  final_series: SeriesFormat
+  /** Swiss only: wins to qualify / losses to go out */
+  swiss_wins?: number
+  swiss_losses?: number
+  /** a round closes by itself this many hours after it opens (0 or missing: no deadline) */
+  round_deadline_hours?: number
+  /** Player Draft: seconds per pick before the best available player is picked automatically (0: no clock) */
+  draft_pick_seconds?: number
+  /** free agency: signings each manager may make over the season (0: off) */
+  max_signings?: number
+  /** free agents generated per lane when the competition starts */
+  free_agents_per_role?: number
+}
+
+export interface SeasonTeamRef {
+  /** the SeasonTeam id */
+  id: number
+  /** the season's frozen copy of the team */
+  team_id: number
+  name: string
+  logo: string
+  seed: number
+  is_cpu: boolean
+  is_you: boolean
+  manager: { id: number; username: string } | null
+}
+
+export interface SeasonTeamSummary extends SeasonTeamRef {
+  /** sum of the five players' stat totals */
+  rating: number
+}
+
+export interface StandingRecord {
+  seed: number
+  rank: number
+  played: number
+  wins: number
+  losses: number
+  game_wins: number
+  game_losses: number
+  game_diff: number
+  /** the current run: "W3", "L1" ("" before any match) */
+  streak: string
+  /** the last five results, oldest first */
+  form: ('W' | 'L')[]
+}
+
+export interface StandingRow extends StandingRecord {
+  team: SeasonTeamRef
+  /** Swiss stage: decided yet? */
+  swiss_status: 'QUALIFIED' | 'ELIMINATED' | null
+  /** out of the season: missed the playoffs, out of the Swiss stage or knocked out */
+  eliminated: boolean
+}
+
+export interface SeasonMatchGame {
+  game_id: number
+  game_number: number
+  status: GameStatus
+  winner_team_id: number | null
+}
+
+export interface SeasonMatch {
+  id: number
+  stage: SeasonStage
+  round: number
+  slot: number
+  format: SeriesFormat
+  status: 'SCHEDULED' | 'LIVE' | 'COMPLETED'
+  /** how it was decided: played through the draft, or by the CPU for both sides */
+  played_mode: 'LIVE' | 'AUTO' | null
+  home: SeasonTeamRef | null
+  away: SeasonTeamRef | null
+  home_score: number
+  away_score: number
+  winner_team_id: number | null
+  series_id: number | null
+  live_game_id: number | null
+  latest_game_id: number | null
+  games: SeasonMatchGame[]
+  /** a user manages one of the teams */
+  has_manager: boolean
+  /** you manage one of the teams */
+  yours: boolean
+  /** between two managers: which of them asked to let the CPU play it */
+  auto_requested: { home: boolean; away: boolean }
+  completed_at: string | null
+}
+
+export interface SeasonSummary {
+  id: number
+  name: string
+  code: string
+  status: SeasonStatus
+  roster_mode: RosterMode
+  format: SeasonFormat
+  team_count: number
+  teams_entered: number
+  /** teams users manage, out of human_slots */
+  managers: number
+  human_slots: number
+  current_round: number
+  /** rounds in the current stage (Swiss: the most it can take) */
+  total_rounds: number
+  /** the stage being played; null before the start and after the end */
+  stage: SeasonStage | null
+  created_by: { id: number; username: string } | null
+  is_creator: boolean
+  /** your SeasonTeam id */
+  my_team_id: number | null
+  winner_team_id: number | null
+  /** when the current round closes by itself (null: no deadline) */
+  round_deadline_at: string | null
+  created_at: string | null
+  started_at: string | null
+  completed_at: string | null
+}
+
+/** GET /seasons/{id}: the season hub */
+export interface Season extends SeasonSummary {
+  rules: RulesetSettings & { ruleset: string }
+  options: SeasonOptions
+  ruleset_name: string
+  stage_label: string
+  bracket: SeasonBracket | null
+  my_team_eliminated: boolean
+  teams: SeasonTeamSummary[]
+  standings: StandingRow[]
+  /** the current round's matches */
+  round_matches: SeasonMatch[]
+  my_match: SeasonMatch | null
+  /** current round matches with a manager that are still unplayed */
+  waiting_on_managers: number
+  can_start: boolean
+  can_advance: boolean
+  /** the creator, while the season runs: may remove managers */
+  can_manage: boolean
+  champion: SeasonTeamRef | null
+  /** Player Draft: the order, picks and who's on the clock (null before the draft and in Bring Your Own) */
+  draft: SeasonDraft | null
+  /** Player Draft setup: the pool so far */
+  pool: SeasonPoolSummary | null
+  free_agency: SeasonFreeAgency
+  /** latest signings and releases, newest first */
+  transactions: SeasonTransaction[]
+}
+
+export interface SeasonDraftPick {
+  pick_number: number
+  team: SeasonTeamRef | null
+  player_id: number | null
+  player_name: string
+  lane: Lane
+  /** made by the clock running out, the CPU or an auto-pick */
+  auto: boolean
+}
+
+export interface SeasonDraft {
+  order: (SeasonTeamRef | null)[]
+  picks: SeasonDraftPick[]
+  total_picks: number
+  current_pick: number | null
+  on_the_clock: SeasonTeamRef | null
+  pick_deadline_at: string | null
+  my_turn: boolean
+  my_open_lanes: Lane[]
+  complete: boolean
+}
+
+export interface SeasonPoolSummary {
+  count: number
+  /** players who can play each lane (a two-lane player counts in both) */
+  by_lane: Record<Lane, number>
+  /** what the pool can't fill for the managers entered so far */
+  shortfall: Partial<Record<Lane, number>>
+}
+
+export interface SeasonFreeAgency {
+  enabled: boolean
+  max_signings: number
+  /** the season is under way */
+  open: boolean
+  /** your team's, if you manage one */
+  signings_left: number | null
+}
+
+export interface SeasonTransaction {
+  id: number
+  team: SeasonTeamRef | null
+  type: 'SIGN' | 'RELEASE'
+  player_id: number | null
+  player_name: string
+  lane: Lane
+  stage: SeasonStage
+  round: number
+  created_at: string | null
+}
+
+/** GET /seasons/{id}/pool: the draft pool, or the free agents */
+export interface SeasonPoolPlayer extends Player {
+  lanes: Lane[]
+  /** made up by the season (no owner) */
+  generated: boolean
+}
+
+/** GET /seasons/join/{code}: what an invite shows before joining */
+export interface SeasonJoinPreview {
+  id: number
+  name: string
+  code: string
+  status: SeasonStatus
+  roster_mode: RosterMode
+  format: SeasonFormat
+  rules: RulesetSettings & { ruleset: string }
+  options: SeasonOptions
+  ruleset_name: string
+  created_by: { id: number; username: string } | null
+  managers: number
+  open_slots: number
+  is_member: boolean
+  has_team: boolean
+  can_join: boolean
+}
+
+export type SeasonStage = 'REGULAR' | 'SWISS' | 'PLAYOFF'
+
+export interface SeasonBracketRound {
+  round: number
+  /** "Quarterfinals", "Semifinals", "Final" */
+  name: string
+  /** matches the round will have */
+  slots: number
+  format: SeriesFormat
+  /** drawn so far, in bracket order (empty until the round starts) */
+  matches: SeasonMatch[]
+}
+
+export interface SeasonBracket {
+  size: number
+  rounds: SeasonBracketRound[]
+}
+
+export interface SeasonSchedule {
+  current_round: number
+  stage: SeasonStage
+  rounds: { stage: SeasonStage; stage_label: string; round: number; name: string; current: boolean; matches: SeasonMatch[] }[]
+}
+
+export interface SeasonPlayerStats {
+  games: number
+  kills: number
+  deaths: number
+  assists: number
+  cs: number
+  gold: number
+  damage_dealt: number
+  mvps: number
+  kda: number
+}
+
+export interface SeasonTeamDetail {
+  team: SeasonTeamRef
+  view: Team
+  record: (StandingRecord & { team: number }) | null
+  matches: SeasonMatch[]
+  /** by player id; empty while the season hides player data */
+  player_stats: Record<string, SeasonPlayerStats>
+}
+
+/** On a game that belongs to a season fixture. */
+export interface GameSeasonInfo {
+  season_id: number
+  season_name: string
+  match_id: number
+  stage: string
+  round: number
+  format: SeriesFormat
+}
+
+// ------------------------------------------------------------ season stats
+/** One player's season line, summed from the box scores of every game they played. */
+export interface SeasonPlayerStats {
+  player_id: number
+  name: string
+  team_id: number
+  team: SeasonTeamRef | null
+  /** the lane they played most */
+  lane: Lane | ''
+  games: number
+  wins: number
+  mvps: number
+  kills: number
+  deaths: number
+  assists: number
+  cs: number
+  gold: number
+  damage_dealt: number
+  kda: number
+  /** average rank score: the same score that picks each game's MVP */
+  rating: number
+  kills_pg: number
+  assists_pg: number
+  deaths_pg: number
+  cs_pg: number
+  damage_pg: number
+  champions: string[]
+}
+
+export interface SeasonLeaderRow {
+  player_id: number
+  name: string
+  team_id: number
+  team: SeasonTeamRef | null
+  lane: Lane | ''
+  games: number
+  value: number
+}
+
+export interface SeasonLeaderCategory {
+  key: 'rating' | 'kda' | 'kills_pg' | 'assists_pg' | 'cs_pg' | 'damage_pg' | 'mvps'
+  label: string
+  decimals: number
+  rows: SeasonLeaderRow[]
+}
+
+export interface SeasonStats {
+  games: number
+  /** games a player needs to lead a stat or win an award (half the most anyone has played) */
+  min_games: number
+  /** the season is over: the awards are final (before that they show who leads the race) */
+  final: boolean
+  players: SeasonPlayerStats[]
+  leaders: SeasonLeaderCategory[]
+  awards: {
+    season_mvp: SeasonPlayerStats | null
+    finals_mvp: SeasonPlayerStats | null
+    all_pro: { lane: Lane; player: SeasonPlayerStats | null }[]
+  }
+}
+
+// ------------------------------------------------------------ notifications
+export type NotificationKind =
+  | 'MATCH_READY' | 'OPPONENT_READY' | 'AUTO_SIM_ASKED' | 'ON_THE_CLOCK' | 'DEADLINE'
+  | 'SEASON_STARTED' | 'SEASON_OVER' | 'SEASON_JOINED' | 'SEASON_REMOVED'
+
+export interface AppNotification {
+  id: number
+  kind: NotificationKind
+  title: string
+  body: string
+  /** a path in the app, e.g. /seasons/3 */
+  link: string
+  season_id: number | null
+  created_at: string | null
+  read: boolean
+}
+
+export interface NotificationInbox {
+  unread: number
+  items: AppNotification[]
+}

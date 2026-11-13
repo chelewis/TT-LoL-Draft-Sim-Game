@@ -58,7 +58,7 @@ export default function ResultView({ game }: { game: GameState }) {
   return (
     <div className="stack">
       <div className={`card result-banner side-${r.winner.toLowerCase()}`}>
-        <p className="muted">{solo ? 'Match result' : youWon ? 'Victory' : 'Defeat'}</p>
+        <p className="muted">{solo || !me ? 'Match result' : youWon ? 'Victory' : 'Defeat'}</p>
         <h1>{names[r.winner]} wins</h1>
         {game.series && (
           <p className="muted">
@@ -193,13 +193,14 @@ export default function ResultView({ game }: { game: GameState }) {
         <p className="small muted">Simulation v{r.simulation_version} · seed {r.seed}</p>
       </div>
 
-      {game.series && <SeriesNext game={game} names={names} />}
+      {/* a season member watching someone else's series can't ready up for it */}
+      {game.series && (me || solo) && <SeriesNext game={game} names={names} />}
       {game.rematch?.available && <RematchPanel game={game} names={names} />}
 
       {rerun.error && <ErrorNotice error={rerun.error} />}
       <div className="row between wrap">
         <Link to="/">← Back home</Link>
-        {game.you.is_owner && !game.series && (
+        {game.you.is_owner && !game.series && !game.season && (
           <button
             disabled={rerun.isPending}
             onClick={() => window.confirm('Re-run this match with the same teams and draft? The current result will be replaced.') && rerun.mutate()}

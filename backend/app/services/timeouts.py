@@ -1,4 +1,4 @@
-"""Background processing of draft timers and lobby expiry.
+"""Background processing of draft timers, lobby expiry, season round deadlines and season pick clocks.
 
 The draft endpoints also apply expired timers lazily on every request, so the game never depends on this
 loop for correctness; the loop just makes timeouts happen on time and notifies connected clients.
@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.clock import utcnow
 from app.models import Game
 from app.services import game_service as svc
+from app.services import season_draft_service, season_service
 from app.websocket.manager import manager
 
 log = logging.getLogger(__name__)
@@ -30,6 +31,8 @@ def process_due_games(session_factory: sessionmaker) -> list[dict]:
         waiting = db.scalars(select(Game).where(Game.status.in_(svc.PRE_DRAFT))).all()
         for game in waiting:
             events += svc.expire_if_needed(db, game)
+        events += season_service.process_deadlines(db, now)
+        events += season_draft_service.process_draft_clocks(db, now)
     return events
 
 
